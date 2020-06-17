@@ -47,10 +47,10 @@ namespace EMStudio
         {
             TYPE_ID = 0x00000002
         };
-        StateConnection(const QModelIndex& modelIndex, GraphNode* sourceNode, GraphNode* targetNode, bool isWildcardConnection);
+        StateConnection(NodeGraph* parentGraph, const QModelIndex& modelIndex, GraphNode* sourceNode, GraphNode* targetNode, bool isWildcardConnection);
         ~StateConnection();
 
-        void Render(QPainter& painter, QPen* pen, QBrush* brush, int32 stepSize, const QRect& visibleRect, float opacity, bool alwaysColor) override;
+        void Render(const QItemSelectionModel& selectionModel, QPainter& painter, QPen* pen, QBrush* brush, int32 stepSize, const QRect& visibleRect, float opacity, bool alwaysColor) override;
         bool Intersects(const QRect& rect) override;
         bool CheckIfIsCloseTo(const QPoint& point) override;
         void CalcStartAndEndPoints(QPoint& start, QPoint& end) const override;

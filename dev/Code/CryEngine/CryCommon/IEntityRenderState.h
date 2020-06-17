@@ -33,8 +33,7 @@ struct SRendItemSorter;
 struct SFrameLodInfo;
 struct pe_params_area;
 struct pe_articgeomparams;
-
-class CTerrainNode;
+struct ITerrainNode;
 
 // @NOTE: When removing an item from this enum, replace it with a dummy - ID's from this enum are stored in data and should not change.
 enum EERType
@@ -44,7 +43,7 @@ enum EERType
     eERType_Vegetation,
     eERType_Light,
     eERType_Cloud,
-    eERType_Dummy_1, // used to be eERType_VoxelObject, preserve order for compatibility
+    eERType_TerrainSystem, // used to be eERType_Dummy_1 which used to be eERType_VoxelObject, preserve order for compatibility
     eERType_FogVolume,
     eERType_Decal,
     eERType_ParticleEmitter,
@@ -76,6 +75,7 @@ enum ERNListType
     eRNListType_Brush,
     eRNListType_Vegetation,
     eRNListType_DecalsAndRoads,
+    eRNListType_TerrainSystem,
     eRNListType_ListsNum,
     eRNListType_First = eRNListType_Unknown, // This should be the last member
     // And it counts on eRNListType_Unknown
@@ -148,15 +148,27 @@ struct IShadowCaster
     uint8 m_cStaticShadowLod;
 };
 
+// Optional filter function for octree queries to perform custom filtering of the results.
+// return true to keep the render node, false to filter it out.
+using ObjectTreeQueryFilterCallback = AZStd::function<bool(IRenderNode*, EERType)>;
+
 struct IOctreeNode
 {
 public:
-    CTerrainNode* GetTerrainNode() const { return (CTerrainNode*) (m_pTerrainNode & ~0x1); }
-    void SetTerrainNode(CTerrainNode* node) { m_pTerrainNode = (m_pTerrainNode & 0x1) | ((INT_PTR) node); }
+    virtual ~IOctreeNode() {};
+
+    ITerrainNode* GetTerrainNode() const { return (ITerrainNode*) (m_pTerrainNode & ~0x1); }
+    void SetTerrainNode(ITerrainNode* node) { m_pTerrainNode = (m_pTerrainNode & 0x1) | ((INT_PTR) node); }
 
     // If true - this node needs to be recompiled for example update nodes max view distance.
     bool IsCompiled() const { return (bool) (m_pTerrainNode & 0x1); }
     void SetCompiled(bool compiled) { m_pTerrainNode = ((int) compiled) | (m_pTerrainNode & ~0x1); }
+
+    virtual void MarkAsUncompiled(const IRenderNode* pRenderNode = NULL) = 0;
+
+    virtual void UpdateTerrainNodes(ITerrainNode* pParentNode = 0) = 0;
+
+    virtual void GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType objType, const AABB* pBBox, ObjectTreeQueryFilterCallback filterCallback = nullptr) = 0;
 
     struct CVisArea* m_pVisArea;
 
@@ -443,7 +455,7 @@ struct IRenderNode
 
     // Returns:
     //   Current VisArea or null if in outdoors or entity was not registered in 3dengine.
-    CTerrainNode* GetEntityTerrainNode() const { return (m_pOcNode && !m_pOcNode->m_pVisArea) ? m_pOcNode->GetTerrainNode() : NULL; }
+    ITerrainNode* GetEntityTerrainNode() const { return (m_pOcNode && !m_pOcNode->m_pVisArea) ? m_pOcNode->GetTerrainNode() : NULL; }
 
     // Summary:
     //   Makes object visible at any distance.
@@ -494,6 +506,10 @@ struct IRenderNode
         case eERType_Decal:
         case eERType_Road:
             return eRNListType_DecalsAndRoads;
+#ifdef LY_TERRAIN_RUNTIME
+        case eERType_TerrainSystem:
+            return eRNListType_TerrainSystem;
+#endif
         default:
             return eRNListType_Unknown;
         }
@@ -574,6 +590,10 @@ struct IVegetation
     virtual void SetPosition(const Vec3& pos) = 0;
     virtual void SetRotation(const Ang3& rotation) = 0;
     virtual void PrepareBBox() = 0;
+
+    // Query or set whether this is a static or a dynamic vegetation instance
+    virtual bool IsDynamic() const = 0;
+    virtual void SetDynamic(bool isDynamicInstance) = 0;
 };
 
 struct IBrush
@@ -633,6 +653,7 @@ struct IRoadRenderNode
     virtual void SetPhysicalize(bool bVal) = 0;
     virtual void GetClipPlanes(Plane* pPlanes, int nPlanesNum, int nVertId = 0) = 0;
     virtual void GetTexCoordInfo(float* pTexCoordInfo) = 0;
+    virtual void OnTerrainChanged() = 0;
     // </interfuscator:shuffle>
 
     // This flag is used to account for legacy entities which used to serialize the node without parent objects.

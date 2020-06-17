@@ -20,6 +20,7 @@
 #include <PhysX/MathConversion.h>
 #include <PhysX/UserDataTypes.h>
 #include <PhysX/Utils.h>
+#include <PhysX/PhysXLocks.h>
 
 #include <AzFramework/Physics/SystemBus.h>
 #include <AzFramework/Physics/Utils.h>
@@ -30,9 +31,6 @@
 
 #include <IConsole.h>
 #include <StringUtils.h>
-
-//#include "E:\novanet_dev_physx\dev\Gems\ImGui\External\ImGui\v1.53\imgui\imgui_internal.h"
-//#include "E:\physx\PhysX-3.4-master\PhysX-3.4-master\PhysX_3.4\Include\common\PxCoreUtilityTypes.h"
 
 namespace PhysXDebug
 {
@@ -45,6 +43,13 @@ namespace PhysXDebug
         const AZ::u8 g = static_cast<AZ::u8>((color & 0x0000FF00) >> 8);
         const AZ::u8 r = static_cast<AZ::u8>(color & 0x000000FF);
         return ColorB(r, g, b, a);
+    }
+
+    bool UseEditorPhysicsWorld()
+    {
+        // Runtime components are created when 'simulation' mode is enabled in the Editor,
+        // so we shouldn't use Editor physics world in this case
+        return gEnv->IsEditing() && !gEnv->IsEditorSimulationMode();
     }
 
     void ReflectPhysXVisulizationSettings(AZ::ReflectContext* context)
@@ -209,14 +214,14 @@ namespace PhysXDebug
         ImGui::ImGuiUpdateListenerBus::Handler::BusConnect();
 #endif // IMGUI_ENABLED
 #ifdef PHYSXDEBUG_GEM_EDITOR
-        Physics::SystemNotificationBus::Handler::BusConnect();
+        Physics::WorldNotificationBus::Handler::BusConnect(Physics::EditorPhysicsWorldId);
 #endif // PHYSXDEBUG_GEM_EDITOR
     }
 
     void SystemComponent::Deactivate()
     {
 #ifdef PHYSXDEBUG_GEM_EDITOR
-        Physics::SystemNotificationBus::Handler::BusDisconnect();
+        Physics::WorldNotificationBus::Handler::BusDisconnect();
 #endif // PHYSXDEBUG_GEM_EDITOR
 #ifdef IMGUI_ENABLED
         ImGui::ImGuiUpdateListenerBus::Handler::BusDisconnect();
@@ -227,14 +232,9 @@ namespace PhysXDebug
     }
 
 #ifdef PHYSXDEBUG_GEM_EDITOR
-    void SystemComponent::OnPostPhysicsUpdate(float, Physics::World* world)
+    void SystemComponent::OnPostPhysicsUpdate(float)
     {
-        AZStd::shared_ptr<Physics::World> editorWorld = nullptr;
-        Physics::EditorWorldBus::BroadcastResult(editorWorld, &Physics::EditorWorldRequests::GetEditorWorld);
-        if (editorWorld.get() == world)
-        {
-            m_editorPhysicsWorldDirty = true;
-        }
+        m_editorPhysicsWorldDirty = true;
     }
 #endif
 
@@ -326,6 +326,7 @@ namespace PhysXDebug
     static const physx::PxRenderBuffer& GetRenderBuffer(physx::PxScene* physxScene)
     {
         AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Physics);
+        PHYSX_SCENE_READ_LOCK(physxScene);
         return physxScene->getRenderBuffer();
     }
 
@@ -407,7 +408,7 @@ namespace PhysXDebug
     {
         AZStd::shared_ptr<Physics::World> world = nullptr;
 
-        if (gEnv->IsEditing())
+        if (UseEditorPhysicsWorld())
         {
             // Editor world needs to be ticked for debug rendering to work (taking place in EditorSystemComponent)
             Physics::EditorWorldBus::BroadcastResult(world, &Physics::EditorWorldRequests::GetEditorWorld);
@@ -427,7 +428,7 @@ namespace PhysXDebug
         m_currentTime = time;
         bool dirty = true;
 
-        if (gEnv->IsEditing())
+        if (UseEditorPhysicsWorld())
         {
             dirty = m_editorPhysicsWorldDirty;
         }
@@ -454,7 +455,7 @@ namespace PhysXDebug
 
     void SystemComponent::UpdateColliderVisualizationByProximity()
     {
-        if(gEnv->IsEditing())
+        if (UseEditorPhysicsWorld())
         {
             if (m_settings.m_visualizeCollidersByProximity)
             {
@@ -600,6 +601,7 @@ namespace PhysXDebug
         if (Physics::World* world = GetCurrentPhysicsWorld())
         {
             physx::PxScene* physxScene = static_cast<physx::PxScene*>(world->GetNativePointer());
+            PHYSX_SCENE_WRITE_LOCK(physxScene);
 
             // Warning: if "mScale" is enabled, then debug visualization data will be available and requested from PhysX
             // this however creates a "significant performance impact" !
@@ -663,6 +665,7 @@ namespace PhysXDebug
             if (Physics::World* world = GetCurrentPhysicsWorld())
             {
                 physx::PxScene* physxScene = static_cast<physx::PxScene*>(world->GetNativePointer());
+                PHYSX_SCENE_WRITE_LOCK(physxScene);
                 physxScene->setVisualizationCullingBox(m_cullingBox);
             }
         }

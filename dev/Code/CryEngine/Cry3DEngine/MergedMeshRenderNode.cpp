@@ -22,6 +22,8 @@
 #include <IIndexedMesh.h>
 #include <QTangent.h>
 #include <StringUtils.h>
+#include <MathConversion.h>
+#include <AzFramework/Terrain/TerrainDataRequestBus.h>
 
 #include "MergedMeshRenderNode.h"
 #include "MergedMeshGeometry.h"
@@ -985,7 +987,7 @@ static inline void pool_resize_list(T*& list, size_t nsize, size_t align)
 static inline void pool_free(void* ptr)
 {
     AUTO_LOCK(s_MergedMeshPoolLock);
-    if (s_MergedMeshPool && s_MergedMeshPool->UsableSize(ptr))
+    if (s_MergedMeshPool && !(gEnv->IsDynamicMergedMeshGenerationEnabled()) && s_MergedMeshPool->UsableSize(ptr))
     {
         s_MergedMeshPool->Free(ptr);
         return;
@@ -2295,8 +2297,11 @@ CMergedMeshRenderNode::CMergedMeshRenderNode()
 CMergedMeshRenderNode::~CMergedMeshRenderNode()
 {    
     Clear();
-    Get3DEngine()->FreeRenderNodeState(this);
-    m_pMergedMeshesManager->RemoveMergedMesh(this);
+    GetISystem()->GetI3DEngine()->FreeRenderNodeState(this);
+    if (m_pMergedMeshesManager)
+    {
+        m_pMergedMeshesManager->RemoveMergedMesh(this);
+    }
 }
 
 void CMergedMeshRenderNode::Clear()
@@ -2439,7 +2444,7 @@ bool CMergedMeshRenderNode::PrepareRenderMesh(RENDERMESH_UPDATE_TYPE type, int n
                 mesh->chunks = procGeom->numChunks[0];
             }
 
-            resize_list(header->visibleChunks, header->numVisbleChunks = procGeom->numChunks[0], 16);
+            pool_resize_list(header->visibleChunks, header->numVisbleChunks = procGeom->numChunks[0], 16);
             for (size_t j = 0; j < procGeom->numChunks[0]; ++j)
             {
                 const SMMRMChunk& chunk = procGeom->pChunks[0][j];
@@ -2453,12 +2458,12 @@ bool CMergedMeshRenderNode::PrepareRenderMesh(RENDERMESH_UPDATE_TYPE type, int n
         {
             if (header->procGeom->numSpines)
             {
-                resize_list(header->spines, header->numSamples * header->procGeom->numSpineVtx, 128);
+                pool_resize_list(header->spines, header->numSamples * header->procGeom->numSpineVtx, 128);
             }
 
             if (header->procGeom->deform)
             {
-                resize_list(header->deform_vertices, header->numSamples * header->procGeom->deform->nvertices, 16);
+                pool_resize_list(header->deform_vertices, header->numSamples * header->procGeom->deform->nvertices, 16);
             }
 
             InitializeSpineAndDeformationData(header);
@@ -2575,7 +2580,7 @@ IRenderNode* CMergedMeshRenderNode::AddInstance(const SProcVegSample& sample, bo
         pool_resize_list(header->instances, header->numSamplesAlloc += 0xff, 128);
         if (gEnv->IsDynamicMergedMeshGenerationEnabled())
         {
-            resize_list(header->proxies, header->numSamplesAlloc, 16);
+            pool_resize_list(header->proxies, header->numSamplesAlloc, 16);
         }
     }
 
@@ -2635,7 +2640,8 @@ IRenderNode* CMergedMeshesManager::AddDynamicInstance(const IMergedMeshesManager
 {
     SProcVegSample s = { sample.pos, sample.q, sample.instGroupId, sample.scale };
     CMergedMeshRenderNode* meshNode = nullptr;
-    IRenderNode* node = AddInstance(s, &meshNode, bRegister);
+    const bool dynamicInstance = true;
+    IRenderNode* node = AddInstance(s, &meshNode, bRegister, dynamicInstance);
     meshNode->m_hasDynamicInstances = 1;
     if (ppNode)
     {
@@ -2674,7 +2680,7 @@ size_t CMergedMeshRenderNode::RemoveInstance(size_t headerIndex, size_t instance
         pool_resize_list(header->instances, header->numSamplesAlloc -= 0xff, 128);
         if (gEnv->IsDynamicMergedMeshGenerationEnabled())
         {
-            resize_list(header->proxies, header->numSamplesAlloc, 16);
+            pool_resize_list(header->proxies, header->numSamplesAlloc, 16);
         }
     }
 
@@ -2884,7 +2890,7 @@ void CMergedMeshRenderNode::CreateRenderMesh(RENDERMESH_UPDATE_TYPE type, const 
 
         if ((totalVerticesRendered + mesh->vertices) > maxVertices)
         {
-            AZ_Error("MergedMesh", false, "Merged mesh sector exceeded e_MergedMeshesMaxVerticesPerSector.  Portions of the sector won't be rendered.")
+            AZ_Error("MergedMesh", false, "Merged mesh sector exceeded e_MergedMeshesMaxVerticesPerSector.  Portions of the sector won't be rendered.");
             continue;
         }
 
@@ -3370,8 +3376,15 @@ void CMergedMeshRenderNode::RenderRenderMesh(
 
     if (GetCVars()->e_VegetationUseTerrainColor && bUseTerrainColor)
     {
-        float fRadius = GetBBox().GetRadius();
-        Vec3 vTerrainNormal = GetTerrain()->GetTerrainSurfaceNormal(GetBBox().GetCenter(), fRadius);
+        const Vec3 bboxCenter = GetBBox().GetCenter();
+
+        AZ::Vector3 terrainNormal = AzFramework::Terrain::TerrainDataRequests::GetDefaultTerrainNormal();
+        AzFramework::Terrain::TerrainDataRequestBus::BroadcastResult(terrainNormal
+            , &AzFramework::Terrain::TerrainDataRequests::GetNormalFromFloats
+            , bboxCenter.x, bboxCenter.y
+            , AzFramework::Terrain::TerrainDataRequests::Sampler::BILINEAR, nullptr);
+        Vec3 vTerrainNormal = AZVec3ToLYVec3(terrainNormal);
+
         ucSunDotTerrain = (uint8)(CLAMP((vTerrainNormal.Dot(Get3DEngine()->GetSunDirNormalized()))* 255.0f, 0, 255));
         GetObjManager()->FillTerrainTexInfo(m_pOcNode, distance, pTerrainTexInfo, GetBBox());
     }
@@ -3711,7 +3724,12 @@ void CMergedMeshRenderNode::StreamAsyncOnComplete (IReadStream* pStream, unsigne
     }
 
     const uint8* buffer = reinterpret_cast<const uint8*>(pStream->GetBuffer());
-    AZ::Job* job = AZ::CreateJobFunction([this, fExtents, buffer](){ this->InitializeSamples(fExtents, buffer); }, true);
+    // The ReadStream buffer isn't guaranteed to exist after this callback completes, so we
+    // synchronously convert the data into instance data.
+    InitializeSamplesFromBuffer(buffer);
+    // We can defer any notifications / calculations based on the instance data to a job, since
+    // those no longer rely on the read buffer
+    AZ::Job* job = AZ::CreateJobFunction([this](){ this->FinishInitializingSamples(); }, true);
     job->Start(); // legacy: job.SetPriorityLevel(JobManager::eLowPriority);
 }
 
@@ -4407,7 +4425,10 @@ void CMergedMeshesManager::Init()
     m_ActiveNodes.reserve(8192);
     m_VisibleNodes.reserve(8192);
 
-    gEnv->pPhysicalWorld->AddEventClient(EventPhysPostStep::id, CMergedMeshesManager::OnPhysPostStep, 0, 1.0f);
+    if (gEnv->pPhysicalWorld)
+    {
+        gEnv->pPhysicalWorld->AddEventClient(EventPhysPostStep::id, CMergedMeshesManager::OnPhysPostStep, 0, 1.0f);
+    }
 }
 void CMergedMeshesManager::Shutdown()
 {    
@@ -4447,7 +4468,10 @@ void CMergedMeshesManager::Shutdown()
     }
     m_MeshListPresent = false;
 
-    gEnv->pPhysicalWorld->RemoveEventClient(EventPhysPostStep::id, CMergedMeshesManager::OnPhysPostStep, 0);
+    if (gEnv->pPhysicalWorld)
+    {
+        gEnv->pPhysicalWorld->RemoveEventClient(EventPhysPostStep::id, CMergedMeshesManager::OnPhysPostStep, 0);
+    }
 }
 
 void CMergedMeshesManager::UpdateViewDistRatio(float value)
@@ -4807,7 +4831,7 @@ bool CMergedMeshesManager::SyncPreparationStep()
     return true;
 }
 
-IRenderNode* CMergedMeshesManager::AddInstance(const SProcVegSample& sample, CMergedMeshRenderNode** ppNode, bool bRegister)
+IRenderNode* CMergedMeshesManager::AddInstance(const SProcVegSample& sample, CMergedMeshRenderNode** ppNode, bool bRegister, bool dynamicInstance)
 {    
     float fExtents = c_MergedMeshesExtent;
     const float fExtentsRec = 1.0f / c_MergedMeshesExtent;
@@ -4823,8 +4847,13 @@ IRenderNode* CMergedMeshesManager::AddInstance(const SProcVegSample& sample, CMe
     {
         if ((* it)->GetInternalBBox().IsContainPoint(vPos))
         {
-            node = * it;
-            break;
+            // Make sure we keep dynamic instances and static instances separate within a merged mesh render
+            // node so that way we can correctly delete static render nodes when necessary.
+            if ((*it)->HasDynamicInstances() == dynamicInstance)
+            {
+                node = *it;
+                break;
+            }
         }
     }
     if (!node)
@@ -5479,7 +5508,7 @@ void CDeformableNode::CreateInstanceData(SDeformableData* pData, IStatObj* pStat
     SMMRMUpdateContext* update = & pData->m_mmrmContext;
     update->group = header;
 
-    resize_list(header->instances, header->numSamplesAlloc = header->numSamples = 1, 128);
+    pool_resize_list(header->instances, header->numSamplesAlloc = header->numSamples = 1, 128);
 
     header->instances[0].pos_x = 0u;
     header->instances[0].pos_y = 0u;
@@ -5734,7 +5763,7 @@ void CDeformableNode::RenderInternalDeform(
                 }
                 if (!group->deform_vertices)
                 {
-                    resize_list(group->deform_vertices, group->numSamples* group->procGeom->deform->nvertices, 16);
+                    pool_resize_list(group->deform_vertices, group->numSamples* group->procGeom->deform->nvertices, 16);
                 }
                 memset(group->deform_vertices, 0x0, sizeof(SMMRMDeformVertex)* group->numSamples* group->procGeom->deform->nvertices);
                 for (size_t k = 0; group->procGeom->deform && k < group->procGeom->deform->nvertices; ++k)

@@ -54,6 +54,9 @@ public:
     byte  m_ucAngleX;
     byte  m_ucAngleY;
     byte m_bApplyPhys;
+    // Keep track of whether this is a static instance (created at level load) or dynamic
+    // instance (created/destroyed during game execution)
+    bool m_isDynamic;
 
     static float g_scBoxDecomprTable[256] _ALIGN(128);
 
@@ -105,6 +108,10 @@ public:
     void SetPosition(const Vec3& pos) override { m_vPos = pos; }
     void PrepareBBox() override;
 
+    // Query or set whether this is a static or a dynamic vegetation instance
+    bool IsDynamic() const override { return m_isDynamic; }
+    void SetDynamic(bool isDynamicInstance) override { m_isDynamic = isDynamicInstance; }
+
     IStatObj* GetStatObj();
 
     void SetRotation(const Ang3& rotation) override;
@@ -124,6 +131,9 @@ public:
     static void InitVegDecomprTable();
     virtual bool GetLodDistances(const SFrameLodInfo& frameLodInfo, float* distances) const override;
     float GetFirstLodDistance() const override;
+
+    //! A Helper Method used for vegetation planting.
+    static void GetTerrainAlignmentMatrix(const Vec3& vPos, const float amount, Matrix33& matrix33);
 
     // Avoid C4266 virtual function is hidden because that SetScale(float fScale) is also defined in IVegetation: https://msdn.microsoft.com/en-us/library/4b76ty10.aspx
     void SetScale(const Vec3& scale) override

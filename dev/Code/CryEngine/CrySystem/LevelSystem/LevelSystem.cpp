@@ -15,18 +15,17 @@
 #include "LevelSystem.h"
 #include <IAudioSystem.h>
 #include "IMovieSystem.h"
-#include "IGameTokens.h"
 #include "IDialogSystem.h"
 #include "IMaterialEffects.h"
 #include <IResourceManager.h>
 #include <ILocalizationManager.h>
 #include "IDeferredCollisionEvent.h"
 #include "IPlatformOS.h"
-#include <ICustomActions.h>
 #include <IGameFramework.h>
 
 #include <LoadScreenBus.h>
 
+#include <AzCore/Debug/AssetTracking.h>
 #include <AzFramework/IO/FileOperations.h>
 #include <AzFramework/Entity/GameEntityContextBus.h>
 #include <AzFramework/Input/Buses/Requests/InputChannelRequestBus.h>
@@ -34,6 +33,7 @@
 #include "MainThreadRenderRequestBus.h"
 #include <LyShine/ILyShine.h>
 #include <AzCore/Component/TickBus.h>
+#include <AzCore/StringFunc/StringFunc.h>
 
 #include <IGameVolumes.h>
 
@@ -352,6 +352,7 @@ void CLevelSystem::Rescan(const char* levelsFolder, const uint32 tag)
             if (m_pSystem->IsMODValid(pModArg->GetValue()))
             {
                 m_levelsFolder.Format("Mods/%s/%s", pModArg->GetValue(), levelsFolder);
+                m_levelsFolder.clear();
                 ScanFolder(0, true, tag);
             }
         }
@@ -360,6 +361,7 @@ void CLevelSystem::Rescan(const char* levelsFolder, const uint32 tag)
     }
 
     CRY_ASSERT(!m_levelsFolder.empty());
+    m_levelsFolder.clear();
     m_levelInfos.reserve(64);
     ScanFolder(0, false, tag);
 
@@ -370,25 +372,9 @@ void CLevelSystem::Rescan(const char* levelsFolder, const uint32 tag)
     }
 }
 
-//------------------------------------------------------------------------
-void CLevelSystem::ScanFolder(const char* subfolder, bool modFolder, const uint32 tag)
+//-----------------------------------------------------------------------
+void CLevelSystem::PopulateLevels(string searchPattern, string& folder, ICryPak* pPak, bool& modFolder, const uint32& tag, bool fromFileSystemOnly)
 {
-    //CryLog("[DLC] ScanFolder:'%s' tag:'%.4s'", subfolder, (char*)&tag);
-    string folder;
-    if (subfolder && subfolder[0])
-    {
-        folder = subfolder;
-    }
-
-    string search(m_levelsFolder);
-    if (!folder.empty())
-    {
-        search += string("/") + folder;
-    }
-    search += "/*.*";
-
-    ICryPak* pPak = gEnv->pCryPak;
-
     _finddata_t fd;
     intptr_t handle = 0;
 
@@ -396,7 +382,7 @@ void CLevelSystem::ScanFolder(const char* subfolder, bool modFolder, const uint3
     // --kenzo
     // allow this find first to actually touch the file system
     // (causes small overhead but with minimal amount of levels this should only be around 150ms on actual DVD Emu)
-    handle = pPak->FindFirst(search.c_str(), &fd, 0, true);
+    handle = pPak->FindFirst(searchPattern.c_str(), &fd, 0, fromFileSystemOnly);
 
     if (handle > -1)
     {
@@ -460,6 +446,28 @@ void CLevelSystem::ScanFolder(const char* subfolder, bool modFolder, const uint3
 
         pPak->FindClose(handle);
     }
+
+}
+
+//------------------------------------------------------------------------
+void CLevelSystem::ScanFolder(const char* subfolder, bool modFolder, const uint32 tag)
+{
+    string folder;
+    if (subfolder && subfolder[0])
+    {
+        folder = subfolder;
+    }
+
+    string search(m_levelsFolder);
+    if (!folder.empty())
+    {
+        search += string("/") + folder;
+    }
+    search += AZ_FILESYSTEM_SEPARATOR_WILDCARD;
+
+    ICryPak* pPak = gEnv->pCryPak;
+
+    PopulateLevels(search, folder, pPak, modFolder, tag, true);
 }
 
 //------------------------------------------------------------------------
@@ -591,6 +599,7 @@ ILevel* CLevelSystem::LoadLevel(const char* _levelName)
 ILevel* CLevelSystem::LoadLevelInternal(const char* _levelName)
 {
     gEnv->pSystem->SetSystemGlobalState(ESYSTEM_GLOBAL_STATE_LEVEL_LOAD_START);
+    AZ_ASSET_NAMED_SCOPE("Level: %s", _levelName);
 
     CryLog ("Level system is loading \"%s\"", _levelName);
     INDENT_LOG_DURING_SCOPE();
@@ -736,28 +745,31 @@ ILevel* CLevelSystem::LoadLevelInternal(const char* _levelName)
         {
             const char* controlsPath = nullptr;
             Audio::AudioSystemRequestBus::BroadcastResult(controlsPath, &Audio::AudioSystemRequestBus::Events::GetControlsPath);
-            CryFixedStringT<MAX_AUDIO_FILE_PATH_LENGTH> sAudioLevelPath(controlsPath);
-            sAudioLevelPath.append("levels/");
-            sAudioLevelPath += sLevelNameOnly;
-
-            Audio::SAudioManagerRequestData<Audio::eAMRT_PARSE_CONTROLS_DATA> oAMData(sAudioLevelPath, Audio::eADS_LEVEL_SPECIFIC);
-            Audio::SAudioRequest oAudioRequestData;
-            oAudioRequestData.nFlags = (Audio::eARF_PRIORITY_HIGH | Audio::eARF_EXECUTE_BLOCKING); // Needs to be blocking so data is available for next preloading request!
-            oAudioRequestData.pData = &oAMData;
-            Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::PushRequestBlocking, oAudioRequestData);
-
-            Audio::SAudioManagerRequestData<Audio::eAMRT_PARSE_PRELOADS_DATA> oAMData2(sAudioLevelPath, Audio::eADS_LEVEL_SPECIFIC);
-            oAudioRequestData.pData = &oAMData2;
-            Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::PushRequestBlocking, oAudioRequestData);
-
-            Audio::TAudioPreloadRequestID nPreloadRequestID = INVALID_AUDIO_PRELOAD_REQUEST_ID;
-
-            Audio::AudioSystemRequestBus::BroadcastResult(nPreloadRequestID, &Audio::AudioSystemRequestBus::Events::GetAudioPreloadRequestID, sLevelNameOnly.c_str());
-            if (nPreloadRequestID != INVALID_AUDIO_PRELOAD_REQUEST_ID)
+            if (controlsPath)
             {
-                Audio::SAudioManagerRequestData<Audio::eAMRT_PRELOAD_SINGLE_REQUEST> requestData(nPreloadRequestID, true);
-                oAudioRequestData.pData = &requestData;
+                AZStd::string sAudioLevelPath(controlsPath);
+                sAudioLevelPath.append("levels/");
+                sAudioLevelPath += sLevelNameOnly;
+
+                Audio::SAudioManagerRequestData<Audio::eAMRT_PARSE_CONTROLS_DATA> oAMData(sAudioLevelPath.c_str(), Audio::eADS_LEVEL_SPECIFIC);
+                Audio::SAudioRequest oAudioRequestData;
+                oAudioRequestData.nFlags = (Audio::eARF_PRIORITY_HIGH | Audio::eARF_EXECUTE_BLOCKING); // Needs to be blocking so data is available for next preloading request!
+                oAudioRequestData.pData = &oAMData;
                 Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::PushRequestBlocking, oAudioRequestData);
+
+                Audio::SAudioManagerRequestData<Audio::eAMRT_PARSE_PRELOADS_DATA> oAMData2(sAudioLevelPath.c_str(), Audio::eADS_LEVEL_SPECIFIC);
+                oAudioRequestData.pData = &oAMData2;
+                Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::PushRequestBlocking, oAudioRequestData);
+
+                Audio::TAudioPreloadRequestID nPreloadRequestID = INVALID_AUDIO_PRELOAD_REQUEST_ID;
+
+                Audio::AudioSystemRequestBus::BroadcastResult(nPreloadRequestID, &Audio::AudioSystemRequestBus::Events::GetAudioPreloadRequestID, sLevelNameOnly.c_str());
+                if (nPreloadRequestID != INVALID_AUDIO_PRELOAD_REQUEST_ID)
+                {
+                    Audio::SAudioManagerRequestData<Audio::eAMRT_PRELOAD_SINGLE_REQUEST> requestData(nPreloadRequestID, true);
+                    oAudioRequestData.pData = &requestData;
+                    Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::PushRequestBlocking, oAudioRequestData);
+                }
             }
         }
 
@@ -828,11 +840,6 @@ ILevel* CLevelSystem::LoadLevelInternal(const char* _levelName)
         {
             // bSeekAllToStart needs to be false here as it's only of interest in the editor
             movieSys->Reset(true, false);
-        }
-
-        if (gEnv->pFlowSystem)
-        {
-            gEnv->pFlowSystem->Reset(false);
         }
 
         gEnv->pSystem->SetSystemGlobalState(ESYSTEM_GLOBAL_STATE_LEVEL_LOAD_START_PRECACHE);
@@ -1302,14 +1309,6 @@ void CLevelSystem::UnLoadLevel()
 
     CTimeValue tBegin = gEnv->pTimer->GetAsyncTime();
 
-    // One last update to execute pending requests.
-    // Do this before the EntitySystem resets!
-    if (gEnv->pFlowSystem)
-    {
-        gEnv->pFlowSystem->Update();
-        gEnv->pFlowSystem->Uninitialize();
-    }
-
     I3DEngine* p3DEngine = gEnv->p3DEngine;
     if (p3DEngine)
     {
@@ -1385,11 +1384,6 @@ void CLevelSystem::UnLoadLevel()
     Audio::SAudioManagerRequestData<Audio::eAMRT_CLEAR_PRELOADS_DATA> oAMData3(Audio::eADS_LEVEL_SPECIFIC);
     oAudioRequestData.pData = &oAMData3;
     Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::PushRequestBlocking, oAudioRequestData);
-
-    if (gEnv->pFlowSystem)
-    {
-        gEnv->pFlowSystem->Reset(true);
-    }
 
     if (gEnv->pEntitySystem)
     {

@@ -11,6 +11,7 @@
 */
 
 #include "SQLiteQuery.h"
+#include <AzToolsFramework/SQLite/SQLiteQueryLogBus.h>
 
 namespace AzToolsFramework
 {
@@ -18,6 +19,16 @@ namespace AzToolsFramework
     {
         namespace Internal
         {
+            void LogQuery(const char* statement, const AZStd::string& params)
+            {
+                SQLiteQueryLogBus::Broadcast(&SQLiteQueryLogBus::Events::LogQuery, statement, params);
+            }
+
+            void LogResultId(AZ::s64 rowId)
+            {
+                SQLiteQueryLogBus::Broadcast(&SQLiteQueryLogBus::Events::LogResultId, rowId);
+            }
+
             bool Bind(Statement* statement, int index, const AZ::Uuid& value)
             {
                 return statement->BindValueUuid(index, value);
@@ -60,3 +71,13 @@ namespace AzToolsFramework
         } // namespace Internal
     } // namespace SQLite
 } // namespace AZFramework
+
+std::ostream& std::operator<<(ostream& out, const AZ::Uuid& uuid)
+{
+    return out << uuid.ToString<AZStd::string>().c_str();
+}
+
+std::ostream& std::operator<<(ostream& out, const AzToolsFramework::SQLite::SqlBlob&)
+{
+    return out << "[Blob]";
+}

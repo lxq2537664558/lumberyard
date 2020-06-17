@@ -38,6 +38,7 @@
 
 
 #include <LoadScreenBus.h>
+#include <IVideoRenderer.h>
 
 #if AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
 #include <RTT/RTTContextManager.h>
@@ -47,6 +48,10 @@
 
 #include "GraphicsPipeline/FurBendData.h"
 
+#ifdef LY_TERRAIN_RUNTIME
+#include "RendElements/TerrainUtils/TerrainRenderingParameters.h"
+#include "CRETerrain.h"
+#endif
 #include "IGeomCache.h"
 #include "ITimeOfDay.h"
 #include <AzCore/Math/Crc.h>
@@ -74,6 +79,8 @@
 #define RENDERER_CPP_SECTION_11 11
 #define RENDERER_CPP_SECTION_12 12
 #define RENDERER_CPP_SECTION_13 13
+#define RENDERER_CPP_SECTION_14 14
+#define RENDERER_CPP_SECTION_15 15
 #endif
 
 #ifdef WIN64
@@ -147,6 +154,8 @@ CRenderer* gRenDev = nullptr;
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 #if !defined(RENDERER_DEFAULT_MESHPOOLSIZE)
@@ -262,6 +271,8 @@ AllocateConstIntCVar(CRenderer, CV_r_predicatedtiling);
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 int CRenderer::CV_r_DeferredShadingSortLights;
@@ -432,7 +443,7 @@ float CRenderer::CV_r_ChromaticAberration;
 AllocateConstIntCVar(CRenderer, CV_r_geominstancing);
 AllocateConstIntCVar(CRenderer, CV_r_geominstancingdebug);
 AllocateConstIntCVar(CRenderer, CV_r_materialsbatching);
-#if defined(WIN32) || defined(WIN64) || defined(APPLE) || defined(LINUX)
+#if defined(WIN32) || defined(WIN64) || defined(APPLE) || defined(LINUX) || defined(USE_SILHOUETTEPOM_CVAR)
 int CRenderer::CV_r_SilhouettePOM;
 #endif
 #ifdef WATER_TESSELLATION_RENDERER
@@ -499,15 +510,24 @@ int CRenderer::CV_r_impostersupdateperframe;
 AllocateConstIntCVar(CRenderer, CV_r_shaderslazyunload);
 AllocateConstIntCVar(CRenderer, CV_r_shadersdebug);
 #if !defined(CONSOLE)
-int CRenderer::CV_r_shadersorbis; // ACCEPTED_USE
-int CRenderer::CV_r_shadersdurango; // ACCEPTED_USE
+int CRenderer::CV_r_shadersorbis;
+int CRenderer::CV_r_shadersdurango;
 int CRenderer::CV_r_shadersdx10;
 int CRenderer::CV_r_shadersdx11;
 int CRenderer::CV_r_shadersGL4;
 int CRenderer::CV_r_shadersGLES3;
 int CRenderer::CV_r_shadersMETAL;
 
-int CRenderer::CV_r_ProvoHardwareMode;
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION RENDERER_CPP_SECTION_14
+#if defined(AZ_PLATFORM_XENIA)
+#include "Xenia/Renderer_cpp_xenia.inl"
+#elif defined(AZ_PLATFORM_PROVO)
+#include "Provo/Renderer_cpp_provo.inl"
+#elif defined(AZ_PLATFORM_SALEM)
+#include "Salem/Renderer_cpp_salem.inl"
+#endif
+#endif
 
 int CRenderer::CV_r_shadersPlatform;
 #endif
@@ -676,6 +696,7 @@ float CRenderer::CV_r_waterupdateFactor;
 float CRenderer::CV_r_waterupdateDistance;
 float CRenderer::CV_r_envcmupdateinterval;
 float CRenderer::CV_r_envtexupdateinterval;
+int CRenderer::CV_r_SlimGBuffer;
 AllocateConstIntCVar(CRenderer, CV_r_waterreflections);
 AllocateConstIntCVar(CRenderer, CV_r_waterreflections_quality);
 float CRenderer::CV_r_waterreflections_min_visible_pixels_update;
@@ -817,7 +838,6 @@ int CRenderer::CV_r_EnableGMEMPostProcCS;
 int CRenderer::CV_r_GMEM_DOF_Gather1_Quality;
 int CRenderer::CV_r_GMEM_DOF_Gather2_Quality;
 
-//  Confetti BEGIN: Igor Lobanchikov :END
 int CRenderer::CV_r_RainUseStencilMasking;
 
 // Confetti Thomas Zeng: 0 = diable, 1 = enable
@@ -826,7 +846,6 @@ int CRenderer::CV_r_EnableComputeDownSampling;
 // Confetti Vera
 float CRenderer::CV_r_CubeDepthMapFarPlane;
 
-//  Confetti BEGIN: Igor Lobanchikov :END is respected by OpenGL ES only
 int CRenderer::CV_r_ForceFixedPointRenderTargets;
 
 // Fur control parameters
@@ -868,6 +887,8 @@ int CRenderer::CV_r_SpecularAntialiasing = 1;
 float CRenderer::CV_r_minConsoleFontSize;
 float CRenderer::CV_r_maxConsoleFontSize;
 
+// Linux
+int CRenderer::CV_r_linuxSkipWindowCreation = 0;
 
 // Graphics programmers: Use these in your code for local tests/debugging.
 // Delete all references in your code before you submit
@@ -923,13 +944,13 @@ static void ShadersOptimise(IConsoleCmdArgs* Cmd)
     {
         ShadersOptimizeHelper(CParserBin::SetupForGLES3, " GLSL-ES 3");
     }
-    if (CRenderer::CV_r_shadersdurango) // ACCEPTED_USE
+    if (CRenderer::CV_r_shadersdurango)
     {
-        ShadersOptimizeHelper(CParserBin::SetupForDurango, "Durango"); // ACCEPTED_USE
+        ShadersOptimizeHelper(CParserBin::SetupForDurango, "Durango");
     }
-    if (CRenderer::CV_r_shadersorbis) // ACCEPTED_USE
+    if (CRenderer::CV_r_shadersorbis)
     {
-        ShadersOptimizeHelper(CParserBin::SetupForOrbis, "Orbis"); // ACCEPTED_USE
+        ShadersOptimizeHelper(CParserBin::SetupForOrbis, "Orbis");
     }
     if (CRenderer::CV_r_shadersMETAL)
     {
@@ -975,9 +996,9 @@ static void OnChange_CV_r_AntialiasingMode(ICVar* pCVar)
     int32 nVal = pCVar->GetIVal();
     nVal = min(eAT_AAMODES_COUNT - 1, nVal);
 #if defined(OPENGL_ES)
-    if (nVal == static_cast<int32>(eAT_SMAA1TX))
+    if ((nVal == static_cast<int32>(eAT_SMAA1TX)) || (nVal == static_cast<int32>(eAT_TAA)))
     {
-        AZ_Warning("Rendering", false, "SMAA is not supported on this platform. Fallback to FXAA");
+        AZ_Warning("Rendering", false, "SMAA and TAA are not supported on this platform. Fallback to FXAA");
         nVal = eAT_FXAA;
     }
 #endif
@@ -1361,6 +1382,10 @@ static void OnChange_CV_r_DeferredShadingTiled(ICVar* pCVar)
     // We don't support deferred shading tiled on macOS yet so always force the cvar to 0
     AZ_Warning("Rendering", pCVar->GetIVal() == 0, "Deferred Shading Tiled is not supported on macOS");
     CRenderer::CV_r_DeferredShadingTiled = 0;
+#elif defined(OPENGL)
+    // We don't support deferred shading tiled on any OpenGL targets yet so always force the cvar to 0
+    AZ_Warning("Rendering", pCVar->GetIVal() == 0, "Deferred Shading Tiled is not supported when using OpenGL");
+    CRenderer::CV_r_DeferredShadingTiled = 0;
 #endif
 }
 
@@ -1520,10 +1545,10 @@ RendererAssetListener::RendererAssetListener(IRenderer* renderer)
 
 void RendererAssetListener::Connect()
 {
-    BusConnect(AZ_CRC("dds"));
-    BusConnect(AZ_CRC("cgf"));
-    BusConnect(AZ_CRC("cfx"));
-    BusConnect(AZ_CRC("cfi"));
+    BusConnect(AZ_CRC("dds", 0x780234cb));
+    BusConnect(AZ_CRC("cgf", 0x3bbd9566));
+    BusConnect(AZ_CRC("cfx", 0xd8a99944));
+    BusConnect(AZ_CRC("cfi", 0xb219b9b6));
 }
 
 void RendererAssetListener::Disconnect()
@@ -1563,6 +1588,8 @@ void CRenderer::InitRenderer()
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 
@@ -1707,8 +1734,8 @@ void CRenderer::InitRenderer()
 
     DefineConstIntCVar3("r_DeferredShadingLBuffersFmt", CV_r_DeferredShadingLBuffersFmt, 1, VF_NULL,
         "Toggles light buffers format.\n"
-        "Usage: r_DeferredShadingLBuffersFmt [0/1]\n"
-        "Default is 1 (R11G11B10F), 0: R16G16B16A16F");
+        "Usage: r_DeferredShadingLBuffersFmt [0/1/2] \n"
+        "Default is 1 (R11G11B10F), 0: R16G16B16A16F 2: Use optimized format for gmem : diffuseAcc 8 (R8) bits instead of 64 and SpeculaAcc 32 bits (R10G10B10A2) instead of 64.");
 
 
     DefineConstIntCVar3("r_DeferredShadingDepthBoundsTest", CV_r_DeferredShadingDepthBoundsTest, DEF_SHAD_DBT_DEFAULT_VAL,
@@ -1730,7 +1757,7 @@ void CRenderer::InitRenderer()
         "  1: Visualize g-buffer and l-buffers\n"
         "  2: Debug deferred lighting fillrate (brighter colors means more expensive)\n");
 
-    DefineConstIntCVar3("r_DebugGBuffer", CV_r_DeferredShadingDebugGBuffer, 0, VF_NULL,
+    DefineConstIntCVar3("r_DebugGBuffer", CV_r_DeferredShadingDebugGBuffer, 0, VF_DEV_ONLY,
         "Debug view for gbuffer attributes\n"
         "  0 - Disabled\n"
         "  1 - Normals\n"
@@ -1900,7 +1927,7 @@ void CRenderer::InitRenderer()
         "1 - GPU friendly.\n"
         "2 - Automatic.\n");
 
-#if defined(WIN32) || defined(WIN64) || defined(APPLE) || defined(LINUX)
+#if defined(WIN32) || defined(WIN64) || defined(APPLE) || defined(LINUX) || defined(USE_SILHOUETTEPOM_CVAR)
     REGISTER_CVAR3("r_SilhouettePOM", CV_r_SilhouettePOM, 0, VF_NULL,
         "Enables use of silhouette parallax occlusion mapping.\n"
         "Usage: r_SilhouettePOM [0/1]");
@@ -2854,13 +2881,22 @@ void CRenderer::InitRenderer()
         "Default is 0 (off)");
 
 #if !defined(CONSOLE)
-    REGISTER_CVAR3("r_ShadersOrbis", CV_r_shadersorbis, 0, VF_NULL, ""); // ACCEPTED_USE
+    REGISTER_CVAR3("r_ShadersOrbis", CV_r_shadersorbis, 0, VF_NULL, "");
     REGISTER_CVAR3("r_ShadersDX11", CV_r_shadersdx11, 0, VF_NULL, "");
     REGISTER_CVAR3("r_ShadersGL4", CV_r_shadersGL4, 0, VF_NULL, "");
     REGISTER_CVAR3("r_ShadersGLES3", CV_r_shadersGLES3, 0, VF_NULL, "");
-    REGISTER_CVAR3("r_ShadersDurango", CV_r_shadersdurango, 0, VF_NULL, ""); // ACCEPTED_USE
+    REGISTER_CVAR3("r_ShadersDurango", CV_r_shadersdurango, 0, VF_NULL, "");
     REGISTER_CVAR3("r_ShadersMETAL", CV_r_shadersMETAL, 0, VF_NULL, "");
-    REGISTER_CVAR3("r_ProvoHardwareMode", CV_r_ProvoHardwareMode, -1, VF_NULL, "");
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION RENDERER_CPP_SECTION_15
+#if defined(AZ_PLATFORM_XENIA)
+#include "Xenia/Renderer_cpp_xenia.inl"
+#elif defined(AZ_PLATFORM_PROVO)
+#include "Provo/Renderer_cpp_provo.inl"
+#elif defined(AZ_PLATFORM_SALEM)
+#include "Salem/Renderer_cpp_salem.inl"
+#endif
+#endif
     REGISTER_CVAR3("r_ShadersPlatform", CV_r_shadersPlatform, AZ::PLATFORM_MAX, VF_NULL, "");
 #endif
 
@@ -3010,7 +3046,21 @@ void CRenderer::InitRenderer()
         "Sets the interval between environmental 2d texture updates.\n"
         "Usage: r_EnvTexUpdateInterval 0.001\n"
         "Default is 0.001.");
-
+    
+    // Slimming of GBuffers by encoding full RGB channels into more efficient YCbCr channels which require
+    // less storage for the CbCr channels (ie. 24(8+8+8) bits to 16(8+4+4) bits).
+    // This allows the packing of different component channels into the G-Buffers, saving the cost of 3 extra channels.
+    // 4 + 4 + 4 = 12 bytes of saving per pixel in the G-Buffer, assuming RGBA8 format
+    // Slimmed down GBuffer encoding scheme:
+    // Texture Channels:            R               G               B                   A   
+    //
+    // Normal Map Texture           Normal.x        Normal.y        Specular Y (YCrCb)  Smoothness (6bit) + Light (2bit)
+    // Diffuse Texture              Albedo.x        Albedo.y        Albedo.z            Specular CrCb (4+4 bit)
+    // Specular (One Channel Only)  Occlusion       N/A             N/A                 N/A
+    REGISTER_CVAR3("r_SlimGBuffer", CV_r_SlimGBuffer,0, VF_REQUIRE_APP_RESTART,
+        "Optimize the gbuffer render targets use.\n"
+        "Usage:r_SlimGBuffer 1\n");
+      
     DefineConstIntCVar3("r_WaterReflections", CV_r_waterreflections, 1, VF_DUMPTODISK,
         "Toggles water reflections.\n"
         "Usage: r_WaterReflections [0/1]\n"
@@ -3194,9 +3244,29 @@ void CRenderer::InitRenderer()
 
     DefineConstIntCVar3("r_wireframe", CV_r_wireframe, R_SOLID_MODE, VF_CHEAT, "Toggles wireframe rendering mode");
 
-    REGISTER_CVAR3("r_GetScreenShot", CV_r_GetScreenShot, 0, VF_NULL,
-        "To capture one screenshot (variable is set to 0 after capturing)\n"
-        "0=do not take a screenshot (default), 1=save a screenshot (together with .HDR if enabled), 2=save a screenshot");
+    REGISTER_CVAR3_CB("r_GetScreenShot", CV_r_GetScreenShot, 0, VF_NULL,
+        AZStd::string::format
+        (
+            "To capture one screenshot (variable is set to 0 after capturing)\n"
+            "%d = do not take a screenshot (default)\n"
+            "%d = take a screenshot and another HDR screenshot if HDR is enabled\n"
+            "%d = take a screenshot\n",
+            static_cast<int>(ScreenshotType::None),
+            static_cast<int>(ScreenshotType::HdrAndNormal),
+            static_cast<int>(ScreenshotType::Normal)
+        ).c_str(),
+        [](ICVar* pArgs)
+        {
+            // Do not accept other values, since ScreenshotType::NormalWithFilepath = 3 is reserved for internal use.
+            if (CV_r_GetScreenShot != static_cast<int>(ScreenshotType::None) &&
+                CV_r_GetScreenShot != static_cast<int>(ScreenshotType::HdrAndNormal) &&
+                CV_r_GetScreenShot != static_cast<int>(ScreenshotType::Normal))
+            {
+                CV_r_GetScreenShot = static_cast<int>(ScreenshotType::None);
+                iLog->LogWarning("Screenshot type not supported!");
+            }
+        }
+    );
 
     DefineConstIntCVar3("r_Character_NoDeform", CV_r_character_nodeform, 0, VF_NULL, "");
 
@@ -3272,7 +3342,7 @@ void CRenderer::InitRenderer()
         "While in fullscreen activities like notification pop ups of other applications won't cause a mode switch back into windowed mode.");
 #endif
     DefineConstIntCVar3("r_PredicatedTiling", CV_r_predicatedtiling, 0, VF_REQUIRE_APP_RESTART,
-        "Toggles predicated tiling mode (deprecated platform only)\n" // ACCEPTED_USE
+        "Toggles predicated tiling mode (deprecated platform only)\n"
         "Usage: r_PredicatedTiling [0/1]");
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION RENDERER_CPP_SECTION_5
@@ -3280,6 +3350,8 @@ void CRenderer::InitRenderer()
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
     DefineConstIntCVar3("r_MeasureOverdraw", CV_r_measureoverdraw, 0, VF_CHEAT,
@@ -3400,6 +3472,8 @@ void CRenderer::InitRenderer()
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -3503,6 +3577,8 @@ void CRenderer::InitRenderer()
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
     REGISTER_COMMAND("r_OverscanBorders", &cmd_OverscanBorders, VF_NULL,
@@ -3630,7 +3706,6 @@ void CRenderer::InitRenderer()
         "0 Compute disabled with postprocessing on GMEM path\n"
         "1 Compute enabled with postprocessing on GMEM path\n");
 
-    //  Confetti BEGIN: Igor Lobanchikov :END
     REGISTER_CVAR3("r_RainUseStencilMasking", CV_r_RainUseStencilMasking, 0, VF_REQUIRE_APP_RESTART,
         "GMEM Deferred Rain enable stencil masking\n"
         "Usage: \n"
@@ -3643,7 +3718,6 @@ void CRenderer::InitRenderer()
         "GMEM render path doesn't support per-portal blend weight.\n"
         "0.f to 1.f weight\n");
 
-    //  Confetti BEGIN: Igor Lobanchikov :END is respected by OpenGL ES only
     REGISTER_CVAR3("r_ForceFixedPointRenderTargets", CV_r_ForceFixedPointRenderTargets, 0, VF_NULL,
         "Forces the engine to use fixed point render targets instead of floating point ones.\n"
         "This variable is respected on Android OpenGL ES only\n"
@@ -3747,6 +3821,11 @@ void CRenderer::InitRenderer()
 
     REGISTER_CVAR3("r_maxConsoleFontSize", CV_r_maxConsoleFontSize, 24.0f, VF_NULL,
         "Maximum size used for scaling the font when rendering the console"
+    );
+
+    REGISTER_CVAR3("r_linuxSkipWindowCreation", CV_r_linuxSkipWindowCreation, 0, VF_NULL,
+        "0: Create a rendering window like normal"
+        "1: (Linux Only) Skip window creation and only render to an offscreen pixel buffer surface.  Screenshots can still be captured with r_GetScreenShot."
     );
 
     REGISTER_CVAR3("r_GraphicsTest00", CV_r_GraphicsTest00, 0, VF_DEV_ONLY, "Graphics programmers: Use in your code for misc graphics tests/debugging.");
@@ -3971,6 +4050,11 @@ void CRenderer::PostInit()
     }
 #endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
 
+#ifdef LY_TERRAIN_RUNTIME
+    // Instantiate the terrain render params singleton, registering our custom CVars
+    Terrain::TerrainRenderingParameters::GetInstance();
+#endif
+
 #if !defined(NULL_RENDERER)
     //////////////////////////////////////////////////////////////////////////
     // Load internal renderer font.
@@ -3990,12 +4074,16 @@ void CRenderer::PostInit()
         gEnv->pRenderer->InitSystemResources(FRR_SYSTEM_RESOURCES);
     }
 #endif
+
+    AzFramework::ViewportRequestBus::Handler::BusConnect();
 }
 
 //////////////////////////////////////////////////////////////////////////
 
 void CRenderer::Release()
 {
+    AzFramework::ViewportRequestBus::Handler::BusDisconnect();
+
     m_assetListener.Disconnect();
 
 #if AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
@@ -4022,6 +4110,8 @@ void CRenderer::Release()
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 
@@ -4356,7 +4446,7 @@ void CRenderer::RenderTextMessages(CTextMessages& messages)
             }
 
             ProjectToScreen(vPos.x, vPos.y, vPos.z, &sx, &sy, &sz);
-            
+
             if (!b800x600)
             {
                 // ProjectToScreen() returns virtual screen values in range [0-100], while the Draw2dTextWithDepth() method expects screen coords.
@@ -4650,6 +4740,8 @@ void CRenderer::EF_ReleaseInputShaderResource(SInputShaderResources* pRes)
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 void CRenderer::ForceSwapBuffers()
@@ -5566,6 +5658,11 @@ IRenderElement* CRenderer::EF_CreateRE(EDataType edt)
         // The gem is expected to provide a delegate that implement the IRenderElementDelegate interface
         re = new CRendElementBase();
         break;
+#ifdef LY_TERRAIN_RUNTIME
+    case eDATA_TerrainSystem:
+        re = new Terrain::CRETerrain;
+        break;
+#endif
     }
     return re;
 }
@@ -6594,6 +6691,8 @@ void CRenderer::EF_QueryImpl(ERenderQueryTypes eQuery, void* pInOut0, uint32 nIn
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -6620,6 +6719,8 @@ void CRenderer::EF_QueryImpl(ERenderQueryTypes eQuery, void* pInOut0, uint32 nIn
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 
@@ -7622,6 +7723,8 @@ ERenderType CRenderer::GetRenderType() const
         #include "Xenia/Renderer_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -8090,9 +8193,8 @@ void CRenderer::SetTextureStreamListener(ITextureStreamListener* pListener)
 //////////////////////////////////////////////////////////////////////////
 float CRenderer::GetGPUFrameTime()
 {
-    //  Confetti BEGIN: Igor Lobanchikov
 #if defined(CRY_USE_METAL) || defined(ANDROID)
-    //  TODO: Igor: if this won't work consider different frame time calculation
+    //  TODO: if this won't work consider different frame time calculation
     return gEnv->pTimer->GetRealFrameTime();
 #else
 #if 0
@@ -8116,7 +8218,6 @@ float CRenderer::GetGPUFrameTime()
     return fGPUtime;
 #endif
 #endif
-    //  Confetti End: Igor Lobanchikov
 }
 
 void CRenderer::GetRenderTimes(SRenderTimes& outTimes)
@@ -8465,20 +8566,9 @@ void CRenderer::UpdateShaderItem(SShaderItem* pShaderItem, _smart_ptr<IMaterial>
     }
 }
 
-void CRenderer::RefreshShaderResourceConstants(SShaderItem* pShaderItem, _smart_ptr<IMaterial> pMaterial)
+void CRenderer::RefreshShaderResourceConstants(SShaderItem* pShaderItem, IMaterial* pMaterial)
 {
-    AZ_Assert(pMaterial->GetNumRefs() > 0, "ref is 0");
-    m_pRT->EnqueueRenderCommand([pShaderItem, pMaterial]()
-        {
-            CShader* shader = static_cast<CShader*>(pShaderItem->m_pShader);
-            if (shader)
-            {
-                if (pShaderItem->RefreshResourceConstants())
-                {
-                    pShaderItem->m_pShaderResources->UpdateConstants(shader);
-                }
-            }
-        });
+    m_pRT->RC_RefreshShaderResourceConstants(pShaderItem, pMaterial);
 }
 
 void CRenderer::ForceUpdateShaderItem(SShaderItem* pShaderItem, _smart_ptr<IMaterial> pMaterial)
@@ -8514,6 +8604,17 @@ void CRenderer::RT_UpdateShaderItem(SShaderItem* pShaderItem, IMaterial* materia
     }
 }
 
+void CRenderer::RT_RefreshShaderResourceConstants(SShaderItem* shaderItem) const
+{
+    if (CShader* shader = static_cast<CShader*>(shaderItem->m_pShader))
+    {
+        if (shaderItem->RefreshResourceConstants())
+        {
+            shaderItem->m_pShaderResources->UpdateConstants(shader);
+        }
+    }
+}
+
 void CRenderer::GetClampedWindowSize(int& widthPixels, int& heightPixels)
 {
     const int maxWidth = gEnv->pConsole->GetCVar("r_maxWidth")->GetIVal();
@@ -8541,13 +8642,14 @@ CRenderView* CRenderer::GetRenderViewForThread(int nThreadID)
 
 bool CRenderer::UseHalfFloatRenderTargets()
 {
-#if defined(OPENGL_ES)
+#if defined(OPENGL_ES) && !defined(AZ_PLATFORM_LINUX)
+    // When using OpenGL ES on Linux, DXGL_GL_EXTENSION_SUPPORTED(EXT_color_buffer_half_float) returns false,
+    // however with at least the Mesa driver, half float render targets are natively supported.
     return RenderCapabilities::SupportsHalfFloatRendering() && (!CRenderer::CV_r_ForceFixedPointRenderTargets);
 #else
     return true;
 #endif
 }
-//  Confetti End: Igor Lobanchikov
 
 Matrix44A CRenderer::GetCameraMatrix()
 {
@@ -8673,6 +8775,69 @@ IDynTexture* CRenderer::CreateDynTexture2(uint32 nWidth, uint32 nHeight, uint32 
 uint32 CRenderer::GetCurrentTextureAtlasSize()
 {
     return SDynTexture::s_CurTexAtlasSize;
+}
+
+void CRenderer::RT_InitializeVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer)
+{
+    AZ_Assert(pVideoRenderer != nullptr, "Expected video player to be passed in");
+
+    AZ::VideoRenderer::VideoTexturesDesc videoTexturesDesc;
+    if (pVideoRenderer && pVideoRenderer->GetVideoTexturesDesc(videoTexturesDesc))
+    {
+        AZ::VideoRenderer::VideoTextures videoTextures;
+
+        auto InitVideoTexture = [](const AZ::VideoRenderer::VideoTextureDesc& videoTextureDesc, uint32 flags) -> uint32
+        {
+            uint32 resultTextureId = 0;
+            if (videoTextureDesc.m_used)
+            {
+                CTexture* pCreatedPlaneTexture = CTexture::Create2DTexture(videoTextureDesc.m_name, videoTextureDesc.m_width, videoTextureDesc.m_height, 1, flags, nullptr, videoTextureDesc.m_format, videoTextureDesc.m_format);
+                if (pCreatedPlaneTexture != nullptr)
+                {
+                    resultTextureId = pCreatedPlaneTexture->GetTextureID();
+                }
+            }
+            return resultTextureId;
+        };
+
+        videoTextures.m_outputTextureId = InitVideoTexture(videoTexturesDesc.m_outputTextureDesc, FT_USAGE_RENDERTARGET);
+
+        for (uint32 videoIndex = 0; videoIndex < AZ::VideoRenderer::MaxInputTextureCount; videoIndex++)
+        {
+            videoTextures.m_inputTextureIds[videoIndex] = InitVideoTexture(videoTexturesDesc.m_inputTextureDescs[videoIndex], 0);
+        }
+
+        pVideoRenderer->NotifyTexturesCreated(videoTextures);
+    }
+}
+
+void CRenderer::RT_CleanupVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer)
+{
+    AZ_Assert(pVideoRenderer != nullptr, "Expected video player to be passed in");
+
+    AZ::VideoRenderer::VideoTextures videoTextures;
+    if (pVideoRenderer && pVideoRenderer->GetVideoTextures(videoTextures))
+    {
+        auto ReleaseVideoTexture = [](uint32 textureId)
+        {
+            if (textureId != 0)
+            {
+                if (CTexture* pTexture = CTexture::GetByID(textureId))
+                {
+                    pTexture->Release();
+                }
+            }
+        };
+
+        ReleaseVideoTexture(videoTextures.m_outputTextureId);
+
+        for (uint32 textureId : videoTextures.m_inputTextureIds)
+        {
+            ReleaseVideoTexture(textureId);
+        }
+
+        pVideoRenderer->NotifyTexturesDestroyed();
+    }
 }
 
 #ifndef _RELEASE

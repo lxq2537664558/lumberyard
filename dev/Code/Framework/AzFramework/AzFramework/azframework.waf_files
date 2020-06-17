@@ -31,9 +31,21 @@
             "Asset/AssetProcessorMessages.h",
             "Asset/AssetRegistry.h",
             "Asset/AssetRegistry.cpp",
+            "Asset/AssetSeedList.cpp",
+            "Asset/AssetSeedList.h",
             "Asset/AssetSystemComponent.cpp",
             "Asset/AssetSystemComponent.h",
-            "Asset/GenericAssetHandler.h"
+            "Asset/CfgFileAsset.h",
+            "Asset/GenericAssetHandler.h",
+            "Asset/AssetBundleManifest.cpp",
+            "Asset/AssetBundleManifest.h",
+            "Asset/CustomAssetTypeComponent.cpp",
+            "Asset/CustomAssetTypeComponent.h",
+            "Asset/FileTagAsset.cpp",
+            "Asset/FileTagAsset.h",
+            "Asset/NetworkAssetNotification_private.h",
+            "Asset/XmlSchemaAsset.cpp",
+            "Asset/XmlSchemaAsset.h"
         ],
         "CommandLine": [
             "CommandLine/CommandLine.cpp",
@@ -41,11 +53,21 @@
             "CommandLine/CommandRegistrationBus.h"
         ],
         "Debug": [
-            "Debug/DebugCameraBus.h"
+            "Debug/DebugCameraBus.h",
+            "Debug/TimeDataStatisticsManager.h",
+            "Debug/TimeDataStatisticsManager.cpp",
+            "Debug/StatisticalProfiler.h",
+            "Debug/StatisticalProfilerProxy.h",
+            "Debug/StatisticalProfilerProxySystemComponent.h",
+            "Debug/StatisticalProfilerProxySystemComponent.cpp"
         ],
         "Viewport": [
+            "Viewport/ViewportBus.h",
+            "Viewport/ViewportBus.cpp",
             "Viewport/ViewportColors.h",
             "Viewport/ViewportColors.cpp",
+            "Viewport/ViewportConstants.h",
+            "Viewport/ViewportConstants.cpp",
             "Viewport/CameraState.h",
             "Viewport/CameraState.cpp",
             "Viewport/DisplayContextRequestBus.h"
@@ -69,6 +91,9 @@
             "Driller/DrillToFileComponent.cpp"
         ],
         "Components": [
+            "Components/ComponentAdapter.h",
+            "Components/ComponentAdapter.inl",
+            "Components/ComponentAdapterHelpers.h",
             "Components/EditorEntityEvents.h",
             "Components/TransformComponent.cpp",
             "Components/TransformComponent.h",
@@ -76,15 +101,17 @@
             "Components/BootstrapReaderComponent.cpp",
             "Components/CameraBus.h",
             "Components/ConsoleBus.h",
-            "Components/ConsoleBus.cpp"
+            "Components/ConsoleBus.cpp",
+            "Components/DeprecatedComponentsBus.h",
+            "Components/AzFrameworkConfigurationSystemComponent.h",
+            "Components/AzFrameworkConfigurationSystemComponent.cpp"
         ],
         "FileFunc": [
             "FileFunc/FileFunc.h",
             "FileFunc/FileFunc.cpp"
         ],
         "StringFunc": [
-            "StringFunc/StringFunc.h",
-            "StringFunc/StringFunc.cpp"
+            "StringFunc/StringFunc.h"
         ],
         "InGameUI": [
             "InGameUI/UiFrameworkBus.h"
@@ -100,7 +127,7 @@
             "Math/MathUtils.cpp",
             "Math/MathUtils.h"
         ],
-        "Metrics":  [
+        "Metrics": [
             "Metrics/MetricsPlainTextNameRegistration.h"
         ],
         "Network": [
@@ -135,7 +162,17 @@
             "Logging/LoggingComponent.cpp",
             "Logging/LoggingComponent.h",
             "Logging/StartupLogSinkReporter.cpp",
-            "Logging/StartupLogSinkReporter.h"
+            "Logging/StartupLogSinkReporter.h",
+            "Logging/MissingAssetLogger.cpp",
+            "Logging/MissingAssetLogger.h",
+            "Logging/MissingAssetNotificationBus.h"
+        ],        
+        "Scene": [
+            "Scene/Scene.h",
+            "Scene/Scene.cpp",
+            "Scene/SceneSystemBus.h",
+            "Scene/SceneSystemComponent.h",
+            "Scene/SceneSystemComponent.cpp"
         ],
         "Script": [
             "Script/ScriptComponent.h",
@@ -158,6 +195,7 @@
             "Physics/Collision.cpp",
             "Physics/Collision.h",
             "Physics/CollisionBus.h",
+            "Physics/CollisionBus.cpp",
             "Physics/Material.cpp",
             "Physics/Material.h",
             "Physics/RigidBody.cpp",
@@ -198,6 +236,18 @@
             "Physics/WorldEventhandler.h",
             "Physics/ScriptCanvasPhysicsUtils.h",
             "Physics/ScriptCanvasPhysicsUtils.cpp"
+        ],
+        "Terrain": [
+            "Terrain/TerrainDataRequestBus.h"
+        ],
+        "Platform": [
+            "Platform/PlatformDefaults.h",
+            "Platform/PlatformDefaults.cpp"
+        ],
+        "Windowing": [
+            "Windowing/WindowBus.h",
+            "Windowing/NativeWindow.cpp",
+            "Windowing/NativeWindow.h"
         ]
     },
     "AzFramework_Input_Uber.cpp":
@@ -300,6 +350,12 @@
             "Input/Utils/AdjustAnalogInputForDeadZone.h",
             "Input/Utils/IsAnyKeyOrButton.h",
             "Input/Utils/ProcessRawInputEventQueues.h"
+        ],
+        "Statistics": [
+            "Statistics/RunningStatistic.h",
+            "Statistics/RunningStatistic.cpp",
+            "Statistics/NamedRunningStatistic.h",
+            "Statistics/StatisticsManager.h"
         ]
     },
     "AzFramework_TargetManagement_Uber.cpp":
@@ -311,6 +367,16 @@
             "TargetManagement/TargetManagementAPI.h",
             "TargetManagement/TargetManagementComponent.cpp",
             "TargetManagement/TargetManagementComponent.h"
+        ]
+    },
+    "AzFramework_FileTag_Uber.cpp":
+    {
+        "FileTag": [
+            "FileTag/FileTag.h",
+            "FileTag/FileTag.cpp",
+            "FileTag/FileTagBus.h",
+            "FileTag/FileTagComponent.h",
+            "FileTag/FileTagComponent.cpp"
         ]
     }
 }

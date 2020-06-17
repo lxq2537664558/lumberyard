@@ -86,8 +86,9 @@ namespace AZ
             Edit::Attribute* FindAttribute(AttributeId attributeId) const;
 
             AttributeId         m_elementId;
-            const char*         m_description;
-            const char*         m_name;
+            const char*         m_description = nullptr;
+            const char*         m_name = nullptr;
+            const char*         m_deprecatedName = nullptr;
             SerializeContext::ClassElement* m_serializeClassElement; ///< If nullptr this is class (logical) element, not physical element exists in the class
             AttributeArray      m_attributes;
         };
@@ -279,6 +280,17 @@ namespace AZ
             template<class T>
             ClassBuilder* DataElement(Crc32 uiIdCrc, T memberVariable, const char* name, const char* description);
 
+            /** Declare element that will handle a specific class member variable (SerializeContext::ClassBuilder::Field).
+            * \param uiId - Crc32 of us element ID ("Int" or "Real", etc. how to edit the memberVariable)
+            * \param memberVariable - reference to the member variable to we can bind to serializations data.
+            * \param name - descriptive name of the field. Use this when using types in context. For example T is 'int' and name describes what it does.
+            * \param deprecatedName - supports name deprecation when an element name needs to be changed.
+            * Sometime 'T' will have edit context with enough information for name and description. In such cases use the DataElement function below.
+            * \param description - detailed description that will usually appear in a tool tip.
+            */
+            template<class T>
+            ClassBuilder* DataElement(Crc32 uiIdCrc, T memberVariable, const char* name, const char* description, const char* deprecatedName);
+
             /**
              * Same as above, except we will get the name and description from the edit context of the 'T' type. If 'T' doesn't have edit context
              * both name and the description will be set AzTypeInfo<T>::Name().
@@ -465,7 +477,7 @@ namespace AZ
     EditContext::EnumBuilder
     EditContext::Enum(const char* displayName, const char* description)
     {
-        AZ_STATIC_ASSERT(Internal::HasAZTypeInfo<E>::value, "Enums must have reflection type info (via AZ_TYPE_INFO_SPECIALIZE or AzTypeInfo<Enum>) to be reflected globally");
+        static_assert(Internal::HasAZTypeInfo<E>::value, "Enums must have reflection type info (via AZ_TYPE_INFO_SPECIALIZE or AzTypeInfo<Enum>) to be reflected globally");
         const AZ::Uuid& enumId = azrtti_typeid<E>();
         if (m_serializeContext.IsRemovingReflection())
         {
@@ -552,7 +564,7 @@ namespace AZ
     EditContext::ClassBuilder*
     EditContext::ClassBuilder::DataElement(const char* uiId, T memberVariable, const char* name, const char* description)
     {
-        return DataElement(Crc32(uiId), memberVariable, name, description);
+        return DataElement(Crc32(uiId), memberVariable, name, description, "");
     }
 
     //=========================================================================
@@ -560,7 +572,17 @@ namespace AZ
     //=========================================================================
     template<class T>
     EditContext::ClassBuilder*
-    EditContext::ClassBuilder::DataElement(Crc32 uiIdCrc, T memberVariable, const char* name, const char* description)
+        EditContext::ClassBuilder::DataElement(Crc32 uiIdCrc, T memberVariable, const char* name, const char* description)
+    {
+        return DataElement(uiIdCrc, memberVariable, name, description, "");
+    }
+
+    //=========================================================================
+    // DataElement
+    //=========================================================================
+    template<class T>
+    EditContext::ClassBuilder*
+    EditContext::ClassBuilder::DataElement(Crc32 uiIdCrc, T memberVariable, const char* name, const char* description, const char* deprecatedName)
     {
         if (!IsValid())
         {
@@ -594,6 +616,7 @@ namespace AZ
         m_editElement = ed;
         ed->m_elementId = uiIdCrc;
         ed->m_name = name;
+        ed->m_deprecatedName = deprecatedName;
         ed->m_description = description;
         ed->m_serializeClassElement = classElement;
         return this;
@@ -758,7 +781,7 @@ namespace AZ
             return this;
         }
 
-        AZ_STATIC_ASSERT(AZStd::is_enum<T>::value, "Type passed to EnumAttribute is not an enum.");
+        static_assert(AZStd::is_enum<T>::value, "Type passed to EnumAttribute is not an enum.");
         // If the name of the element is the same as the class name, then this is the global reflection (see EditContext::Enum<E>())
         const bool isReflectedGlobally = m_editElement->m_serializeClassElement && m_editElement->m_elementId == Internal::UuidToCrc32(m_editElement->m_serializeClassElement->m_typeId);
         AZ_Error("EditContext", !isReflectedGlobally, "You cannot add enum values to an enum which is globally reflected (while reflecting %s %s)", AzTypeInfo<T>::Name(), m_editElement->m_name);
@@ -861,8 +884,8 @@ namespace AZ
         {
             return this;
         }
-        AZ_STATIC_ASSERT(AZStd::is_enum<E>::value, "Only values that are part of an enum are valid as value attributes");
-        AZ_STATIC_ASSERT(Internal::HasAZTypeInfo<E>::value, "Enums must have reflection type info (via AZ_TYPEINFO_SPECIALIZE or AzTypeInfo<Enum>) to be reflected globally");
+        static_assert(AZStd::is_enum<E>::value, "Only values that are part of an enum are valid as value attributes");
+        static_assert(Internal::HasAZTypeInfo<E>::value, "Enums must have reflection type info (via AZ_TYPEINFO_SPECIALIZE or AzTypeInfo<Enum>) to be reflected globally");
         AZ_Assert(m_elementData, "Attempted to add a value attribute (%s) to a non-existent enum element data", name);
         const Edit::EnumConstant<E> internalValue(value, name);
         using ContainerType = Edit::AttributeData<Edit::EnumConstant<E>>;

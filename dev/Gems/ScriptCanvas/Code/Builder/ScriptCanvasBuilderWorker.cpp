@@ -12,6 +12,8 @@
 
 #include "precompiled.h"
 
+#include <AssetBuilderSDK/SerializationDependencies.h>
+
 #include <AzCore/Math/Uuid.h>
 
 #include <Builder/ScriptCanvasBuilderWorker.h>
@@ -49,7 +51,7 @@ namespace ScriptCanvasBuilder
 
     int Worker::GetVersionNumber() const
     {
-        return 1;
+        return 2;
     }
 
     const char* Worker::GetFingerprintString() const
@@ -141,7 +143,9 @@ namespace ScriptCanvasBuilder
         auto assetFilter = [&response](const AZ::Data::Asset<AZ::Data::AssetData>& asset)
         {
             if (asset.GetType() == azrtti_typeid<ScriptCanvasEditor::ScriptCanvasAsset>() ||
-                asset.GetType() == azrtti_typeid<ScriptCanvas::RuntimeAsset>())
+                asset.GetType() == azrtti_typeid<ScriptCanvas::RuntimeAsset>() ||
+                asset.GetType() == azrtti_typeid<ScriptEvents::ScriptEventsAsset>()
+                )
             {
                 AssetBuilderSDK::SourceFileDependency dependency;
                 dependency.m_sourceFileDependencyUUID = asset.GetId().m_guid;
@@ -211,13 +215,9 @@ namespace ScriptCanvasBuilder
         AZ::SerializeContext* context{};
         AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
 
-        AZStd::vector<AssetBuilderSDK::ProductDependency> productDependencies;
-
         // Asset filter is used to record dependencies.  Only returns true for editor script canvas assets
-        auto assetFilter = [&productDependencies](const AZ::Data::Asset<AZ::Data::AssetData>& filterAsset)
+        auto assetFilter = [](const AZ::Data::Asset<AZ::Data::AssetData>& filterAsset)
         {
-            productDependencies.emplace_back(filterAsset.GetId(), 0);
-
             return filterAsset.GetType() == azrtti_typeid<ScriptCanvasEditor::ScriptCanvasAsset>();
         };
 
@@ -278,6 +278,12 @@ namespace ScriptCanvasBuilder
         }
         AZ_TracePrintf(s_scriptCanvasBuilder, "Script Canvas Asset has been saved to the object stream successfully\n");
 
+
+        AZStd::vector<AssetBuilderSDK::ProductDependency> productDependencies;
+        AssetBuilderSDK::ProductPathDependencySet productPathDependencySet;
+        // Gather product dependencies from the compiled asset, not the source asset. In some cases asset references can change during asset compliation.
+        GatherProductDependencies(*context, runtimeAsset, productDependencies, productPathDependencySet);
+
         AZ::IO::FileIOStream outFileStream(runtimeScriptCanvasOutputPath.data(), AZ::IO::OpenMode::ModeWrite);
         if (!outFileStream.IsOpen())
         {
@@ -306,11 +312,21 @@ namespace ScriptCanvasBuilder
         jobProduct.m_productAssetType = azrtti_typeid<ScriptCanvas::RuntimeAsset>();
         jobProduct.m_productSubID = AZ_CRC("RuntimeData", 0x163310ae);
         jobProduct.m_dependencies = AZStd::move(productDependencies);
+        jobProduct.m_pathDependencies = AZStd::move(productPathDependencySet);
         response.m_outputProducts.push_back(AZStd::move(jobProduct));
 
         response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
 
         AZ_TracePrintf(s_scriptCanvasBuilder, "Finished processing script canvas %s\n", fullPath.c_str());
+    }
+
+    bool Worker::GatherProductDependencies(
+        AZ::SerializeContext& serializeContext,
+        AZ::Data::Asset<ScriptCanvas::RuntimeAsset>& runtimeAsset,
+        AZStd::vector<AssetBuilderSDK::ProductDependency>& productDependencies,
+        AssetBuilderSDK::ProductPathDependencySet& productPathDependencySet)
+    {
+        return AssetBuilderSDK::GatherProductDependencies(serializeContext, &runtimeAsset.Get()->GetData(), productDependencies, productPathDependencySet);
     }
 
     AZ::Data::Asset<ScriptCanvas::RuntimeAsset> Worker::ProcessEditorAsset(AZ::Data::AssetHandler& editorAssetHandler, AZ::IO::GenericStream& stream)
@@ -390,6 +406,8 @@ namespace ScriptCanvasBuilder
 
         AZStd::unordered_map<AZ::EntityId, NodeEntityPair > nodeLookUpMap;
 
+        AZStd::unordered_set<AZ::EntityId> deletedNodeEntities;
+
         {
             auto nodeIter = compiledGraphData.m_nodes.begin();
 
@@ -400,11 +418,15 @@ namespace ScriptCanvasBuilder
 
                 if (nodeComponent == nullptr)
                 {
+                    deletedNodeEntities.insert(nodeEntity->GetId());
+
                     delete nodeEntity;
                     nodeIter = compiledGraphData.m_nodes.erase(nodeIter);
 
                     continue;
                 }
+
+                nodeComponent->SetExecutionType(ScriptCanvas::ExecutionType::Runtime);
 
                 bool disabledNode = false;
                 
@@ -415,7 +437,9 @@ namespace ScriptCanvasBuilder
 
                     for (const ScriptCanvas::Slot* slot : nodeSlots)
                     {
-                        disabledEndpoints.insert(slot->GetEndpoint());
+                        // While slot has a GetEndpoint method. It uses the Node pointer which has not been set yet.
+                        // Bypass it for the more manual way in the builder.
+                        disabledEndpoints.insert(ScriptCanvas::Endpoint(nodeEntity->GetId(), slot->GetId()));
                     }
                 }
 
@@ -506,7 +530,9 @@ namespace ScriptCanvasBuilder
 
                 for (const ScriptCanvas::Slot* slot : inputSlots)
                 {
-                    if (compiledGraphData.m_endpointMap.count(slot->GetEndpoint()) > 0)
+                    // Can't use the slot method since it requires the node to be registered which has not happened yet.
+                    ScriptCanvas::Endpoint endpoint = { nodePair.second->GetId(), slot->GetId() };
+                    if (compiledGraphData.m_endpointMap.count(endpoint) > 0)
                     {
                         hasExecutionIn = true;
                         break;
@@ -521,10 +547,11 @@ namespace ScriptCanvasBuilder
 
                     for (auto disabledSlot : disabledSlots)
                     {
-                        disabledEndpoints.insert(disabledSlot->GetEndpoint());
+                        ScriptCanvas::Endpoint endpoint = { nodePair.second->GetId(), disabledSlot->GetId() };
+                        disabledEndpoints.insert(endpoint);
                     }
 
-                    nodeLookUpMap.erase(node->GetEntityId());
+                    nodeLookUpMap.erase(nodePair.second->GetId());
                     size_t eraseCount = compiledGraphData.m_nodes.erase(nodePair.second);
                     AZ_Assert(eraseCount == 1, "Failed to erase node from compiled graph data");
 
@@ -555,7 +582,9 @@ namespace ScriptCanvasBuilder
                 ScriptCanvas::Endpoint sourceEndpoint = connection->GetSourceEndpoint();
 
                 if (fullyRemovedEndpoints.count(targetEndpoint) > 0
-                    || fullyRemovedEndpoints.count(sourceEndpoint) > 0)
+                    || fullyRemovedEndpoints.count(sourceEndpoint) > 0
+                    || deletedNodeEntities.count(targetEndpoint.GetNodeId()) > 0
+                    || deletedNodeEntities.count(sourceEndpoint.GetNodeId()) > 0)
                 {
                     delete connectionEntity;
                     connectionIter = compiledGraphData.m_connections.erase(connectionIter);

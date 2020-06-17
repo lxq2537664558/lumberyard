@@ -42,9 +42,10 @@ void AssetScannerWorker::StartScan()
 
     for (int idx = 0; idx < m_platformConfiguration->GetScanFolderCount(); idx++)
     {
-        ScanFolderInfo scanFolderInfo = m_platformConfiguration->GetScanFolderAt(idx);
-        ScanForSourceFiles(scanFolderInfo);
+        const ScanFolderInfo& scanFolderInfo = m_platformConfiguration->GetScanFolderAt(idx);
+        ScanForSourceFiles(scanFolderInfo, scanFolderInfo);
     }
+
     // we want not to emit any signals until we're finished scanning
     // so that we don't interleave directory tree walking (IO access to the file table)
     // with file access (IO access to file data) caused by sending signals to other classes.
@@ -74,7 +75,7 @@ void AssetScannerWorker::StopScan()
     m_doScan = false;
 }
 
-void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
+void AssetScannerWorker::ScanForSourceFiles(const ScanFolderInfo& scanFolderInfo, const ScanFolderInfo& rootScanFolder)
 {
     if (!m_doScan)
     {
@@ -104,45 +105,28 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
 
         QString absPath = entry.absoluteFilePath();
         const bool isDirectory = entry.isDir();
+        QDateTime modTime = entry.lastModified();
+        AZ::u64 fileSize = isDirectory ? 0 : entry.size();
+        AssetFileInfo assetFileInfo(absPath, modTime, fileSize, &rootScanFolder, isDirectory);
 
         // Filtering out excluded files
         if (m_platformConfiguration->IsFileExcluded(absPath))
         {
+            m_excludedList.insert(AZStd::move(assetFileInfo));
             continue;
         }
 
         if (isDirectory)
         {
             //Entry is a directory
-            AZ::u64 modTime = entry.lastModified().toMSecsSinceEpoch();
-            m_folderList.insert(AssetFileInfo(absPath, modTime, isDirectory));
+            m_folderList.insert(AZStd::move(assetFileInfo));
             ScanFolderInfo tempScanFolderInfo(absPath, "", "", "", false, true);
-            ScanForSourceFiles(tempScanFolderInfo);
+            ScanForSourceFiles(tempScanFolderInfo, rootScanFolder);
         }
         else
         {
-            // Filtering out metadata files as well, there is no need to send both the source file and the metadata files 
-            // to the apm for analysis, just sending the source file should be enough
-            bool isMetaFile = false;
-            for (int idx = 0; idx < m_platformConfiguration->MetaDataFileTypesCount(); idx++)
-            {
-                QPair<QString, QString> metaInfo = m_platformConfiguration->GetMetaDataFileTypeAt(idx);
-                if (absPath.endsWith("." + metaInfo.first, Qt::CaseInsensitive))
-                {
-                    // its a meta file
-                    isMetaFile = true;
-                    break;
-                }
-            }
-
-            if (isMetaFile)
-            {
-                continue;
-            }
-
             //Entry is a file
-            AZ::u64 modTime = entry.lastModified().toMSecsSinceEpoch();
-            m_fileList.insert(AssetFileInfo(absPath, modTime, isDirectory));
+            m_fileList.insert(AZStd::move(assetFileInfo));
         }
     }
 }
@@ -154,6 +138,9 @@ void AssetScannerWorker::EmitFiles()
     m_fileList.clear();
     Q_EMIT FoldersFound(m_folderList);
     m_folderList.clear();
+    Q_EMIT ExcludedFound(m_excludedList);
+    m_excludedList.clear();
+    
 }
 
 

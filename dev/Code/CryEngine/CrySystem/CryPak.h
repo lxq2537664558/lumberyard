@@ -38,10 +38,17 @@
 #include <AzCore/std/parallel/mutex.h>
 #include <AzCore/std/parallel/lock.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
+#include <AzCore/std/smart_ptr/shared_ptr.h>
 
 #include <AzCore/IO/CompressionBus.h>
 
 class CCryPak;
+
+namespace AzFramework
+{
+    class AssetBundleManifest;
+    class AssetRegistry;
+}
 
 // this is the header in the cache of the file data
 struct CCachedFileData
@@ -287,6 +294,7 @@ class CCryPak
     {
         string strBindRoot; // the zip binding root WITH the trailing native slash
         string strFileName; // the zip file name (with path) - very useful for debugging so please don't remove
+        bool m_containsLevelPak = false; // indicates whether this pak has level.pak inside it or not  
 
         TCommentDataMap m_commentData;  //VectorMap of key=value pairs from the zip archive comments
         const char* GetFullPath() const {return pZip->GetFilePath(); }
@@ -304,6 +312,7 @@ class CCryPak
             pSizer->AddObject(strFileName);
             pSizer->AddObject(pArchive);
             pSizer->AddObject(pZip);
+            pSizer->AddObject(m_containsLevelPak);
         }
     };
     typedef std::vector<PackDesc, stl::STLGlobalAllocator<PackDesc> > ZipArray;
@@ -319,6 +328,15 @@ protected:
     // given the source relative path, constructs the full path to the file according to the flags
     const char* AdjustFileNameImpl(const char* src, char* dst, size_t dstSize, unsigned nFlags, bool skipMods) override;
 
+    // LY Bundle Management
+    // Handle our initial LY Canonical "Bundles" which contain manifest info and update our Asset Registry as 
+    // Loaded and Unloaded
+    bool OpenBundle(ZipDir::CachePtr zipEntry);
+    bool CloseBundle(ZipDir::CachePtr zipEntry);
+    // Retrieve the manifest from the Bundle if it exists
+    AZStd::unique_ptr<AzFramework::AssetBundleManifest> LoadManifest(ZipDir::CachePtr zipEntry) const;
+    // Retrieve the Catalog name from the bundle
+    AZStd::string GetCatalogName(AZStd::unique_ptr<const AzFramework::AssetBundleManifest>& bundleManifest) const;
 private:
     IMiniLog* m_pLog;
 
@@ -508,15 +526,15 @@ public: // ---------------------------------------------------------------------
     virtual bool IsInstalledToHDD(const char* acFilePath = 0) const;
     void SetInstalledToHDD(bool bValue);
 
-    virtual bool OpenPack(const char* pName, unsigned nFlags = 0, IMemoryBlock* pData = 0, CryFixedStringT<ICryPak::g_nMaxPath>* pFullPath = NULL);
-    virtual bool OpenPack(const char* szBindRoot, const char* pName, unsigned nFlags = 0, IMemoryBlock* pData = 0, CryFixedStringT<ICryPak::g_nMaxPath>* pFullPath = NULL);
+    virtual bool OpenPack(const char* pName, unsigned nFlags = 0, IMemoryBlock* pData = 0, CryFixedStringT<ICryPak::g_nMaxPath>* pFullPath = NULL, bool addLevels = true);
+    virtual bool OpenPack(const char* szBindRoot, const char* pName, unsigned nFlags = 0, IMemoryBlock* pData = 0, CryFixedStringT<ICryPak::g_nMaxPath>* pFullPath = NULL, bool addLevels = true);
     // after this call, the file will be unlocked and closed, and its contents won't be used to search for files
     virtual bool ClosePack(const char* pName, unsigned nFlags = 0);
     virtual bool OpenPacks(const char* pWildcard, unsigned nFlags = 0, std::vector< CryFixedStringT<ICryPak::g_nMaxPath> >* pFullPaths = NULL);
     virtual bool OpenPacks(const char* szBindRoot, const char* pWildcard, unsigned nFlags = 0, std::vector< CryFixedStringT<ICryPak::g_nMaxPath> >* pFullPaths = NULL);
 
-    bool OpenPackCommon(const char* szBindRoot, const char* pName, unsigned int nPakFlags, IMemoryBlock* pData = 0);
-    bool OpenPacksCommon(const char* szDir, const char* pWildcardIn, char* cWork, int nPakFlags, std::vector< CryFixedStringT<ICryPak::g_nMaxPath> >* pFullPaths = NULL);
+    bool OpenPackCommon(const char* szBindRoot, const char* pName, unsigned int nPakFlags, IMemoryBlock* pData = 0, bool addLevels = true);
+    bool OpenPacksCommon(const char* szDir, const char* pWildcardIn, char* cWork, int nPakFlags, std::vector< CryFixedStringT<ICryPak::g_nMaxPath> >* pFullPaths = NULL, bool addLevels = true);
 
     // closes pack files by the path and wildcard
     virtual bool ClosePacks(const char* pWildcard, unsigned nFlags = 0);
@@ -545,8 +563,18 @@ public: // ---------------------------------------------------------------------
     // and it's important that the autoptr is returned: another thread may release the existing
     // cached data before the function returns
     // the path must be absolute normalized lower-case with forward-slashes
-    CCachedFileDataPtr GetFileData(const char* szName, unsigned int& nArchiveFlags);
+    CCachedFileDataPtr GetFileData(const char* szName, unsigned int& nArchiveFlags, ZipDir::CachePtr* pZip = 0);
     CCachedFileDataPtr GetFileData(const char* szName){unsigned int archiveFlags; return GetFileData(szName, archiveFlags); }
+    // Get the data for a file by name within an archive if it exists
+    CCachedFileDataPtr GetFileData(ZipDir::CachePtr pZip, const char* szName);
+
+    //! Return the Manifest from a bundle, if it exists
+    AZStd::shared_ptr<AzFramework::AssetBundleManifest> GetBundleManifest(ZipDir::CachePtr pZip);
+    AZStd::shared_ptr<AzFramework::AssetRegistry> GetBundleCatalog(ZipDir::CachePtr pZip, const AZStd::string& catalogName);
+
+    //! Checks the archive for any levels and returns a list of levels folder.
+    //! We check for levels by searching for the level.pak file.
+    AZStd::vector<AZStd::string> ScanForLevels(ZipDir::CachePtr pZip);
 
     // Return cached file data for entries inside pak file.
     CCachedFileDataPtr GetOpenedFileDataInZip(AZ::IO::HandleType file);
@@ -628,6 +656,7 @@ public: // ---------------------------------------------------------------------
     void RecordFileOpen(ERecordFileOpenList eMode);
     ICryPak::ERecordFileOpenList GetRecordFileOpenList();
     void RecordFile(AZ::IO::HandleType in, const char* szFilename);
+    void CheckFileAccess(const char* szFilename);
 
     virtual IResourceList* GetResourceList(ERecordFileOpenList eList);
     virtual void SetResourceList(ERecordFileOpenList eList, IResourceList* pResourceList);
@@ -661,6 +690,7 @@ public: // ---------------------------------------------------------------------
     CryCriticalSection m_csMissingFiles;
     typedef std::map<string, uint32, std::less<string> > MissingFileMap;
     MissingFileMap m_mapMissingFiles;
+    bool m_warnedCryMissingFilesDeprecated = false;
 
     friend struct SAutoCollectFileAcessTime;
 
@@ -676,7 +706,7 @@ public: // ---------------------------------------------------------------------
 
     virtual void CreatePerfHUDWidget();
 
-#if defined(LINUX) || defined(APPLE)
+#if AZ_TRAIT_LEGACY_CRYPAK_UNIX_LIKE_FILE_SYSTEM
 private:
     intptr_t m_HandleSource;
     std::map<intptr_t, CCryPakFindData* > m_Handles;

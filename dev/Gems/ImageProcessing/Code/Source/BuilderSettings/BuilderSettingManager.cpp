@@ -19,7 +19,7 @@
 #include <QString>
 #include <QSettings>
 
-#include <BuilderSettings/PixelFormats.h>
+#include <ImageProcessing/PixelFormats.h>
 #include <BuilderSettings/CubemapSettings.h>
 #include <BuilderSettings/TextureSettings.h>
 #include <Processing/PixelFormatInfo.h>
@@ -683,7 +683,7 @@ AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS
 
         if (!outcome.IsSuccess())
         {
-            AZ_Warning(AssetBuilderSDK::WarningWindow, false, "Failed to read project specific preset setting at [%s], will use default setting file.", projectSettingPath.c_str());
+            AZ_TracePrintf(AssetBuilderSDK::InfoWindow, "Failed to read project specific preset setting at [%s], will use default setting file.\n", projectSettingPath.c_str());
             // Construct the default setting path
             const char* engineRoot = nullptr;
             AzFramework::ApplicationRequests::Bus::BroadcastResult(engineRoot, &AzFramework::ApplicationRequests::GetEngineRoot);
@@ -1022,7 +1022,8 @@ AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS
 
         if (image == nullptr)
         {
-            return AZ::Uuid();
+            AZ_Error("Image Processing", image, "Cannot load image file [%s]. Invalid image format or corrupt data. Note that \"Indexed Color\" is not currently supported for .tga files.", imageFilePath.c_str());
+            return AZ::Uuid::CreateNull();
         }
 
         //get file mask of this image file

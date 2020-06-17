@@ -34,6 +34,8 @@
         #include "Xenia/CryAction_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/CryAction_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/CryAction_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -56,6 +58,8 @@
         #include "Xenia/CryAction_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/CryAction_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/CryAction_cpp_salem.inl"
     #endif
 #elif defined(WIN32) || defined(WIN64)
 #include <CryWindows.h>
@@ -75,7 +79,6 @@
 #include "ScriptBind_Inventory.h"
 #include "ScriptBind_ActionMapManager.h"
 #include "Network/ScriptBind_Network.h"
-#include "ScriptBind_Action.h"
 #include "ScriptBind_VehicleSystem.h"
 
 #include "Network/ScriptRMI.h"
@@ -112,9 +115,7 @@
 // game object extensions
 #include "Inventory.h"
 
-#include "FlowSystem/FlowSystem.h"
 #include "IVehicleSystem.h"
-#include "GameTokens/GameTokenSystem.h"
 #include "EffectSystem/EffectSystem.h"
 #include "VehicleSystem/ScriptBind_Vehicle.h"
 #include "VehicleSystem/ScriptBind_VehicleSeat.h"
@@ -171,7 +172,6 @@
 
 #include "LivePreview/RealtimeRemoteUpdate.h"
 
-#include "CustomActions/CustomActionManager.h"
 #include "CustomEvents/CustomEventsManager.h"
 
 #ifdef GetUserName
@@ -203,8 +203,6 @@
 #include "LipSync/LipSync_FacialInstance.h"
 
 #include "Components/IComponentSerialization.h"
-
-#include <FeatureTests/FeatureTests.h>
 
 #include <AzCore/Module/Environment.h>
 #include <AzCore/Component/ComponentApplication.h>
@@ -321,7 +319,6 @@ CCryAction::CCryAction()
     , m_pGameplayRecorder(0)
     , m_pGameplayAnalyst(0)
     , m_pGameRulesSystem(0)
-    , m_pFlowSystem(0)
     , m_pGameObjectSystem(0)
     , m_pScriptRMI(0)
     , m_pUIDraw(0)
@@ -333,7 +330,6 @@ CCryAction::CCryAction()
     , m_pPlayerProfileManager(0)
     , m_pDialogSystem(0)
     , m_pSubtitleManager(0)
-    , m_pGameTokenSystem(0)
     , m_pEffectSystem(0)
     , m_pGameSerialize(0)
     , m_pCallbackTimer(0)
@@ -341,7 +337,6 @@ CCryAction::CCryAction()
     , m_pDevMode(0)
     , m_pRuntimeAreaManager(NULL)
     , m_pVisualLog(0)
-    , m_pScriptA(0)
     , m_pScriptIS(0)
     , m_pScriptAS(0)
     , m_pScriptNet(0)
@@ -375,7 +370,6 @@ CCryAction::CCryAction()
     , m_pAINetworkDebugRenderer(0)
     , m_pCooperativeAnimationManager(nullptr)
     , m_pAIProxyManager(0)
-    , m_pCustomActionManager(0)
     , m_pCustomEventManager(0)
     , m_colorGradientManager(nullptr)
     , m_screenFaderManager(nullptr)
@@ -1061,7 +1055,6 @@ bool CCryAction::Init(SSystemInitParams& startupParams)
     m_pScriptRMI = new CScriptRMI();
 
     // initialize subsystems
-    m_pGameTokenSystem = new CGameTokenSystem;
     m_pEffectSystem = new CEffectSystem;
     m_pEffectSystem->Init();
     m_pUIDraw = new CUIDraw;
@@ -1090,7 +1083,7 @@ bool CCryAction::Init(SSystemInitParams& startupParams)
     m_pGamePhysicsSettings = new GameConfigPhysicsSettings();
     m_pGamePhysicsSettings->Init();
 
-    //-- Network Stall ticker thread - PS3 only // ACCEPTED_USE
+    //-- Network Stall ticker thread - legacy only?
     if (m_pCryActionCVars->g_gameplayAnalyst)
     {
         m_pGameplayAnalyst = new CGameplayAnalyst();
@@ -1140,6 +1133,8 @@ bool CCryAction::Init(SSystemInitParams& startupParams)
         #include "Xenia/CryAction_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/CryAction_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/CryAction_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -1155,7 +1150,6 @@ bool CCryAction::Init(SSystemInitParams& startupParams)
     m_pTimeOfDayScheduler = new CTimeOfDayScheduler();
     m_pSubtitleManager = new CSubtitleManager();
 
-    m_pCustomActionManager = new CCustomActionManager();
     m_pCustomEventManager = new CCustomEventManager();
 
     CRangeSignaling::Create();
@@ -1333,18 +1327,7 @@ bool CCryAction::CompleteInit()
 
     EndGameContext(false);
 
-    FeatureTests::CreateManager();
-
-    SAFE_DELETE(m_pFlowSystem);
-    m_pFlowSystem = new CFlowSystem();
-    m_pSystem->SetIFlowSystem(m_pFlowSystem);
-    m_pFlowSystem->PreInit();
     m_pSystem->SetIDialogSystem(m_pDialogSystem);
-
-    if (m_pFlowSystem)
-    {
-        m_pFlowSystem->Init();
-    }
 
     InlineInitializationProcessing("CCryAction::CompleteInit SetDialogSystem");
 
@@ -1405,14 +1388,6 @@ bool CCryAction::CompleteInit()
         pGame->CompleteInit();
     }
 
-    InlineInitializationProcessing("CCryAction::CompleteInit LoadFlowGraphLibs");
-
-    // load flowgraphs (done after Game has initialized, because it might add additional flownodes)
-    if (m_pMaterialEffects)
-    {
-        m_pMaterialEffects->LoadFlowGraphLibs();
-    }
-
     m_pPrefabManager = std::make_shared<CPrefabManager>();
     m_pScriptBindPF = std::make_unique<CScriptBind_PrefabManager>(m_pPrefabManager, this);
 
@@ -1432,6 +1407,10 @@ bool CCryAction::CompleteInit()
     {
         gEnv->pAISystem->CompleteInit();
     }
+
+#if AZ_LOADSCREENCOMPONENT_ENABLED
+    EBUS_EVENT(LoadScreenBus, Stop);
+#endif // if AZ_LOADSCREENCOMPONENT_ENABLED
 
     GetISystem()->GetISystemEventDispatcher()->OnSystemEvent(ESYSTEM_EVENT_GAME_POST_INIT, 0, 0);
     GetISystem()->GetISystemEventDispatcher()->OnSystemEvent(ESYSTEM_EVENT_GAME_POST_INIT_DONE, 0, 0);
@@ -1456,7 +1435,6 @@ bool CCryAction::CompleteInit()
 void CCryAction::InitScriptBinds()
 {
     m_pScriptNet = new CScriptBind_Network(m_pSystem, this);
-    m_pScriptA = new CScriptBind_Action(this);
     m_pScriptIS = new CScriptBind_ItemSystem(m_pSystem, m_pItemSystem, this);
     m_pScriptAS = new CScriptBind_ActorSystem(m_pSystem, this);
     m_pScriptAMM = new CScriptBind_ActionMapManager(m_pSystem, m_pActionMapManager);
@@ -1479,7 +1457,6 @@ void CCryAction::ReleaseScriptBinds()
         m_pScriptSystem->EndCall();
     }
 
-    SAFE_RELEASE(m_pScriptA);
     SAFE_RELEASE(m_pScriptIS);
     SAFE_RELEASE(m_pScriptAS);
     SAFE_RELEASE(m_pScriptAMM);
@@ -1550,13 +1527,6 @@ void CCryAction::Shutdown()
         m_pDialogSystem->Shutdown();
     }
 
-    if (m_pFlowSystem)
-    {
-        m_pFlowSystem->Shutdown();
-    }
-
-    FeatureTests::DestroyManager();
-
     SAFE_DELETE(m_pGamePhysicsSettings);
     SAFE_RELEASE(m_pActionMapManager);
     SAFE_RELEASE(m_pItemSystem);
@@ -1573,12 +1543,10 @@ void CCryAction::Shutdown()
     SAFE_DELETE(m_pForceFeedBackSystem);
     SAFE_DELETE(m_pSubtitleManager);
     SAFE_DELETE(m_pUIDraw);
-    SAFE_DELETE(m_pGameTokenSystem);
     SAFE_DELETE(m_pEffectSystem);
     SAFE_DELETE(m_pAnimationGraphCvars);
     SAFE_DELETE(m_pGameObjectSystem);
     SAFE_DELETE(m_pMannequin);
-    SAFE_RELEASE(m_pFlowSystem);
     SAFE_DELETE(m_pGameSerialize);
     SAFE_DELETE(m_pPersistentDebug);
     SAFE_DELETE(m_pDialogSystem); // maybe delete before
@@ -1586,7 +1554,6 @@ void CCryAction::Shutdown()
     SAFE_DELETE(m_pLocalAllocs);
     SAFE_DELETE(m_pCooperativeAnimationManager);
     SAFE_DELETE(m_pCustomEventManager)
-    SAFE_DELETE(m_pCustomActionManager)
 
     SAFE_DELETE(m_pGameVolumesManager);
     SAFE_DELETE(m_pScriptRMI);
@@ -1777,14 +1744,6 @@ bool CCryAction::PostUpdate(bool haveFocus, unsigned int updateFlags)
             }
         }
 
-        if (!bGameIsPaused && gameRunning)
-        {
-            if (m_pFlowSystem)
-            {
-                m_pFlowSystem->Update();
-            }
-        }
-
         gEnv->pMovieSystem->ControlCapture();
 
         // if the Game had been paused and is now unpaused, don't update viewsystem until next frame
@@ -1873,8 +1832,6 @@ bool CCryAction::PostUpdate(bool haveFocus, unsigned int updateFlags)
         m_pSystem->RenderEnd();
         return bRetRun;
     }
-
-    FeatureTests::UpdateCamera();
 
     if (updateFlags & ESYSUPDATE_EDITOR_ONLY)
     {
@@ -2049,7 +2006,7 @@ bool CCryAction::PostUpdate(bool haveFocus, unsigned int updateFlags)
     {
         m_pSystem->DoWorkDuringOcclusionChecks();
     }
-    FeatureTests::Update();
+
     // Sync the work that must be done in the main thread by the end of frame.
     gEnv->pRenderer->GetGenerateShadowRendItemJobExecutor()->WaitForCompletion();
     gEnv->pRenderer->GetGenerateRendItemJobExecutor()->WaitForCompletion();
@@ -2624,9 +2581,6 @@ bool CCryAction::SaveGame(const char* path, bool bQuick, bool bForceImmediate, E
             case eSGR_Command:
                 s = "Command";
                 break;
-            case eSGR_FlowGraph:
-                s = "FlowGraph";
-                break;
             case eSGR_LevelStart:
                 s = "LevelStart";
                 break;
@@ -2872,12 +2826,6 @@ void CCryAction::OnEditorSetGameMode(int iMode)
     {
         m_pCooperativeAnimationManager->Reset();
     }
-}
-
-//------------------------------------------------------------------------
-IFlowSystem* CCryAction::GetIFlowSystem()
-{
-    return m_pFlowSystem;
 }
 
 //------------------------------------------------------------------------
@@ -3273,11 +3221,6 @@ IGameRulesSystem* CCryAction::GetIGameRulesSystem()
 IGameObjectSystem* CCryAction::GetIGameObjectSystem()
 {
     return m_pGameObjectSystem;
-}
-
-IGameTokenSystem* CCryAction::GetIGameTokenSystem()
-{
-    return m_pGameTokenSystem;
 }
 
 IEffectSystem* CCryAction::GetIEffectSystem()
@@ -3858,7 +3801,6 @@ void CCryAction::GetMemoryUsage(ICrySizer* s) const
 #define CHILD_STATISTICS(x) if (x) (x)->GetMemoryStatistics(s)
     s->AddObject(m_pGame);
     s->AddObject(m_pLevelSystem);
-    s->AddObject(m_pCustomActionManager);
     s->AddObject(m_pCustomEventManager);
     CHILD_STATISTICS(m_pActorSystem);
     s->AddObject(m_pItemSystem);
@@ -3867,7 +3809,6 @@ void CCryAction::GetMemoryUsage(ICrySizer* s) const
     CHILD_STATISTICS(m_pActionMapManager);
     s->AddObject(m_pViewSystem);
     CHILD_STATISTICS(m_pGameRulesSystem);
-    s->AddObject(m_pFlowSystem);
     CHILD_STATISTICS(m_pUIDraw);
     s->AddObject(m_pGameObjectSystem);
     if (m_pAnimationGraphCvars)
@@ -3877,7 +3818,6 @@ void CCryAction::GetMemoryUsage(ICrySizer* s) const
     s->AddObject(m_pMaterialEffects);
     s->AddObject(m_pBreakableGlassSystem);
     CHILD_STATISTICS(m_pDialogSystem);
-    CHILD_STATISTICS(m_pGameTokenSystem);
     CHILD_STATISTICS(m_pEffectSystem);
     CHILD_STATISTICS(m_pGameSerialize);
     CHILD_STATISTICS(m_pCallbackTimer);
@@ -3885,9 +3825,7 @@ void CCryAction::GetMemoryUsage(ICrySizer* s) const
     CHILD_STATISTICS(m_pGameplayRecorder);
     CHILD_STATISTICS(m_pGameplayAnalyst);
     CHILD_STATISTICS(m_pTimeOfDayScheduler);
-    s->AddObject(m_pFlowSystem);
     CHILD_STATISTICS(m_pGameStatistics);
-    s->Add(*m_pScriptA);
     s->Add(*m_pScriptIS);
     s->Add(*m_pScriptAS);
     s->Add(*m_pScriptAMM);
@@ -3996,11 +3934,6 @@ ICheckpointSystem* CCryAction::GetICheckpointSystem()
 IForceFeedbackSystem* CCryAction::GetIForceFeedbackSystem() const
 {
     return m_pForceFeedBackSystem;
-}
-
-ICustomActionManager* CCryAction::GetICustomActionManager() const
-{
-    return m_pCustomActionManager;
 }
 
 ICustomEventManager* CCryAction::GetICustomEventManager() const
@@ -4219,6 +4152,8 @@ void CCryAction::SetupLocalView()
         #include "Xenia/CryAction_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/CryAction_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/CryAction_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)

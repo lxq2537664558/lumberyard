@@ -19,13 +19,14 @@ def build(bld):
             group = 'com.android.billingclient',
             version = '1.0'
         )
+    bld.register_non_lumberyard_module('billing')
 
     bld.DefineGem(
         # Add custom build options here
-        includes        = [bld.Path('Code/CryEngine/CryCommon'),
-                           bld.Path('Code/CryEngine/CryAction')
-                          ],
+        includes        = ['.',
+                           bld.Path('Code/CryEngine/CryCommon')],
         file_list       = ['inapppurchases.waf_files'],
+        vs_filter       = 'Gems/PlatformServices',
         use             = ['AzCore'],
 
         # Platform Specific

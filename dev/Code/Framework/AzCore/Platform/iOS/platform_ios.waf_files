@@ -61,8 +61,10 @@
         "Memory/Platform/iOS":
         [
             "../Common/Apple/AzCore/Memory/OSAllocator_Apple.h",
+            "../Common/Unimplemented/AzCore/Memory/OverrunDetectionAllocator_Unimplemented.h",
             "AzCore/Memory/HeapSchema_iOS.cpp",
-            "AzCore/Memory/OSAllocator_Platform.h"
+            "AzCore/Memory/OSAllocator_Platform.h",
+            "AzCore/Memory/OverrunDetectionAllocator_Platform.h"
         ],
 
         "Math/Internal/Platform/iOS":
@@ -70,6 +72,11 @@
             "AzCore/Math/Internal/MathTypes_iOS.h",
             "../Common/FPU/AzCore/Math/Internal/MathTypes_FPU.h",
             "../Common/SIMD/AzCore/Math/Internal/MathTypes_SIMD.h"
+        ],
+
+        "Module/Internal/Platform/iOS":
+        [
+            "../Common/Default/AzCore/Module/Internal/ModuleManagerSearchPathTool_Default.cpp"
         ],
 
         "Math/Platform/iOS":

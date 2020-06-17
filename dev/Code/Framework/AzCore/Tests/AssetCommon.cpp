@@ -17,6 +17,29 @@ namespace UnitTest
     using namespace AZ;
     using namespace AZ::Data;
 
+    TEST_F(AllocatorsFixture, AssetId_PrintDecimalSubId_SubIdIsDecimal)
+    {
+        // Arbitrary GUID, sub ID picked that will be different in decimal and hexadecimal.
+        AssetId id("{A9F596D7-9913-4BA4-AD4E-7E477FB9B542}", 20);
+        AZStd::string asString = id.ToString<AZStd::string>(AZ::Data::AssetId::SubIdDisplayType::Decimal);
+
+        ASSERT_EQ(asString.size(), 41);
+        ASSERT_EQ(asString[39], '2');
+        ASSERT_EQ(asString[40], '0');
+    }
+
+    TEST_F(AllocatorsFixture, AssetId_PrintHexadecimalSubId_SubIdIsHex)
+    {
+        // Arbitrary GUID, sub ID picked that will be different in decimal and hexadecimal.
+        AssetId id("{A9F596D7-9913-4BA4-AD4E-7E477FB9B542}", 20);
+        AZStd::string asString = id.ToString<AZStd::string>(AZ::Data::AssetId::SubIdDisplayType::Hex);
+        ASSERT_EQ(asString.size(), 41);
+
+        ASSERT_EQ(asString[39], '1');
+        ASSERT_EQ(asString[40], '4');
+    }
+
+
     TEST_F(AllocatorsFixture, AssetPreserveHintTest_Const_Copy)
     {
         // test to make sure that when we copy asset<T>s around using copy operations
@@ -79,6 +102,41 @@ namespace UnitTest
         // ensure move construction copies the hint.
         Asset<AssetData> copied(Asset<AssetData>(id, typeOfExample, "a different hint"));
         ASSERT_STREQ(copied.GetHint().c_str(), "a different hint");
+    }
+
+    TEST_F(AllocatorsFixture, AssetIdLessThanOperator_LHSEqualsRHS_ReturnsFalse)
+    {
+        AssetId left("{88888888-4444-4444-4444-CCCCCCCCCCCC}", 1);
+        AssetId right("{88888888-4444-4444-4444-CCCCCCCCCCCC}", 1);
+        ASSERT_FALSE(left < right);
+    }
+
+    TEST_F(AllocatorsFixture, AssetIdLessThanOperator_GuidsEqualLHSSubIdLessThanRHS_ReturnsTrue)
+    {
+        AssetId left("{EEEEEEEE-EEEE-BBBB-BBBB-CCCCCCCCCCCC}", 0);
+        AssetId right("{EEEEEEEE-EEEE-BBBB-BBBB-CCCCCCCCCCCC}", 1);
+        ASSERT_TRUE(left < right);
+    }
+
+    TEST_F(AllocatorsFixture, AssetIdLessThanOperator_GuidsEqualLHSSubIdGreaterThanRHS_ReturnsFalse)
+    {
+        AssetId left("{66666666-2222-4444-3333-CCCCCCCCCCCC}", 4);
+        AssetId right("{66666666-2222-4444-3333-CCCCCCCCCCCC}", 2);
+        ASSERT_FALSE(left < right);
+    }
+
+    TEST_F(AllocatorsFixture, AssetIdLessThanOperator_LHSGuidLessThanRHS_ReturnsTrue)
+    {
+        AssetId left("{00000000-4444-4444-4444-CCCCCCCCCCCC}", 1);
+        AssetId right("{10000000-4444-4444-4444-CCCCCCCCCCCC}", 1);
+        ASSERT_TRUE(left < right);
+    }
+
+    TEST_F(AllocatorsFixture, AssetIdLessThanOperator_LHSGuidGreaterThanRHS_ReturnsFalse)
+    {
+        AssetId left("{10200000-4444-4444-4444-CCCCCCCCCCCC}", 1);
+        AssetId right("{10000000-4444-4444-4444-CCCCCCCCCCCC}", 1);
+        ASSERT_FALSE(left < right);
     }
 }
 

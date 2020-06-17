@@ -155,11 +155,10 @@ namespace AzFramework
 
         AZ::SliceComponent::SliceInstanceAddress GetOwningSliceForEntity(AZ::EntityId entityId) const;
 
-        /**
-        * A performant way to destroy all entities under the root slice, including both loose entities and entities
-        * in slices. This is useful when resetting the context. 
-        */
-        void DestroyRootSliceEntities();
+        SliceInstantiationTicket GenerateSliceInstantiationTicket();
+        void PreSliceInstantiate(AZ::Data::AssetId sliceAssetId, const AZ::SliceComponent::SliceInstanceAddress& instance, const SliceInstantiationTicket& ticket);
+        void PostSliceInstantiate(AZ::Data::AssetId sliceAssetId, const AZ::SliceComponent::SliceInstanceAddress& instance, const SliceInstantiationTicket& ticket);
+        void SliceInstantiateFailed(AZ::Data::AssetId sliceAssetId, const SliceInstantiationTicket& ticket);
 
         void HandleEntitiesAdded(const EntityList& entities);
         void HandleEntityRemoved(const AZ::EntityId& id);

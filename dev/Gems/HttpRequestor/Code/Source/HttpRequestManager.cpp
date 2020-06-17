@@ -11,14 +11,22 @@
 */
 #include "HttpRequestor_precompiled.h"
 
+#include <AzFramework/AzFramework_Traits_Platform.h>
+
+// The AWS Native SDK AWSAllocator triggers a warning due to accessing members of std::allocator directly.
+// AWSAllocator.h(70): warning C4996: 'std::allocator<T>::pointer': warning STL4010: Various members of std::allocator are deprecated in C++17.
+// Use std::allocator_traits instead of accessing these members directly.
+// You can define _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING or _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS to acknowledge that you have received this warning.
+AZ_PUSH_DISABLE_WARNING(4251 4996, "-Wunknown-warning-option")
 #include <aws/core/http/HttpClient.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/http/HttpRequest.h>
 #include <aws/core/http/HttpResponse.h>
 #include <aws/core/client/ClientConfiguration.h>
+AZ_POP_DISABLE_WARNING
 
 #include <AWSNativeSDKInit/AWSNativeSDKInit.h>
-
+#include <AzCore/std/string/conversions.h>
 #include "HttpRequestManager.h"
 
 namespace HttpRequestor
@@ -108,9 +116,13 @@ namespace HttpRequestor
 
     void Manager::HandleRequest(const Parameters& httpRequestParameters)
     {
-        std::shared_ptr<Aws::Http::HttpClient> httpClient = Aws::Http::CreateHttpClient(Aws::Client::ClientConfiguration());
+        Aws::Client::ClientConfiguration config;
+        config.enableTcpKeepAlive = AZ_TRAIT_AZFRAMEWORK_AWS_ENABLE_TCP_KEEP_ALIVE_SUPPORTED;
+        std::shared_ptr<Aws::Http::HttpClient> httpClient = Aws::Http::CreateHttpClient(config);
 
         auto httpRequest = Aws::Http::CreateHttpRequest(httpRequestParameters.GetURI(), httpRequestParameters.GetMethod(), Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
+
+        AZ_Assert(httpRequest, "HttpRequest not created!");
 
         for (const auto & it : httpRequestParameters.GetHeaders())
         {
@@ -120,9 +132,10 @@ namespace HttpRequestor
         if( httpRequestParameters.GetBodyStream() != nullptr)
         {
             httpRequest->AddContentBody(httpRequestParameters.GetBodyStream());
+            httpRequest->SetContentLength(AZStd::to_string(httpRequestParameters.GetBodyStream()->str().length()).c_str());
         }
         
-        auto httpResponse = httpClient->MakeRequest(*httpRequest);
+        auto httpResponse = httpClient->MakeRequest(httpRequest);
 
         if (!httpResponse)
         {
@@ -149,7 +162,9 @@ namespace HttpRequestor
 
     void Manager::HandleTextRequest(const TextParameters & httpRequestParameters)
     {
-        std::shared_ptr<Aws::Http::HttpClient> httpClient = Aws::Http::CreateHttpClient(Aws::Client::ClientConfiguration());
+        Aws::Client::ClientConfiguration config;
+        config.enableTcpKeepAlive = AZ_TRAIT_AZFRAMEWORK_AWS_ENABLE_TCP_KEEP_ALIVE_SUPPORTED;
+        std::shared_ptr<Aws::Http::HttpClient> httpClient = Aws::Http::CreateHttpClient(config);
 
         auto httpRequest = Aws::Http::CreateHttpRequest(httpRequestParameters.GetURI(), httpRequestParameters.GetMethod(), Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
         
@@ -163,7 +178,7 @@ namespace HttpRequestor
             httpRequest->AddContentBody(httpRequestParameters.GetBodyStream());
         }
 
-        auto httpResponse = httpClient->MakeRequest(*httpRequest);
+        auto httpResponse = httpClient->MakeRequest(httpRequest);
 
         if (!httpResponse)
         {

@@ -130,6 +130,31 @@ namespace
         }
     }
 
+    void DisableActionWhileInSimMode(QAction* action, EEditorNotifyEvent editorNotifyEvent)
+    {
+        if (action == nullptr)
+        {
+            return;
+        }
+
+        switch (editorNotifyEvent)
+        {
+        case eNotify_OnBeginSimulationMode:
+        {
+            action->setVisible(false);
+            action->setDisabled(true);
+            break;
+        }
+        case eNotify_OnEndSimulationMode:
+        {
+            action->setVisible(true);
+            action->setDisabled(false);
+            break;
+        }
+        default:
+            break;
+        }
+    }
 }
 
 LevelEditorMenuHandler::LevelEditorMenuHandler(
@@ -533,13 +558,6 @@ void LevelEditorMenuHandler::PopulateEditMenu(ActionManager::MenuWrapper& editMe
     // Invert Selection
     editMenu.AddAction(ID_EDIT_INVERTSELECTION);
 
-    // Select Slice Root
-    if (!m_selectSliceRootMenu)
-    {
-        m_selectSliceRootMenu = editMenu.AddMenu(QObject::tr("Select root"));
-        m_selectSliceRootMenu->setEnabled(false);
-    }
-
     editMenu.AddSeparator();
 
     // New Viewport Interaction Model actions/shortcuts
@@ -787,9 +805,9 @@ void LevelEditorMenuHandler::PopulateEditMenu(ActionManager::MenuWrapper& editMe
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
 #define AZ_RESTRICTED_PLATFORM_EXPANSION(CodeName, CODENAME, codename, PrivateName, PRIVATENAME, privatename, PublicName, PUBLICNAME, publicname, PublicAuxName1, PublicAuxName2, PublicAuxName3)\
     auto publicname##Menu = graphicPerformanceSubMenu.AddMenu(tr(PublicAuxName2));\
-    publicname##Menu.AddAction(ID_GAME_##PUBLICNAME##_ENABLEHIGHSPEC);\
-    publicname##Menu.AddAction(ID_GAME_##PUBLICNAME##_ENABLEMEDIUMSPEC);\
-    publicname##Menu.AddAction(ID_GAME_##PUBLICNAME##_ENABLELOWSPEC);
+    publicname##Menu.AddAction(ID_GAME_##CODENAME##_ENABLEHIGHSPEC);\
+    publicname##Menu.AddAction(ID_GAME_##CODENAME##_ENABLEMEDIUMSPEC);\
+    publicname##Menu.AddAction(ID_GAME_##CODENAME##_ENABLELOWSPEC);
     AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS
 #undef AZ_RESTRICTED_PLATFORM_EXPANSION
 #endif
@@ -830,8 +848,10 @@ QMenu* LevelEditorMenuHandler::CreateGameMenu()
 
     gameMenu.AddSeparator();
 
+#ifdef LY_TERRAIN_EDITOR
     // Terrain Collision
     gameMenu.AddAction(ID_TERRAIN_COLLISION);
+#endif //#ifdef LY_TERRAIN_EDITOR
 
     if (m_enableLegacyCryEntities)
     {
@@ -966,6 +986,7 @@ QMenu* LevelEditorMenuHandler::CreateGameMenu()
 
     if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
     {
+#ifdef LY_TERRAIN_EDITOR
         // Terrain
         auto terrainMenu = gameMenu.AddMenu(tr("&Terrain"));
 
@@ -987,13 +1008,16 @@ QMenu* LevelEditorMenuHandler::CreateGameMenu()
         auto terrainModifyMenu = terrainMenu.AddMenu(tr("Terrain Modify"));
         terrainModifyMenu.AddAction(ID_TOOLTERRAINMODIFY_SMOOTH);
         terrainModifyMenu.AddAction(ID_TERRAINMODIFY_SMOOTH);
-
         terrainMenu.AddAction(ID_TERRAIN_VEGETATION);
         terrainMenu.AddAction(ID_TERRAIN_PAINTLAYERS);
         terrainMenu.AddAction(ID_TERRAIN_REFINETERRAINTEXTURETILES);
         terrainMenu.AddSeparator();
         terrainMenu.AddAction(ID_FILE_EXPORT_TERRAINAREA);
         terrainMenu.AddAction(ID_FILE_EXPORT_TERRAINAREAWITHOBJECTS);
+#else
+        // If there's no terrain, just add vegetation directly to the Game menu.
+        gameMenu.AddAction(ID_TERRAIN_VEGETATION);
+#endif //#ifdef LY_TERRAIN_EDITOR
 
         gameMenu.AddSeparator();
     }
@@ -1075,13 +1099,18 @@ QMenu* LevelEditorMenuHandler::CreateViewMenu()
     }
 
     // Layouts
-    m_layoutsMenu = viewMenu.AddMenu(tr("Layouts"));
-    connect(m_viewPaneManager, &QtViewPaneManager::savedLayoutsChanged, this, [this]()
-        {
-            UpdateViewLayoutsMenu(m_layoutsMenu);
-        });
 
-    UpdateViewLayoutsMenu(m_layoutsMenu);
+    // Disable Layouts menu if other is active
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        m_layoutsMenu = viewMenu.AddMenu(tr("Layouts"));
+        connect(m_viewPaneManager, &QtViewPaneManager::savedLayoutsChanged, this, [this]()
+            {
+                UpdateViewLayoutsMenu(m_layoutsMenu);
+            });
+
+        UpdateViewLayoutsMenu(m_layoutsMenu);
+    }
 
     // Viewport
     auto viewportViewsMenuWrapper = viewMenu.AddMenu(tr("Viewport"));
@@ -1110,7 +1139,10 @@ QMenu* LevelEditorMenuHandler::CreateViewMenu()
     viewportViewsMenuWrapper.AddAction(ID_VIEW_GRIDSETTINGS);
     viewportViewsMenuWrapper.AddSeparator();
 
-    viewportViewsMenuWrapper.AddAction(ID_VIEW_CONFIGURELAYOUT);
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        viewportViewsMenuWrapper.AddAction(ID_VIEW_CONFIGURELAYOUT);
+    }
     viewportViewsMenuWrapper.AddSeparator();
 
     viewportViewsMenuWrapper.AddAction(ID_DISPLAY_GOTOPOSITION);
@@ -1312,9 +1344,14 @@ QAction* LevelEditorMenuHandler::CreateViewPaneMenuItem(
 {
     QAction* action = CreateViewPaneAction(view);
 
+    if (action && view->m_options.isDisabledInSimMode)
+    {
+        AddDisableActionInSimModeListener(action);
+    }
+
     menu->addAction(action);
 
-    return action;
+return action;
 }
 
 void LevelEditorMenuHandler::InitializeViewPaneMenu(
@@ -1353,10 +1390,10 @@ void LevelEditorMenuHandler::LoadNetPromoterScoreDialog(ActionManager::MenuWrapp
     {
         auto showNetPromoterDialog = menu.Get()->addAction(tr("Show Net Promoter Score Dialog"));
         connect(showNetPromoterDialog, &QAction::triggered, this, [this]()
-            {
-                NetPromoterScoreDialog p(m_mainWindow);
-                p.exec();
-            });
+        {
+            NetPromoterScoreDialog p(m_mainWindow);
+            p.exec();
+        });
     }
     m_settings.endGroup();
 }
@@ -1406,14 +1443,21 @@ void LevelEditorMenuHandler::CreateMenuOptions(
     {
         if (viewpane->m_options.builtInActionId != LyViewPane::NO_BUILTIN_ACTION)
         {
-            sortMenuMap[viewpane->m_name] = [&menu, viewpane]()
+            sortMenuMap[viewpane->m_name] = [this, &menu, viewpane]()
             {
                 // Handle shortcuts for actions with a built-in ID since they
                 // bypass our CreateViewPaneMenuItem method
                 QAction* action = menu.AddAction(viewpane->m_options.builtInActionId);
-                if (action && !viewpane->m_options.shortcut.isEmpty())
+                if (action)
                 {
-                    action->setShortcut(viewpane->m_options.shortcut);
+                    if (viewpane->m_options.isDisabledInSimMode)
+                    {
+                        AddDisableActionInSimModeListener(action);
+                    }
+                    if (!viewpane->m_options.shortcut.isEmpty())
+                    {
+                        action->setShortcut(viewpane->m_options.shortcut);
+                    }
                 }
             };
         }
@@ -1566,7 +1610,11 @@ void LevelEditorMenuHandler::UpdateMRUFiles()
             {
                 auto cryEdit = CCryEditApp::instance();
                 RecentFileList* mruList = cryEdit->GetRecentFileList();
-                cryEdit->OpenDocumentFile((*mruList)[i].toUtf8().data());
+                // Check file is still available
+                if (mruList->GetSize() > i)
+                {
+                    cryEdit->OpenDocumentFile((*mruList)[i].toUtf8().data());
+                }
             });
         m_actionManager->RegisterUpdateCallback(ID_FILE_MRU_FILE1 + i, cryEdit, &CCryEditApp::OnUpdateFileOpen);
 
@@ -1664,26 +1712,6 @@ void LevelEditorMenuHandler::OnUpdateMacrosMenu()
     }
 }
 
-void LevelEditorMenuHandler::SetupSliceSelectMenu(AZ::EntityId id)
-{
-    if (id.IsValid())
-    {
-        if (SliceUtilities::PopulateSliceSelectSubMenu(id, m_selectSliceRootMenu))
-        {
-            m_selectSliceRootMenu->setEnabled(true);
-        }
-        else
-        {
-            m_selectSliceRootMenu->setEnabled(false);
-        }
-    }
-    else
-    {
-        m_selectSliceRootMenu->clear();
-        m_selectSliceRootMenu->setEnabled(false);
-    }
-}
-
 void LevelEditorMenuHandler::UpdateMacrosMenu()
 {
     m_macrosMenu->clear();
@@ -1742,6 +1770,14 @@ void LevelEditorMenuHandler::checkOrOpenView()
             action->setChecked(false);
         });
     }
+}
+
+void LevelEditorMenuHandler::AddDisableActionInSimModeListener(QAction* action)
+{
+    GetIEditor()->RegisterNotifyListener(new EditorListener(action, [action](EEditorNotifyEvent e)
+    {
+        DisableActionWhileInSimMode(action, e);
+    }));
 }
 
 void LevelEditorMenuHandler::EnteredComponentMode(const AZStd::vector<AZ::Uuid>& /*componentModeTypes*/)

@@ -13,20 +13,20 @@
 
 #include <AzCore/EBus/EBus.h>
 #include <AzCore/Math/Uuid.h>
-#include <AzCore/Outcome/Outcome.h>
-
 #include <AzCore/std/containers/vector.h>
-#include <AzCore/std/smart_ptr/shared_ptr.h>
 #include <AzCore/std/string/string.h>
 
-namespace Gems
+namespace AzFramework
 {
     // Version struct forward declaration
     template <size_t N>
     struct Version;
+}
 
+namespace Gems
+{
     // Forward declaring EngineVersion
-    using EngineVersion = Gems::Version<4>;
+    using EngineVersion = AzFramework::Version<4>;
 }
 
 namespace Engines
@@ -57,6 +57,7 @@ namespace Engines
         /// Get the version of the engine instance.
         virtual const Gems::EngineVersion& GetEngineVersion() = 0;
     };
+
     using EngineRequestBus = AZ::EBus<EngineRequests>;
 
     /**
@@ -88,6 +89,7 @@ namespace Engines
         // Check if any Lumberyard Editor is currently running
         virtual bool IsEditorProcessRunning() const = 0;
     };
+
     using EngineManagerRequestBus = AZ::EBus<EngineManagerRequests>;
 
     /**
@@ -108,5 +110,6 @@ namespace Engines
         /// Called when a new engine instance is created or loaded.
         virtual void OnEngineLoaded(EngineId engine) = 0;
     };
+
     using EngineManagerNotificationBus = AZ::EBus<EngineManagerNotifications>;
 }

@@ -28,7 +28,8 @@
 #include <dirent.h>
 
 
-using namespace AZ::IO;
+namespace AZ::IO
+{
 
 namespace UnixLikePlatformUtil
 {
@@ -223,10 +224,12 @@ namespace Platform
     {
         if (handle != PlatformSpecificInvalidHandle)
         {
+        #if AZ_TRAIT_SYSTEMFILE_FSYNC_IS_DEFINED
             if (fsync(handle) != 0)
             {
                 EBUS_EVENT(FileIOEventBus, OnError, systemFile, nullptr, errno);
             }
+        #endif
         }
     }
 
@@ -252,3 +255,4 @@ namespace Platform
     }
 }
 
+} // namespace AZ::IO

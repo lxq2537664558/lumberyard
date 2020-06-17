@@ -21,26 +21,23 @@
 
 #include <AzCore/Serialization/SerializeContext.h>
 
-#include <QtWidgets/QApplication>
-#include <QtCore/QTimer>
-AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QFileInfo::d_ptr': class 'QSharedDataPointer<QFileInfoPrivate>' needs to have dll-interface to be used by clients of class 'QFileInfo'
-#include <QtCore/QDir>
-AZ_POP_DISABLE_WARNING
-
 #include <AzFramework/CommandLine/CommandLine.h>
 
+#include <AzToolsFramework/UI/UICore/QWidgetSavedState.h>
 #include <AzToolsFramework/UI/LegacyFramework/Core/EditorFrameworkAPI.h>
 #include "MainWindowSavedState.h"
-#include <AzToolsFramework/UI/UICore/QWidgetSavedState.h>
 
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // '...' needs to have dll-interface to be used by clients of class '...'
+#include <QtWidgets/QApplication>
+#include <QtCore/QTimer>
+#include <QtCore/QDir>
 #include <QThread>
 #include <QAction>
 #include <QMenu>
 #include <QFontDatabase>
-AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QResource::d_ptr': class 'QScopedPointer<QResourcePrivate,QScopedPointerDeleter<T>>' needs to have dll-interface to be used by clients of class 'QResource'
 #include <QResource>
-AZ_POP_DISABLE_WARNING
 #include <QProxyStyle>
+AZ_POP_DISABLE_WARNING
 
 #include <AzFramework/StringFunc/StringFunc.h>
 
@@ -296,6 +293,8 @@ namespace AzToolsFramework
 
     Framework::~Framework(void)
     {
+        AZ::SystemTickBus::Handler::BusDisconnect();
+
         delete m_ActionPreferences;
         m_ActionPreferences = nullptr;
 
@@ -322,12 +321,22 @@ namespace AzToolsFramework
         EBUS_EVENT(LegacyFramework::CoreMessageBus, OnReady);
     }
 
+    void Framework::OnSystemTick()
+    {
+        AZ::SystemTickBus::Handler::BusDisconnect();
+        CheckForReadyToQuit();
+    }
+
     void Framework::Init()
     {
         char myFileName[MAX_PATH] = {0};
 #if AZ_TRAIT_OS_PLATFORM_APPLE
         uint32_t bufSize = AZ_ARRAY_SIZE(myFileName);
         _NSGetExecutablePath(myFileName, &bufSize);
+        if (strlen(myFileName) > 0)
+#elif defined (AZ_PLATFORM_LINUX)
+        uint32_t bufSize = AZ_ARRAY_SIZE(myFileName);
+        size_t pathLen = readlink("/proc/self/exe", myFileName, bufSize);
         if (strlen(myFileName) > 0)
 #else
         if (GetModuleFileNameA(NULL, myFileName, MAX_PATH))
@@ -411,7 +420,6 @@ namespace AzToolsFramework
         EBUS_EVENT_RESULT(pApp, AZ::ComponentApplicationBus, GetApplication);
         if (pApp)
         {
-
             AZStd::chrono::system_clock::time_point now = AZStd::chrono::system_clock::now();
             static AZStd::chrono::system_clock::time_point lastUpdate = now;
 
@@ -420,10 +428,12 @@ namespace AzToolsFramework
 
             lastUpdate = now;
 
-            AZ::SystemTickBus::ExecuteQueuedEvents();
-            AZ::SystemTickBus::Broadcast(&AZ::SystemTickEvents::OnSystemTick);
-
-            pApp->Tick(deltaTime);
+            if (m_ptrTicker)
+            {
+                AZ::SystemTickBus::ExecuteQueuedEvents();
+                AZ::SystemTickBus::Broadcast(&AZ::SystemTickEvents::OnSystemTick);
+                pApp->Tick(deltaTime);
+            }
 
         }
 
@@ -527,7 +537,7 @@ namespace AzToolsFramework
         {
             // the above could cause contexts to generate threaded requests that are outstanding (like a long data save).
             // we keep the app running until those requests have been completed.
-            QTimer::singleShot(1, this, SLOT(CheckForReadyToQuit()));
+            AZ::SystemTickBus::Handler::BusConnect();
             return;
         }
 

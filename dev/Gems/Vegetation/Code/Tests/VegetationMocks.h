@@ -58,7 +58,7 @@ namespace UnitTest
             Vegetation::AreaSystemRequestBus::Handler::BusDisconnect();
         }
 
-        void RegisterArea(AZ::EntityId areaId) override
+        void RegisterArea(AZ::EntityId areaId, AZ::u32 layer, AZ::u32 priority, const AZ::Aabb& bounds) override
         {
             ++m_count;
         }
@@ -68,7 +68,7 @@ namespace UnitTest
             ++m_count;
         }
 
-        void RefreshArea(AZ::EntityId areaId) override
+        void RefreshArea(AZ::EntityId areaId, AZ::u32 layer, AZ::u32 priority, const AZ::Aabb& bounds) override
         {
             ++m_count;
         }
@@ -94,6 +94,11 @@ namespace UnitTest
         }
 
         AZStd::vector<Vegetation::InstanceData> m_existingInstances;
+        void EnumerateInstancesInOverlappingSectors(const AZ::Aabb& bounds, Vegetation::AreaSystemEnumerateCallback callback) const override
+        {
+            EnumerateInstancesInAabb(bounds, callback);
+        }
+
         void EnumerateInstancesInAabb(const AZ::Aabb& bounds, Vegetation::AreaSystemEnumerateCallback callback) const override
         {
             ++m_count;
@@ -105,58 +110,11 @@ namespace UnitTest
                 }
             }
         }
-    };
 
-    struct MockInstanceSystemRequestBus
-        : public Vegetation::InstanceSystemRequestBus::Handler
-    {
-        int m_count = 0;
-        int m_created = 0;
-        int m_destroyed = 0;
-
-        MockInstanceSystemRequestBus()
+        AZStd::size_t GetInstanceCountInAabb(const AZ::Aabb& bounds) const override
         {
-            Vegetation::InstanceSystemRequestBus::Handler::BusConnect();
-        }
-
-        ~MockInstanceSystemRequestBus() override
-        {
-            Vegetation::InstanceSystemRequestBus::Handler::BusDisconnect();
-        }
-
-        Vegetation::DescriptorPtr RegisterUniqueDescriptor(const Vegetation::Descriptor& descriptor) override
-        {
-            m_count++;
-            return Vegetation::DescriptorPtr();
-        }
-
-        void ReleaseUniqueDescriptor(Vegetation::DescriptorPtr descriptorPtr) override
-        {
-            m_count++;
-        }
-
-        void CreateInstance(Vegetation::InstanceData& instanceData) override
-        {
-            m_created++;
-            m_count++;
-            instanceData.m_instanceId = Vegetation::InstanceId();
-        }
-
-        void DestroyInstance(Vegetation::InstanceId instanceId) override
-        {
-            m_destroyed++;
-            m_count++;
-        }
-
-        void DestroyAllInstances() override
-        {
-            m_destroyed = m_created;
-            m_count++;
-        }
-
-        void Cleanup() override
-        {
-
+            ++m_count;
+            return m_existingInstances.size();
         }
     };
 
@@ -336,7 +294,7 @@ namespace UnitTest
     {
         void ClearData()
         {
-            m_assetData = nullptr;
+            this->m_assetData = nullptr;
         }
     };
 
@@ -447,6 +405,11 @@ namespace UnitTest
             surfacePointList.push_back(outPoint);
         }
 
+        void GetSurfacePointsFromRegion(const AZ::Aabb& inRegion, const AZ::Vector2 stepSize, const SurfaceData::SurfaceTagVector& desiredTags,
+            SurfaceData::SurfacePointListPerPosition& surfacePointListPerPosition) const override
+        {
+        }
+
         SurfaceData::SurfaceDataRegistryHandle RegisterSurfaceDataProvider(const SurfaceData::SurfaceDataRegistryEntry& entry) override
         {
             ++m_count;
@@ -458,7 +421,7 @@ namespace UnitTest
             ++m_count;
         }
 
-        void UpdateSurfaceDataProvider(const SurfaceData::SurfaceDataRegistryHandle& handle, const SurfaceData::SurfaceDataRegistryEntry& entry, const AZ::Aabb& dirtyBoundsOverride) override
+        void UpdateSurfaceDataProvider(const SurfaceData::SurfaceDataRegistryHandle& handle, const SurfaceData::SurfaceDataRegistryEntry& entry) override
         {
             ++m_count;
         }
@@ -474,7 +437,12 @@ namespace UnitTest
             ++m_count;
         }
 
-        void UpdateSurfaceDataModifier(const SurfaceData::SurfaceDataRegistryHandle& handle, const SurfaceData::SurfaceDataRegistryEntry& entry, const AZ::Aabb& dirtyBoundsOverride) override
+        void UpdateSurfaceDataModifier(const SurfaceData::SurfaceDataRegistryHandle& handle, const SurfaceData::SurfaceDataRegistryEntry& entry) override
+        {
+            ++m_count;
+        }
+
+        void RefreshSurfaceData(const AZ::Aabb& dirtyBounds) override
         {
             ++m_count;
         }
@@ -664,6 +632,11 @@ namespace UnitTest
         const string & GetFileName() const override
         {
             return m_GetFileName;
+        }
+        string m_cgfNodeName;
+        const string& GetCGFNodeName() const override
+        {
+            return m_cgfNodeName;
         }
         const char * GetFilePath() const override
         {
@@ -986,6 +959,11 @@ namespace UnitTest
         }
         void CleanUnusedLods() override
         {
+        }
+        AZStd::vector<float> m_clothInverseMasses;
+        AZStd::vector<float>& GetClothInverseMasses() override
+        {
+            return m_clothInverseMasses;
         }
     };
 

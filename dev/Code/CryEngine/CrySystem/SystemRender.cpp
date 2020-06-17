@@ -58,6 +58,12 @@
 
 #include <LoadScreenBus.h>
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define SYSTEMRENDERER_CPP_SECTION_1 1
+#define SYSTEMRENDERER_CPP_SECTION_2 2
+#endif
+
 extern CMTSafeHeap* g_pPakHeap;
 #if defined(AZ_PLATFORM_ANDROID)
 #include <AzCore/Android/Utils.h>
@@ -186,7 +192,20 @@ void CSystem::CreateRendererVars(const SSystemInitParams& startupParams)
 #elif defined(ANDROID)
     const char* p_r_DriverDef = "GL";
 #elif defined(LINUX)
-    const char* p_r_DriverDef = "NULL";
+    const char* p_r_DriverDef = "GL";
+    if (gEnv->IsDedicated())
+    {
+        p_r_DriverDef = "NULL";
+    }
+#elif defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION SYSTEMRENDERER_CPP_SECTION_1
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemRender_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemRender_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/SystemRender_cpp_salem.inl"
+    #endif
 #else
     const char* p_r_DriverDef = "DX9";                          // required to be deactivated for final release
 #endif
@@ -550,10 +569,13 @@ void CSystem::UpdateLoadingScreen()
     }
 
 #if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION SYSTEMRENDERER_CPP_SECTION_2
     #if defined(AZ_PLATFORM_XENIA)
         #include "Xenia/SystemRender_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/SystemRender_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/SystemRender_cpp_salem.inl"
     #endif
 #endif
 
@@ -561,7 +583,7 @@ void CSystem::UpdateLoadingScreen()
     EBUS_EVENT(LoadScreenBus, UpdateAndRender);
 #endif // if AZ_LOADSCREENCOMPONENT_ENABLED
 
-    if (!m_bEditor && !m_bQuit)
+    if (!m_bEditor && !IsQuitting())
     {
         if (m_pProgressListener)
         {

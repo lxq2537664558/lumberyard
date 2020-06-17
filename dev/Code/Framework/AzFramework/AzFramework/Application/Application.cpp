@@ -24,14 +24,16 @@
 #include <AzCore/std/parallel/binary_semaphore.h>
 #include <AzCore/std/string/conversions.h>
 #include <AzCore/Serialization/DataPatch.h>
-#include <AzCore/Serialization/ObjectStreamComponent.h>
 #include <AzCore/Debug/FrameProfilerComponent.h>
 #include <AzCore/NativeUI/NativeUISystemComponent.h>
 #include <AzCore/PlatformIncl.h>
 #include <AzCore/Module/ModuleManagerBus.h>
+#include <AzCore/Interface/Interface.h>
 
 #include <AzFramework/Asset/SimpleAsset.h>
+#include <AzFramework/Asset/AssetBundleManifest.h>
 #include <AzFramework/Asset/AssetCatalogComponent.h>
+#include <AzFramework/Asset/CustomAssetTypeComponent.h>
 #include <AzFramework/Asset/AssetSystemComponent.h>
 #include <AzFramework/Asset/AssetRegistry.h>
 #include <AzFramework/Components/ConsoleBus.h>
@@ -41,11 +43,15 @@
 #include <AzFramework/Entity/EntityContext.h>
 #include <AzFramework/Entity/GameEntityContextComponent.h>
 #include <AzFramework/FileFunc/FileFunc.h>
+#include <AzFramework/FileTag/FileTagComponent.h>
 #include <AzFramework/Input/System/InputSystemComponent.h>
+#include <AzFramework/Scene/SceneSystemComponent.h>
+#include <AzFramework/Components/AzFrameworkConfigurationSystemComponent.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <AzFramework/IO/LocalFileIO.h>
 #include <AzFramework/Network/NetBindingComponent.h>
 #include <AzFramework/Network/NetBindingSystemComponent.h>
+#include <AzFramework/Physics/Utils.h>
 #include <AzFramework/Script/ScriptRemoteDebugging.h>
 #include <AzFramework/Script/ScriptComponent.h>
 #include <AzFramework/TargetManagement/TargetManagementComponent.h>
@@ -53,7 +59,10 @@
 #include <AzFramework/Driller/RemoteDrillerInterface.h>
 #include <AzFramework/Network/NetworkContext.h>
 #include <AzFramework/Metrics/MetricsPlainTextNameRegistration.h>
+#include <AzCore/Console/Console.h>
+#include <AzFramework/Viewport/ViewportBus.h>
 #include <GridMate/Memory.h>
+#include <AzCore/std/string/tokenize.h>
 
 #include "Application.h"
 #include <AzFramework/AzFrameworkModule.h>
@@ -158,7 +167,6 @@ namespace AzFramework
         m_assetRoot[0] = '\0';
         m_engineRoot[0] = '\0';
         
-
         if ((argc) && (argv))
         {
             m_argC = argc;
@@ -166,10 +174,19 @@ namespace AzFramework
         }
         else
         {
-            // use a "valid" value here.  This is becuase Qt and potentially other third party libraries require
+            // use a "valid" value here.  This is because Qt and potentially other third party libraries require
             // that ArgC be 'at least 1' and that (*argV)[0] be a valid pointer to a real null terminated string.
             m_argC = &ApplicationInternal::s_argCUninitialized;
             m_argV = &ApplicationInternal::s_argVUninitialized;
+        }
+
+        // Az Console initialization..
+        // note that tests destroy and construct the application over and over, which is not a desirable pattern
+        // so we allow the console to construct once and skip destruction / construction on consecutive runs
+        if (AZ::Interface<AZ::IConsole>::Get() == nullptr)
+        {
+            new AZ::Console;
+            AZ::Interface<AZ::IConsole>::Get()->LinkDeferredFunctors(AZ::ConsoleFunctorBase::GetDeferredHead());
         }
 
         ApplicationRequests::Bus::Handler::BusConnect();
@@ -264,12 +281,25 @@ namespace AzFramework
         if (descriptorFound)
         {
             // Pass applicationDescriptorFile instead of m_configFilePath because Create() expects AppRoot-relative path.
-            systemEntity = Create(applicationDescriptorFile, startupParameters);
+            systemEntity = Create(applicationDescriptorFile, startupParameters); // NOTE This creates the AZ system allocator
         }
         else
         {
             systemEntity = Create(Descriptor(), startupParameters);
         }
+
+        // Execute any command-line arguments passed to the application now that our allocators are set up
+        {
+            AZStd::string commandLineJoined;
+            for (int32_t iter = 0; iter < *m_argC; ++iter)
+            {
+                commandLineJoined += (*m_argV)[iter];
+                commandLineJoined += " ";
+            }
+
+            AZ::Interface<AZ::IConsole>::Get()->ExecuteCommandLine(commandLineJoined.c_str());
+        }
+
         StartCommon(systemEntity);
     }
 
@@ -305,7 +335,6 @@ namespace AzFramework
         return true;
     }
 
-
     void Application::StartCommon(AZ::Entity* systemEntity)
     {
         // Startup default local FileIO (hits OSAllocator) if not already setup.
@@ -317,7 +346,10 @@ namespace AzFramework
 
         m_pimpl.reset(Implementation::Create());
 
-        m_commandLine.Parse(*m_argC, *m_argV);
+        if (*m_argC != ApplicationInternal::s_argCUninitialized)
+        {
+            m_commandLine.Parse(*m_argC, *m_argV);
+        }
 
         systemEntity->Init();
         systemEntity->Activate();
@@ -340,6 +372,7 @@ namespace AzFramework
 
         // Calculate the engine root by reading the engine.json file
         AZStd::string  engineJsonPath = AZStd::string::format("%s%s", m_appRoot, s_engineConfigFileName);
+        AzFramework::StringFunc::Path::Normalize(engineJsonPath);
         AZ::IO::LocalFileIO localFileIO;
         auto readJsonResult = AzFramework::FileFunc::ReadJsonFile(engineJsonPath, &localFileIO);
 
@@ -420,13 +453,7 @@ namespace AzFramework
              * which does not get cleared when Application shuts down. We need to un-reflect here to clear ReplicaChunkDescriptor
              * so that ReplicaChunkDescriptor::m_vdt doesn't get flooded when we repeatedly instantiate Application in unit tests.
              */
-            m_reflectionManager->RemoveReflectContext<NetworkContext>();
-
-            if (AZ::IO::FileIOBase::GetInstance() == m_defaultFileIO.get())
-            {
-                AZ::IO::FileIOBase::SetInstance(nullptr);
-            }
-            m_defaultFileIO.reset();
+            AZ::ReflectionEnvironment::GetReflectionManager()->RemoveReflectContext<NetworkContext>();
 
             // Free any memory owned by the command line container.
             m_commandLine = CommandLine();
@@ -443,6 +470,18 @@ namespace AzFramework
         }
     }
 
+    void Application::DestroyAllocator()
+    {
+        // Destroy the default file IO.
+        if (AZ::IO::FileIOBase::GetInstance() == m_defaultFileIO.get())
+        {
+            AZ::IO::FileIOBase::SetInstance(nullptr);
+        }
+        m_defaultFileIO.reset();
+
+        ComponentApplication::DestroyAllocator();
+    }
+
     void Application::RegisterCoreComponents()
     {
         AZ::ComponentApplication::RegisterCoreComponents();
@@ -454,7 +493,6 @@ namespace AzFramework
             azrtti_typeid<AZ::StreamerComponent>(),
             azrtti_typeid<AZ::JobManagerComponent>(),
             azrtti_typeid<AZ::AssetManagerComponent>(),
-            azrtti_typeid<AZ::ObjectStreamComponent>(),
             azrtti_typeid<AZ::UserSettingsComponent>(),
             azrtti_typeid<AZ::Debug::FrameProfilerComponent>(),
             azrtti_typeid<AZ::NativeUI::NativeUISystemComponent>(),
@@ -462,9 +500,13 @@ namespace AzFramework
             azrtti_typeid<AZ::SliceSystemComponent>(),
 
             azrtti_typeid<AzFramework::AssetCatalogComponent>(),
+            azrtti_typeid<AzFramework::CustomAssetTypeComponent>(),
+            azrtti_typeid<AzFramework::FileTag::ExcludeFileComponent>(),
             azrtti_typeid<AzFramework::NetBindingComponent>(),
             azrtti_typeid<AzFramework::NetBindingSystemComponent>(),
             azrtti_typeid<AzFramework::TransformComponent>(),
+            azrtti_typeid<AzFramework::SceneSystemComponent>(),
+            azrtti_typeid<AzFramework::AzFrameworkConfigurationSystemComponent>(),
             azrtti_typeid<AzFramework::GameEntityContextComponent>(),
 #if !defined(_RELEASE)
             azrtti_typeid<AzFramework::TargetManagementComponent>(),
@@ -493,11 +535,15 @@ namespace AzFramework
         AzFramework::SimpleAssetReferenceBase::Reflect(context);
         AzFramework::ConsoleRequests::Reflect(context);
         AzFramework::ConsoleNotifications::Reflect(context);
+        AzFramework::ViewportRequests::Reflect(context);
+
+        Physics::ReflectionUtils::ReflectPhysicsApi(context);
 
         if (AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
         {
             AzFramework::AssetRegistry::ReflectSerialize(serializeContext);
             CameraState::Reflect(*serializeContext);
+            AzFramework::AssetBundleManifest::ReflectSerialize(serializeContext);
         }
     }
 
@@ -517,6 +563,10 @@ namespace AzFramework
 
             azrtti_typeid<AzFramework::BootstrapReaderComponent>(),
             azrtti_typeid<AzFramework::AssetCatalogComponent>(),
+            azrtti_typeid<AzFramework::CustomAssetTypeComponent>(),
+            azrtti_typeid<AzFramework::FileTag::ExcludeFileComponent>(),
+            azrtti_typeid<AzFramework::SceneSystemComponent>(),
+            azrtti_typeid<AzFramework::AzFrameworkConfigurationSystemComponent>(),
             azrtti_typeid<AzFramework::GameEntityContextComponent>(),
             azrtti_typeid<AzFramework::AssetSystem::AssetSystemComponent>(),
             azrtti_typeid<AzFramework::InputSystemComponent>(),
@@ -667,7 +717,7 @@ namespace AzFramework
         ComponentApplication::CreateReflectionManager();
 
         // Setup NetworkContext
-        m_reflectionManager->AddReflectContext<NetworkContext>();
+        AZ::ReflectionEnvironment::GetReflectionManager()->AddReflectContext<NetworkContext>();
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -690,7 +740,14 @@ namespace AzFramework
     ////////////////////////////////////////////////////////////////////////////
     NetworkContext* Application::GetNetworkContext()
     {
-        return m_reflectionManager ? m_reflectionManager->GetReflectContext<NetworkContext>() : nullptr;
+        NetworkContext* result = nullptr;
+
+        if (auto reflectionManager = AZ::ReflectionEnvironment::GetReflectionManager())
+        {
+            result = reflectionManager->GetReflectContext<NetworkContext>();
+        }
+
+        return result;
     }
 
     bool Application::IsEngineExternal() const
@@ -786,7 +843,7 @@ namespace AzFramework
         AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzFramework);
 
         AZStd::thread_desc newThreadDesc;
-        newThreadDesc.m_cpuId = AZ_TRAIT_THREAD_WORKERTHREAD_AFFINITY_MASK;
+        newThreadDesc.m_cpuId = AFFINITY_MASK_USERTHREADS;
         newThreadDesc.m_name = newThreadName;
         AZStd::binary_semaphore binarySemaphore;
         AZStd::thread newThread([&workForNewThread, &binarySemaphore, &newThreadName]
@@ -894,6 +951,7 @@ namespace AzFramework
                 AZ_Assert(false, "Invalid RootPathType (%d)", static_cast<int>(type));
             }
     }
+    void Application::QueryApplicationType(ApplicationTypeQuery& appType) const { appType.m_maskValue = ApplicationTypeQuery::Masks::Invalid; }
 
 
 } // namespace AzFramework

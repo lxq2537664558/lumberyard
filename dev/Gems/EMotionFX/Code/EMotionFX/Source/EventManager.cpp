@@ -18,6 +18,7 @@
 #include "AnimGraphStateMachine.h"
 #include "AnimGraph.h"
 #include <EMotionFX/Source/Allocators.h>
+#include <MCore/Source/LogManager.h>
 
 
 namespace EMotionFX
@@ -36,10 +37,10 @@ namespace EMotionFX
     EventManager::~EventManager()
     {
         // Collect all event handlers (avoiding duplicates)
-#ifdef DEBUG
+#ifdef AZ_DEBUG_BUILD
         for (const EventHandlerVector& eventHandlers : m_eventHandlersByEventType)
         {
-            AZ_Assert(eventHandlers.empty(), "Expected all events to be removed");
+            AZ_Assert(eventHandlers.empty(), "Expected all event handlers to be removed");
         }
 #endif
         m_eventHandlersByEventType.clear();

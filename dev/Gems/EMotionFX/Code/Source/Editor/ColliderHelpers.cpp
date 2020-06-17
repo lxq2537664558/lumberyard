@@ -164,12 +164,6 @@ namespace EMotionFX
                 continue;
             }
 
-            // Disable cloth - not available.
-            if (copyFrom == PhysicsSetup::ColliderConfigType::Cloth)
-            {
-                continue;
-            }
-
             QAction* action = copyFromMenu->addAction(PhysicsSetup::GetVisualNameForColliderConfigType(copyFrom));
             QObject::connect(action, &QAction::triggered, parent, [=]
                 {
@@ -197,12 +191,6 @@ namespace EMotionFX
         {
             const PhysicsSetup::ColliderConfigType copyFrom = static_cast<PhysicsSetup::ColliderConfigType>(i);
             if (copyFrom == createForType)
-            {
-                continue;
-            }
-
-            // Disable cloth - not available.
-            if (copyFrom == PhysicsSetup::ColliderConfigType::Cloth)
             {
                 continue;
             }

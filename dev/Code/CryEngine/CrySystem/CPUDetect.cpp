@@ -137,6 +137,8 @@ bool IsAMD()
         #include "Xenia/CPUDetect_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/CPUDetect_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/CPUDetect_cpp_salem.inl"
     #endif
 #endif
 
@@ -335,6 +337,10 @@ unsigned long GetCPUFeatureSet()
         if (CPUInfo[2] & (1 << 29))
         {
             features |= CFI_F16C;
+        }
+        if (CPUInfo[2] & (1 << 19))
+        {
+            features |= CFI_SSE41;
         }
     }
 
@@ -1533,6 +1539,8 @@ void CCpuFeatures::Detect(void)
         #include "Xenia/CPUDetect_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/CPUDetect_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/CPUDetect_cpp_salem.inl"
     #endif
 #endif
 
@@ -1572,6 +1580,7 @@ void CCpuFeatures::Detect(void)
         CryLogAlways("  SSE: %s", (p->mFeatures & CFI_SSE) ? "present" : "not present");
         CryLogAlways("  SSE2: %s", (p->mFeatures & CFI_SSE2) ? "present" : "not present");
         CryLogAlways("  SSE3: %s", (p->mFeatures & CFI_SSE3) ? "present" : "not present");
+        CryLogAlways("  SSE4.1: %s", (p->mFeatures& CFI_SSE41) ? "present" : "not present");
         if (p->mbSerialPresent)
         {
             CryLogAlways("  Serial number: %s", p->mSerialNumber);
@@ -1614,6 +1623,10 @@ void CCpuFeatures::Detect(void)
     if (hasSSE3())
     {
         g_CpuFlags |= CPUF_SSE3;
+    }
+    if (hasSSE41())
+    {
+        g_CpuFlags |= CPUF_SSE41;
     }
     if (has3DNow())
     {

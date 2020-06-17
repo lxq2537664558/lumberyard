@@ -11,14 +11,15 @@
 */
 
 #include "StdAfx.h"
+#include "PythonTerrainLayerFuncs.h"
 #include "IEditor.h"
 #include "GameEngine.h"
 #include "ViewManager.h"
-#include "Util/BoostPythonHelpers.h"
 #include "Terrain/Heightmap.h"
 #include "BitFiddling.h"
 
 #include <AzToolsFramework/UI/UICore/WidgetHelpers.h>
+#include <AzCore/RTTI/BehaviorContext.h>
 
 #include <QFileDialog>
 
@@ -176,22 +177,84 @@ namespace PyTerrainLayers
         return result;
     }
 
+    // NOTE:  See explanation of tile indices and counts at top of this file.
+    // Returns a color packed as ABGR.
+    AZ::u32 GetColorAt(double xPercent, double yPercent)
+    {
+        if (CRGBLayer* rgbLayer = GetRGBLayer())
+        {
+            return rgbLayer->GetValueAt(xPercent, yPercent);
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    // NOTE:  See explanation of tile indices and counts at top of this file.
+    bool ImportMegaterrain(const char* fileName, AZ::u32 left, AZ::u32 top, AZ::u32 right, AZ::u32 bottom)
+    {
+        if (fileName)
+        {
+            if (CRGBLayer* rgbLayer = GetRGBLayer())
+            {
+                if (rgbLayer->TryImportTileRect(fileName, left, top, right, bottom))
+                {
+                    CHeightmap* heightMap = GetIEditor()->GetHeightmap();
+                    AZ::u32 dwTileCountX = rgbLayer->GetTileCountX();
+                    AZ::u32 dwTileCountY = rgbLayer->GetTileCountY();
+
+                    QPoint topLeft(left * heightMap->GetWidth() / dwTileCountX, top * heightMap->GetHeight() / dwTileCountY);
+                    QPoint topRight(right * heightMap->GetWidth() / dwTileCountX, bottom * heightMap->GetHeight() / dwTileCountY);
+                    QRect rect(topLeft, topRight);
+
+                    heightMap->UpdateLayerTexture(rect);
+                    heightMap->RefreshTerrain();
+
+                    return true;
+                }
+            }
+        }
+
+        AZ_Error("Terrain", false, "ImportMegaterrain() failed, Check file path and tile indices.");
+        return false;
+    }
+
+    // NOTE:  See explanation of tile indices and counts at top of this file.
+    void ExportMegaterrain(const char* fileName, AZ::u32 left, AZ::u32 top, AZ::u32 right, AZ::u32 bottom)
+    {
+        if (fileName)
+        {
+            if (CRGBLayer* rgbLayer = GetRGBLayer())
+            {
+                rgbLayer->ExportTileRect(fileName, left, top, right, bottom);
+            }
+        }
+    }
 }
 
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyTerrainLayers::GetTileCountX, terrain, get_tile_count_x,
-    "Gets the number of terrain layer tiles in the X direction of the RGB layer, which is the Y world direction.",
-    "int terrain.get_tile_count_x()");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyTerrainLayers::GetTileCountY, terrain, get_tile_count_y,
-    "Gets the number of terrain layer tiles in the Y direction or the RGB layer, which is the X world direction.",
-    "int terrain.get_tile_count_y()");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyTerrainLayers::GetTileResolution, terrain, get_tile_resolution,
-    "Gets the input resolution of the requested terrain layer tile.\n" \
-    "Note: the tile indices are rotated 90 degrees from the world axis, so the X index is along the Y world axis and vice versa.",
-    "int terrain.get_tile_resolution(int tile_index_x, int tile_index_y)");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyTerrainLayers::SetTileResolution, terrain, set_tile_resolution,
-    "Sets the input resolution of the requested terrain layer tile.\n" \
-    "Note: the tile indices are rotated 90 degrees from the world axis, so the X index is along the Y world axis and vice versa.",
-    "bool terrain.set_tile_resolution(int tile_index_x, int tile_index_y, int resolution)");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyTerrainLayers::SetTileCount, terrain, set_tile_count,
-    "Sets the number of terrain layer tiles.",
-    "bool terrain.set_tile_count(int num_tiles_x, int num_tiles_y)");
+///////////////////////////////////////////////////////////////////
+
+void AzToolsFramework::TerrainLayerPythonFuncsHandler::Reflect(AZ::ReflectContext* context)
+{
+    if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+    {
+        // this will put these methods into the 'azlmbr.legacy.terrain_layer' module
+        auto addTerrainLayer = [](AZ::BehaviorContext::GlobalMethodBuilder methodBuilder)
+        {
+            methodBuilder->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                ->Attribute(AZ::Script::Attributes::Category, "Legacy/Editor")
+                ->Attribute(AZ::Script::Attributes::Module, "legacy.terrain_layer");
+        };
+        addTerrainLayer(behaviorContext->Method("get_tile_count_x", PyTerrainLayers::GetTileCountX, nullptr, "Gets the number of terrain layer tiles in the X direction of the RGB layer, which is the Y world direction."));
+        addTerrainLayer(behaviorContext->Method("get_tile_count_y", PyTerrainLayers::GetTileCountY, nullptr, "Gets the number of terrain layer tiles in the Y direction or the RGB layer, which is the X world direction."));
+        addTerrainLayer(behaviorContext->Method("get_tile_resolution", PyTerrainLayers::GetTileResolution, nullptr, "Gets the input resolution of the requested terrain layer tile.\n" \
+                                                                                                                    "Note: the tile indices are rotated 90 degrees from the world axis, so the X index is along the Y world axis and vice versa."));
+        addTerrainLayer(behaviorContext->Method("set_tile_resolution", PyTerrainLayers::SetTileResolution, nullptr, "Sets the input resolution of the requested terrain layer tile.\n" \
+                                                                                                                    "Note: the tile indices are rotated 90 degrees from the world axis, so the X index is along the Y world axis and vice versa."));
+        addTerrainLayer(behaviorContext->Method("set_tile_count", PyTerrainLayers::SetTileCount, nullptr, "Sets the number of terrain layer tiles."));
+        addTerrainLayer(behaviorContext->Method("get_color_at", PyTerrainLayers::GetColorAt, nullptr, "Returns the pixel color from the megaterrain texture given a normalized texture coordinate."));
+        addTerrainLayer(behaviorContext->Method("import_megaterrain", PyTerrainLayers::ImportMegaterrain, nullptr, "Imports and applies a megaterrain texture."));
+        addTerrainLayer(behaviorContext->Method("export_megaterrain", PyTerrainLayers::ExportMegaterrain, nullptr, "Exports the active megaterrain texture."));
+    }
+}

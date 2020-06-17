@@ -30,18 +30,14 @@ namespace GraphCanvas
         DataConnectionComponent(const Endpoint& sourceEndpoint,const Endpoint& targetEndpoint, bool createModelConnection = true);
         ~DataConnectionComponent() override = default;
 
-        // Component
-        void Activate();
-        void Deactivate();
+        // ConnectionComponent
+        bool AllowNodeCreation() const override;
         ////
 
     protected:
 
-        // VS2013 Fixes
         DataConnectionComponent(const DataConnectionComponent&) = delete;
         const DataConnectionComponent& operator=(const DataConnectionComponent&) = delete;
-        ////
-
         ConnectionMoveResult OnConnectionMoveComplete(const QPointF& scenePos, const QPoint& screenPos) override;
     }; 
 }

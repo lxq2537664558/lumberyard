@@ -13,6 +13,8 @@
 // Written with help from libcxx's any tests
 // https://github.com/llvm-mirror/libcxx/tree/7175a079211ec78c8232d9d55fa4c1f9eeae803d/test/std/experimental/any
 
+#pragma push_macro("AZ_NUMERICCAST_ENABLED")
+#undef AZ_NUMERICCAST_ENABLED
 #define AZ_NUMERICCAST_ENABLED 1
 
 #include <AzCore/std/any.h>
@@ -713,13 +715,13 @@ namespace UnitTest
                 TEST_F(AnyTest, Any_PointerAnyCast_IsReturnTypeValid)
                 {
                     any a;
-                    AZ_STATIC_ASSERT((AZStd::is_same<decltype(any_cast<int>(&a)), int*>::value), "Return type mismatch");
-                    AZ_STATIC_ASSERT((AZStd::is_same<decltype(any_cast<int const>(&a)), int const*>::value), "Return type mismatch");
+                    static_assert((AZStd::is_same<decltype(any_cast<int>(&a)), int*>::value), "Return type mismatch");
+                    static_assert((AZStd::is_same<decltype(any_cast<int const>(&a)), int const*>::value), "Return type mismatch");
 
                     any const& ca = a;
                     (void)ca;
-                    AZ_STATIC_ASSERT((AZStd::is_same<decltype(any_cast<int>(&ca)), int const*>::value), "Return type mismatch");
-                    AZ_STATIC_ASSERT((AZStd::is_same<decltype(any_cast<int const>(&ca)), int const*>::value), "Return type mismatch");
+                    static_assert((AZStd::is_same<decltype(any_cast<int>(&ca)), int const*>::value), "Return type mismatch");
+                    static_assert((AZStd::is_same<decltype(any_cast<int const>(&ca)), int const*>::value), "Return type mismatch");
                 }
 
                 // Test any_cast<...>(nullptr) always returns nullptr
@@ -936,3 +938,5 @@ namespace UnitTest
         }
     }
 }
+
+#pragma pop_macro("AZ_NUMERICCAST_ENABLED")

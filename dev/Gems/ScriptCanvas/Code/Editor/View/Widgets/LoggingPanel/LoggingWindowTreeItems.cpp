@@ -368,9 +368,9 @@ namespace ScriptCanvasEditor
 
         for (int i = 0; i < GetChildCount(); ++i)
         {
-            DataLogTreeItem* testLogItem = static_cast<DataLogTreeItem*>(FindChildByRow(i));
+            DataLogTreeItem* testLogItem = azrtti_cast<DataLogTreeItem*>(FindChildByRow(i));
 
-            if (!testLogItem->HasOutput())
+            if (testLogItem && !testLogItem->HasOutput())
             {
                 dataTreeItem = testLogItem;
                 break;
@@ -395,7 +395,7 @@ namespace ScriptCanvasEditor
 
     void ExecutionLogTreeItem::RegisterExecutionInput(const ScriptCanvas::Endpoint& incitingEndpoint, const ScriptCanvas::SlotId& slotId, AZStd::string_view slotName, AZStd::chrono::milliseconds relativeExecution)
     {
-        m_timeString = QTime::fromMSecsSinceStartOfDay(relativeExecution.count()).toString("mm:ss.zzz");
+        m_timeString = QTime::fromMSecsSinceStartOfDay(aznumeric_cast<int>(relativeExecution.count())).toString("mm:ss.zzz");
 
         m_inputSlot = slotId;
         m_inputName = slotName.data();
@@ -421,7 +421,7 @@ namespace ScriptCanvasEditor
     {
         if (!HasExecutionInput())
         {
-            m_timeString = QTime::fromMSecsSinceStartOfDay(relativeExecution.count()).toString("mm:ss.zzz");
+            m_timeString = QTime::fromMSecsSinceStartOfDay(aznumeric_cast<int>(relativeExecution.count())).toString("mm:ss.zzz");
         }
 
         m_outputSlot = slotId;
@@ -459,7 +459,7 @@ namespace ScriptCanvasEditor
 
         for (int i = 0; i < GetChildCount(); ++i)
         {
-            DataLogTreeItem* dataLogTreeItem = static_cast<DataLogTreeItem*>(FindChildByRow(i));
+            DataLogTreeItem* dataLogTreeItem = azrtti_cast<DataLogTreeItem*>(FindChildByRow(i));
 
             if (dataLogTreeItem)
             {
@@ -479,7 +479,7 @@ namespace ScriptCanvasEditor
 
         for (int i = 0; i < GetChildCount(); ++i)
         {
-            DataLogTreeItem* dataLogTreeItem = static_cast<DataLogTreeItem*>(FindChildByRow(i));
+            DataLogTreeItem* dataLogTreeItem = azrtti_cast<DataLogTreeItem*>(FindChildByRow(i));
 
             if (dataLogTreeItem)
             {
@@ -495,7 +495,7 @@ namespace ScriptCanvasEditor
 
         for (int i = 0; i < GetChildCount(); ++i)
         {
-            DataLogTreeItem* dataLogTreeItem = static_cast<DataLogTreeItem*>(FindChildByRow(i));
+            DataLogTreeItem* dataLogTreeItem = azrtti_cast<DataLogTreeItem*>(FindChildByRow(i));
 
             if (dataLogTreeItem)
             {
@@ -633,10 +633,10 @@ namespace ScriptCanvasEditor
 
             if (!EditorGraphNotificationBus::Handler::BusIsConnected())
             {
-                AZ::EntityId scriptCanvasGraphId;
-                GeneralRequestBus::BroadcastResult(scriptCanvasGraphId, &GeneralRequests::FindScriptCanvasGraphIdByAssetId, GetAssetId());
+                ScriptCanvas::ScriptCanvasId scriptCanvasId;
+                GeneralRequestBus::BroadcastResult(scriptCanvasId, &GeneralRequests::FindScriptCanvasIdByAssetId, GetAssetId());
 
-                EditorGraphNotificationBus::Handler::BusConnect(scriptCanvasGraphId);
+                EditorGraphNotificationBus::Handler::BusConnect(scriptCanvasId);
             }
         }
 
@@ -884,9 +884,14 @@ namespace ScriptCanvasEditor
     // NodeAnnotationTreeItem
     ///////////////////////////
 
-    NodeAnnotationTreeItem::NodeAnnotationTreeItem(ScriptCanvas::AnnotateNodeSignal::AnnotationLevel annotationLevel, AZStd::string_view annotation)
+    NodeAnnotationTreeItem::NodeAnnotationTreeItem()
+        : m_annotationLevel(ScriptCanvas::AnnotateNodeSignal::AnnotationLevel::Info)
+    {
+    }
+
+    NodeAnnotationTreeItem::NodeAnnotationTreeItem(ScriptCanvas::AnnotateNodeSignal::AnnotationLevel annotationLevel, const AZStd::string& annotation)
         : m_annotationLevel(annotationLevel)
-        , m_annotation(annotation.data())
+        , m_annotation(annotation.c_str())
     {
         switch (m_annotationLevel)
         {

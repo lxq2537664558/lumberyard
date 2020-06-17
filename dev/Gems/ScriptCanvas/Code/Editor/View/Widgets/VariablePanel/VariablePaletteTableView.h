@@ -11,13 +11,15 @@
 */
 #pragma once
 
+#include <AzCore/PlatformDef.h>
+AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QCompleter>
 #include <QAbstractItemModel>
 #include <QRegExp>
 #include <QString>
 #include <QSortFilterProxyModel>
 #include <QTableView>
-
+AZ_POP_DISABLE_WARNING
 #include <AzCore/Component/EntityId.h>
 #include <AzCore/Memory/SystemAllocator.h>
 
@@ -39,7 +41,7 @@ namespace ScriptCanvasEditor
         VariablePaletteTableView(QWidget* parent);
         ~VariablePaletteTableView();
 
-        void SetActiveScene(const AZ::EntityId& scriptCanvasGraphId);
+        void SetActiveScene(const ScriptCanvas::ScriptCanvasId& scriptCanvasId);
         
         void PopulateVariablePalette(const AZStd::unordered_set< AZ::Uuid >& objectTypes);
         void SetFilter(const QString& filter);

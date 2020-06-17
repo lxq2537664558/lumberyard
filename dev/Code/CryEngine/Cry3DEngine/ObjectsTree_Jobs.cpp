@@ -18,21 +18,21 @@
 #include "StatObj.h"
 #include "ObjMan.h"
 #include "VisAreas.h"
-#include "terrain_sector.h"
 #include "CullBuffer.h"
 #include "3dEngine.h"
 #include "IndexedMesh.h"
 #include "Brush.h"
 #include "Vegetation.h"
-#include "terrain.h"
 #include "ObjectsTree.h"
 #include "ICryAnimation.h"
+#include <Terrain/ITerrainNode.h>
+#include <Terrain/Bus/LegacyTerrainBus.h> 
 
 #include "DecalRenderNode.h"
 #include "Brush.h"
 #include "BreakableGlassRenderNode.h"
 #include "FogVolumeRenderNode.h"
-#include "terrain_water.h"
+#include "Ocean.h"
 #include "RopeRenderNode.h"
 #include "MergedMeshRenderNode.h"
 #include "LightEntity.h"
@@ -54,9 +54,15 @@ namespace LegacyInternal
 
 //////////////////////////////////////////////////////////////////////////
 COctreeNode::COctreeNode(int nSID, const AABB& box, CVisArea* pVisArea, COctreeNode* pParent)
+    : m_nOccludedFrameId(0), m_renderFlags(0), m_errTypesBitField(0), m_fObjectsMaxViewDist(0.0f), m_nLastVisFrameId(0)
+    , nFillShadowCastersSkipFrameId(0), m_fNodeDistance(0.0f), m_nManageVegetationsFrameId(0)
+    , m_bHasLights(0), m_bHasRoads(0), m_bNodeCompletelyInFrustum(0)
 {
+    memset(m_arrChilds, 0, sizeof(m_arrChilds));
+    memset(m_arrObjects, 0, sizeof(m_arrObjects));
+    memset(&m_lstCasters, 0, sizeof(m_lstCasters));
+
     m_pRNTmpData = NULL;
-    memset(this, 0, sizeof(*this));
     m_nSID = nSID;
     m_vNodeCenter = box.GetCenter();
     m_vNodeAxisRadius = box.GetSize() * 0.5f;
@@ -75,7 +81,17 @@ COctreeNode::COctreeNode(int nSID, const AABB& box, CVisArea* pVisArea, COctreeN
     }
 #endif
 
-    SetTerrainNode(m_nSID >= 0 && GetTerrain() ? GetTerrain()->FindMinNodeContainingBox(box) : NULL);
+    if (m_nSID >= 0)
+    {
+        ITerrainNode* terrainNode = nullptr;
+        LegacyTerrain::LegacyTerrainDataRequestBus::BroadcastResult(terrainNode, &LegacyTerrain::LegacyTerrainDataRequests::FindMinNodeContainingBox, box);
+        SetTerrainNode(terrainNode);
+    }
+    else
+    {
+        SetTerrainNode(nullptr);
+    }
+
     m_pVisArea = pVisArea;
     m_pParent = pParent;
 
@@ -133,6 +149,12 @@ void COctreeNode::RenderContent(int nRenderMask, const SRenderingPassInfo& passI
 //////////////////////////////////////////////////////////////////////////
 void COctreeNode::Shutdown()
 {
+    WaitForContentJobCompletion();
+}
+
+void COctreeNode::WaitForContentJobCompletion()
+{
+    //Deleting it calls WaitForCompletion(), and the next call to RenderContent() will create a new instance
     delete LegacyInternal::s_renderContentJobExecutor;
     LegacyInternal::s_renderContentJobExecutor = nullptr;
 }
@@ -513,16 +535,20 @@ bool COctreeNode::DeleteObject(IRenderNode* pObj)
 
     UnlinkObject(pObj);
 
-    for (int i = 0; i < m_lstCasters.Count(); i++)
+    if (m_removeVegetationCastersOneByOne)
     {
-        if (m_lstCasters[i].pNode == pObj)
+        for (int i = 0; i < m_lstCasters.Count(); i++)
         {
-            m_lstCasters.Delete(i);
-            break;
+            if (m_lstCasters[i].pNode == pObj)
+            {
+                m_lstCasters.Delete(i);
+                break;
+            }
         }
     }
 
-    bool bSafeToUse = Get3DEngine()->IsObjectTreeReady();
+    C3DEngine* p3DEngine = Get3DEngine();
+    bool bSafeToUse = p3DEngine ? p3DEngine->IsObjectTreeReady() : false;
 
     pObj->m_pOcNode = NULL;
     pObj->m_nSID = -1;
@@ -538,7 +564,7 @@ bool COctreeNode::DeleteObject(IRenderNode* pObj)
 //////////////////////////////////////////////////////////////////////////
 void COctreeNode::InsertObject(IRenderNode* pObj, const AABB& objBox, const float fObjRadiusSqr, const Vec3& vObjCenter)
 {
-    FUNCTION_PROFILER_3DENGINE;
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::ThreeDEngineDetailed);
 
     COctreeNode* pCurrentNode = this;
 
@@ -548,7 +574,7 @@ void COctreeNode::InsertObject(IRenderNode* pObj, const AABB& objBox, const floa
     const bool bTypeLight = (eType == eERType_Light);
     const float fViewDistRatioVegetation = GetCVars()->e_ViewDistRatioVegetation;
     const float fWSMaxViewDist = pObj->m_fWSMaxViewDist;
-    const bool bTypeRoad  =   (eType == eERType_Road);
+    const bool bTypeRoad = (eType == eERType_Road);
 
     Vec3 vObjectCentre = vObjCenter;
 
@@ -573,8 +599,8 @@ void COctreeNode::InsertObject(IRenderNode* pObj, const AABB& objBox, const floa
 
         pCurrentNode->m_renderFlags |= renderFlags;
 
-        pCurrentNode->m_bHasLights  |= (bTypeLight);
-        pCurrentNode->m_bHasRoads       |= (bTypeRoad);
+        pCurrentNode->m_bHasLights |= (bTypeLight);
+        pCurrentNode->m_bHasRoads |= (bTypeRoad);
 
         if (pCurrentNode->m_vNodeAxisRadius.x * 2.0f > fNodeMinSize) // store voxels and roads in root
         {
@@ -727,7 +753,7 @@ void COctreeNode::LinkObject(IRenderNode* pObj, EERType eERType, bool bPushFront
 //////////////////////////////////////////////////////////////////////////
 void COctreeNode::UpdateObjects(IRenderNode* pObj)
 {
-    FUNCTION_PROFILER_3DENGINE;
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::ThreeDEngineDetailed);
 
     float fObjMaxViewDistance = 0;
     size_t numCasters = 0;
@@ -742,7 +768,8 @@ void COctreeNode::UpdateObjects(IRenderNode* pObj)
         return;
     }
 
-    const Vec3& sunDir = Get3DEngine()->GetSunDirNormalized();
+    I3DEngine* p3DEngine = GetISystem()->GetI3DEngine();
+    const Vec3& sunDir = p3DEngine->GetSunDirNormalized();
     uint32 sunDirX = (uint32)(sunDir.x * 63.5f + 63.5f);
     uint32 sunDirZ = (uint32)(sunDir.z * 63.5f + 63.5f);
     uint32 sunDirYs = (uint32)(sunDir.y < 0.0f ? 1 : 0);
@@ -839,7 +866,7 @@ void COctreeNode::UpdateObjects(IRenderNode* pObj)
     bool bUpdateParentOcclusionFlags = false;
 
     // fill shadow casters list
-    const bool bHasPerObjectShadow = GetCVars()->e_ShadowsPerObject && Get3DEngine()->GetPerObjectShadow(pObj);
+    const bool bHasPerObjectShadow = GetCVars()->e_ShadowsPerObject && p3DEngine->GetPerObjectShadow(pObj);
     if (nFlags & ERF_CASTSHADOWMAPS && fNewMaxViewDist > fMinShadowCasterViewDist && eRType != eERType_Light && !bHasPerObjectShadow)
     {
         bUpdateParentShadowFlags = true;
@@ -1026,7 +1053,7 @@ bool CObjManager::IsAfterWater(const Vec3& vPos, const SRenderingPassInfo& passI
     }
     else
     {
-        fWaterLevel = GetTerrain() ? GetTerrain()->GetWaterLevel() : WATER_LEVEL_UNKNOWN;
+        fWaterLevel = GetOcean() ? GetOcean()->GetWaterLevel() : WATER_LEVEL_UNKNOWN;
     }
 
     return (0.5f - passInfo.GetRecursiveLevel()) * (0.5f - passInfo.IsCameraUnderWater()) * (vPos.z - fWaterLevel) > 0;
@@ -1047,27 +1074,30 @@ void CObjManager::RenderObjectDebugInfo(IRenderNode* pEnt, float fEntDistance,  
 void CObjManager::FillTerrainTexInfo(IOctreeNode* pOcNode, float fEntDistance, struct SSectorTextureSet*& pTerrainTexInfo, const AABB& objBox)
 {
     IVisArea* pVisArea = pOcNode->m_pVisArea;
-    CTerrainNode* pTerrainNode = pOcNode->GetTerrainNode();
+    ITerrainNode* pTerrainNode = pOcNode->GetTerrainNode();
 
     if ((!pVisArea || pVisArea->IsAffectedByOutLights()) && pTerrainNode)
     { // provide terrain texture info
         AABB boxCenter;
         boxCenter.min = boxCenter.max = objBox.GetCenter();
 
-        if (CTerrainNode* pTerNode = pTerrainNode)
+        if (ITerrainNode* pTerNode = pTerrainNode)
         {
             if (pTerNode = pTerNode->FindMinNodeContainingBox(boxCenter))
             {
-                SSectorTextureSet* terrainInfo = &pTerNode->m_TextureSet;
-                float terrainNodeSize = pTerNode->m_LocalAABB.max.x - pTerNode->m_LocalAABB.min.x;
-                while (fEntDistance * 2.f * 8.f > terrainNodeSize && pTerNode->m_Parent)
+                SSectorTextureSet* terrainInfo = pTerNode->GetTextureSet();
+                const AABB& localAABB = pTerNode->GetLocalAABB();
+                float terrainNodeSize = localAABB.max.x - localAABB.min.x;
+                while (fEntDistance * 2.f * 8.f > terrainNodeSize && pTerNode->GetParent())
                 {
-                    if (pTerNode->m_TextureSet.nTex0)
+                    SSectorTextureSet* textureSet = pTerNode->GetTextureSet();
+                    if (textureSet->nTex0)
                     {
-                        terrainInfo = &pTerNode->m_TextureSet;
+                        terrainInfo = textureSet;
                     }
-                    pTerNode = pTerNode->m_Parent;
-                    terrainNodeSize = pTerNode->m_LocalAABB.max.x - pTerNode->m_LocalAABB.min.x;
+                    pTerNode = pTerNode->GetParent();
+                    const AABB& parentLocalAABB = pTerNode->GetLocalAABB();
+                    terrainNodeSize = parentLocalAABB.max.x - parentLocalAABB.min.x;
                 }
 
                 pTerrainTexInfo = terrainInfo;
@@ -1218,6 +1248,11 @@ void CObjManager::PushIntoCullQueue(const SCheckOcclusionJobData& rCheckOcclusio
             m_CheckOcclusionQueue.BufferSize());
     }
 
+}
+
+void CObjManager::PushTerrainJobDataIntoCullQueue(ITerrainNode* pTerrainNode, const AABB& nodebox, float distanceToCamera)
+{
+    PushIntoCullQueue(SCheckOcclusionJobData::CreateTerrainJobData(pTerrainNode, nodebox, distanceToCamera));
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1380,7 +1415,7 @@ void COctreeNode::GetObjectsByFlags(uint dwFlags, PodArray<IRenderNode*>& lstObj
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void COctreeNode::GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType objType, const AABB* pBBox)
+void COctreeNode::GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType objType, const AABB* pBBox, ObjectTreeQueryFilterCallback filterCallback)
 {
     if (objType == eERType_Light && !m_bHasLights)
     {
@@ -1402,7 +1437,13 @@ void COctreeNode::GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType o
             pObj->FillBBox(box);
             if (!pBBox || Overlap::AABB_AABB(*pBBox, box))
             {
-                lstObjects.Add(pObj);
+                // Check the filterCallback to perform a final validation that we want this object
+                // to appear in our results list.  If there's no filterCallback, then always add
+                // the object.
+                if (!filterCallback || filterCallback(pObj, objType))
+                {
+                    lstObjects.Add(pObj);
+                }
             }
         }
     }
@@ -1411,7 +1452,7 @@ void COctreeNode::GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType o
     {
         if (m_arrChilds[i])
         {
-            m_arrChilds[i]->GetObjectsByType(lstObjects, objType, pBBox);
+            m_arrChilds[i]->GetObjectsByType(lstObjects, objType, pBBox, filterCallback);
         }
     }
 }
@@ -1967,13 +2008,6 @@ _smart_ptr<IMaterial> CMergedMeshRenderNode::GetMaterial(Vec3* pHitPos)
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
-EERType CTerrainNode::GetRenderNodeType()
-{
-    return eERType_NotRenderNode;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////
 #if !defined(EXCLUDE_DOCUMENTATION_PURPOSE)
 #include "PrismRenderNode.h"
 
@@ -2075,11 +2109,3 @@ _smart_ptr<IMaterial> CCloudRenderNode::GetMaterial(Vec3* pHitPos)
 {
     return m_pMaterial;
 }
-
-
-///////////////////////////////////////////////////////////////////////////////
-void CTerrainNode::FillBBox(AABB& aabb)
-{
-    aabb = GetBBox();
-}
-

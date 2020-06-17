@@ -20,7 +20,6 @@
 #include <EMotionFX/Source/Importer/Importer.h>
 #include <Tests/Printers.h>
 
-#include <io.h>
 
 namespace EMotionFX
 {
@@ -104,15 +103,13 @@ namespace EMotionFX
                 {
                     *result_listener << "where the value pair at index #" << i << " don't match\n";
 
-                    static const bool useColor = _isatty(_fileno(stdout)) != 0;
-
                     const uint32 numContextLines = 2;
                     const uint32 beginContextLines = i > numContextLines ? i - numContextLines : 0;
                     const uint32 endContextLines = i > commonSize - numContextLines - 1 ? commonSize : i + numContextLines + 1;
                     for (uint32 contextIndex = beginContextLines; contextIndex < endContextLines; ++contextIndex)
                     {
                         const bool contextLineMatches = ::testing::Matches(innerMatcher)(::testing::make_tuple(got.GetKey(contextIndex), m_expected.GetKey(contextIndex)));
-                        if (useColor && !contextLineMatches)
+                        if (!contextLineMatches)
                         {
                             *result_listener << "\033[0;31m"; // red
                         }
@@ -120,7 +117,7 @@ namespace EMotionFX
                         PrintTo(m_expected.GetKey(contextIndex), result_listener->stream());
                         *result_listener << "\n" << contextIndex << ":   Actual: ";
                         PrintTo(got.GetKey(contextIndex), result_listener->stream());
-                        if (useColor && !contextLineMatches)
+                        if (!contextLineMatches)
                         {
                             *result_listener << "\033[0;m";
                         }
@@ -167,9 +164,14 @@ namespace EMotionFX
     void INTEG_PoseComparisonFixture::TearDown()
     {
         m_actorInstance->Destroy();
-        m_actor->Destroy();
+
+        m_actor.reset();
+
         delete m_motionSet;
+        m_motionSet = nullptr;
+
         delete m_animGraph;
+        m_animGraph = nullptr;
 
         SystemComponentFixture::TearDown();
     }
@@ -189,7 +191,7 @@ namespace EMotionFX
         ASSERT_TRUE(m_motionSet) << "Failed to load motion set";
         m_motionSet->Preload();
 
-        m_actorInstance = ActorInstance::Create(m_actor);
+        m_actorInstance = ActorInstance::Create(m_actor.get());
         m_actorInstance->SetAnimGraphInstance(AnimGraphInstance::Create(m_animGraph, m_actorInstance, m_motionSet));
     }
 
@@ -259,7 +261,7 @@ namespace EMotionFX
         Recorder* recording = AZ::Utils::LoadObjectFromStream<Recorder>(stream);
 
         m_actorInstance->Destroy();
-        m_actorInstance = ActorInstance::Create(m_actor);
+        m_actorInstance = ActorInstance::Create(m_actor.get());
         m_actorInstance->SetAnimGraphInstance(AnimGraphInstance::Create(m_animGraph, m_actorInstance, m_motionSet));
 
         EMotionFX::GetRecorder().StartRecording(settings);

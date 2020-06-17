@@ -15,6 +15,7 @@
 #include <EMotionFX/Source/AnimGraphNode.h>
 #include <EMotionFX/Source/EMotionFXConfig.h>
 #include <EMotionFX/Source/SpringSolver.h>
+#include <EMotionFX/Source/SimulatedObjectBus.h>
 
 namespace EMotionFX
 {
@@ -23,6 +24,7 @@ namespace EMotionFX
 
     class EMFX_API BlendTreeSimulatedObjectNode
         : public AnimGraphNode
+        , private EMotionFX::SimulatedObjectNotificationBus::Handler
     {
     public:
         AZ_RTTI(BlendTreeSimulatedObjectNode, "{89FF51DF-0CB0-4E7D-9F56-E305C8E94D90}", AnimGraphNode)
@@ -34,14 +36,14 @@ namespace EMotionFX
             INPUTPORT_STIFFNESSFACTOR = 1,
             INPUTPORT_GRAVITYFACTOR = 2,
             INPUTPORT_DAMPINGFACTOR = 3,
-            INPUTPORT_WEIGHT = 4,
+            INPUTPORT_ACTIVE = 4,
             OUTPUTPORT_POSE = 0
         };
 
         enum
         {
             PORTID_INPUT_POSE = 0,
-            PORTID_INPUT_WEIGHT = 1,
+            PORTID_INPUT_ACTIVE = 1,
             PORTID_INPUT_STIFFNESSFACTOR = 2,
             PORTID_INPUT_GRAVITYFACTOR = 3,
             PORTID_INPUT_DAMPINGFACTOR = 4,
@@ -50,6 +52,7 @@ namespace EMotionFX
 
         struct EMFX_API Simulation
         {
+            AZ_CLASS_ALLOCATOR_DECL
             SpringSolver m_solver;
             const SimulatedObject* m_simulatedObject = nullptr;
         };
@@ -68,7 +71,7 @@ namespace EMotionFX
                 , m_timePassedInSeconds(0.0f)
             {
             }
-            ~UniqueData() override = default;
+            ~UniqueData() override;
 
         public:
             AZStd::vector<Simulation*> m_simulations;
@@ -78,6 +81,7 @@ namespace EMotionFX
         };
 
         BlendTreeSimulatedObjectNode();
+        ~BlendTreeSimulatedObjectNode();
 
         void Reinit() override;
         bool InitAfterLoading(AnimGraph* animGraph) override;
@@ -93,17 +97,22 @@ namespace EMotionFX
         const char* GetPaletteName() const override;
         AnimGraphObject::ECategory GetPaletteCategory() const override;
 
+        // SimulatedObjectNotifications
+        void OnSimulatedObjectChanged() override;
+        void SetSimulatedObjectNames(const AZStd::vector<AZStd::string>& simObjectNames);
+
         static void Reflect(AZ::ReflectContext* context);
 
     private:
         using PropertyChangeFunction = AZStd::function<void(UniqueData*)>;
+
+        static bool VersionConverter(AZ::SerializeContext& serializeContext, AZ::SerializeContext::DataElementNode& rootElementNode);
 
         void UpdateUniqueData(AnimGraphInstance* animGraphInstance, UniqueData* uniqueData);
         void Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
         void Output(AnimGraphInstance* animGraphInstance) override;
         void AdjustParticles(const SpringSolver::ParticleAdjustFunction& func);
         void OnNumIterationsChanged();
-        void OnUpdateRateChanged();
         void OnPropertyChanged(const PropertyChangeFunction& func);
         bool InitSolvers(AnimGraphInstance* animGraphInstance, UniqueData* uniqueData);
         float GetStiffnessFactor(AnimGraphInstance* animGraphInstance) const;
@@ -112,7 +121,6 @@ namespace EMotionFX
 
         AZStd::vector<AZStd::string> m_simulatedObjectNames;
         AZ::u32 m_numIterations = 2;
-        AZ::u32 m_updateRate = 60;
         float m_stiffnessFactor = 1.0f;
         float m_gravityFactor = 1.0f;
         float m_dampingFactor = 1.0f;

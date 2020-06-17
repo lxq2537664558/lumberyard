@@ -9,15 +9,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
 
-import errno, os, re, string, urllib, urllib2, zipfile
-
-from socket import error as SocketError
-from ssl import SSLEOFError as SSLEOFError
-
+# System Imports
+import errno
+import os
+import string
+import urllib.request
+import urllib.parse
+import urllib.error
+import urllib.request
+import urllib.error
+import urllib.parse
+import zipfile
 import xml.etree.ElementTree as ET
 
-from cry_utils import append_to_unique_list
+from socket import error as SocketError
+try:
+    from ssl import SSLEOFError as SSLEOFError
+    ssl_supported = True
+except Exception as e:
+    ssl_supported = False
 
+# waflib imports
 from waflib import Context, Errors, Logs, Node, Utils
 from waflib.Configure import conf
 from waflib.Task import Task, ASK_LATER, RUN_ME, SKIP_ME
@@ -69,19 +81,33 @@ def get_package_name(android_manifest):
 
 
 def attempt_to_open_url(url):
+    
+    is_ssl_error = False
+    
     try:
-        return urllib2.urlopen(url, timeout = 1)
+        return urllib.request.urlopen(url, timeout = 1)
 
     except Exception as error:
         Logs.debug('android_library: Failed to open URL %s', url)
         Logs.debug('android_library: Exception = %s', error)
 
         # known errors related to an SSL issue on macOS
-        if isinstance(error, urllib2.URLError):
+        if isinstance(error, urllib.error.URLError):
             reason = error.reason
-            if isinstance(reason, SSLEOFError) or (isinstance(reason, SocketError) and reason.errno == errno.ECONNRESET):
+            
+            is_socket_error = (isinstance(reason, SocketError) and reason.errno == errno.ECONNRESET)
+
+            if ssl_supported:
+                if isinstance(reason, SSLEOFError):
+                    is_ssl_error = True
+                
+            if is_socket_error or (ssl_supported and is_ssl_error):
                 Logs.debug('android_library: If url is using HTTPS, try running the command with --android-maven-force-http-requests=True, '
-                            'or setting android_maven_force_http=True in _WAF_/user_settings.options.')
+                           'or setting android_maven_force_http=True in _WAF_/user_settings.options.')
+            elif not ssl_supported:
+                Logs.debug('android_library: Attempting to connect to an HTTPS url but ssl support is not enabled for python.')
+            elif ssl_supported and not is_ssl_error:
+                Logs.debug('android_library: Unknown error attempting to connect to an HTTPS url: {}'.format(error))
 
     return None
 
@@ -214,11 +240,6 @@ def search_maven_repos(ctx, name, group, version):
         if partial_version:
             base_version = version.split('+')[0]
             valid_versions = [ ver for ver in versions_list if ver.startswith(base_version) ]
-
-        # the support lib versions are based on API built against
-        elif group == 'com.android.support' and 'multidex' not in name:
-            android_api_level = str(ctx.env['ANDROID_SDK_VERSION_NUMBER'])
-            valid_versions = [ ver for ver in versions_list if ver.startswith(android_api_level) ]
 
         # try to elimiate the alpha, beta and rc versions
         stable_versions = []
@@ -360,7 +381,7 @@ class fake_jar(Task):
                 return ASK_LATER
 
         for output in self.outputs:
-            output.sig = Utils.h_file(output.abspath())
+            output.cache_sig = Utils.h_file(output.abspath())
 
         return SKIP_ME
 
@@ -375,7 +396,7 @@ class fake_aar(Task):
                 return ASK_LATER
 
         for output in self.outputs:
-            output.sig = Utils.h_file(output.abspath())
+            output.cache_sig = Utils.h_file(output.abspath())
 
         return SKIP_ME
 
@@ -489,7 +510,7 @@ def process_aar(self):
     aar_cache = android_cache.make_node('aar')
     aar_cache.mkdir()
 
-    Logs.debug('android_library: Processing Android library %s', self.name)
+    Logs.debug('android_library: Processing Android library {}'.format(self.name))
     lib_node = None
 
     if search_paths:
@@ -531,7 +552,7 @@ def process_aar(self):
                 Logs.debug('android_library: Downloading %s => %s', file_url, lib_node.abspath())
 
                 try:
-                    url_opener = urllib.FancyURLopener()
+                    url_opener = urllib.request.FancyURLopener()
                     url_opener.retrieve(file_url, filename = lib_node.abspath())
                 except:
                     bld.fatal('[ERROR] Failed to download Android library {} from {}.'.format(self.name, file_url))
@@ -545,7 +566,7 @@ def process_aar(self):
 
         self.android_studio_name = '{}:{}:{}'.format(group, self.name, version)
 
-    lib_node.sig = Utils.h_file(lib_node.abspath())
+    lib_node.cache_sig = Utils.h_file(lib_node.abspath())
 
     folder_name = os.path.splitext(aar_filename)[0]
     extraction_node = aar_cache.make_node(folder_name)

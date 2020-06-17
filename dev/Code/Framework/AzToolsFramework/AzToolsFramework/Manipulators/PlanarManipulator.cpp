@@ -70,7 +70,7 @@ namespace AzToolsFramework
         const AZ::Vector3 localRayOrigin = localFromWorldNormalized * rayOrigin;
         const AZ::Vector3 localRayDirection = localFromWorldNormalized.Multiply3x3(rayDirection);
 
-        // as CalculateRayPlaneIntersectingPoint may fail, ensure localHitPosition is initialized with 
+        // as CalculateRayPlaneIntersectingPoint may fail, ensure localHitPosition is initialized with
         // the starting hit position so the manipulator returns to the original location it was pressed
         // if an invalid ray intersection is attempted
         AZ::Vector3 localHitPosition = startInternal.m_localHitPosition;
@@ -101,6 +101,11 @@ namespace AzToolsFramework
         return action;
     }
 
+    AZStd::shared_ptr<PlanarManipulator> PlanarManipulator::MakeShared(const AZ::Transform& worldFromLocal)
+    {
+        return AZStd::shared_ptr<PlanarManipulator>(aznew PlanarManipulator(worldFromLocal));
+    }
+
     PlanarManipulator::PlanarManipulator(const AZ::Transform& worldFromLocal)
         : m_worldFromLocal(worldFromLocal)
     {
@@ -127,20 +132,19 @@ namespace AzToolsFramework
     {
         const AZ::Transform worldFromLocalUniformScale = TransformUniformScale(m_worldFromLocal);
 
-        const bool snapping =
-            GridSnapping(interaction.m_interactionId.m_viewportId);
-        const float gridSize =
-            GridSize(interaction.m_interactionId.m_viewportId);
+        const GridSnapParameters gridSnapParams = GridSnapSettings(interaction.m_interactionId.m_viewportId);
 
         m_startInternal = CalculateManipulationDataStart(
             m_fixed, worldFromLocalUniformScale, TransformNormalizedScale(m_localTransform),
-            snapping, gridSize, interaction.m_mousePick.m_rayOrigin, interaction.m_mousePick.m_rayDirection);
+            gridSnapParams.m_gridSnap, gridSnapParams.m_gridSize,
+            interaction.m_mousePick.m_rayOrigin, interaction.m_mousePick.m_rayDirection);
 
         if (m_onLeftMouseDownCallback)
         {
             m_onLeftMouseDownCallback(CalculateManipulationDataAction(
                 m_fixed, m_startInternal, worldFromLocalUniformScale, TransformNormalizedScale(m_localTransform),
-                snapping, gridSize, interaction.m_mousePick.m_rayOrigin, interaction.m_mousePick.m_rayDirection,
+                gridSnapParams.m_gridSnap, gridSnapParams.m_gridSize,
+                interaction.m_mousePick.m_rayOrigin, interaction.m_mousePick.m_rayDirection,
                 interaction.m_keyboardModifiers));
         }
     }
@@ -149,11 +153,14 @@ namespace AzToolsFramework
     {
         if (m_onMouseMoveCallback)
         {
+            const GridSnapParameters gridSnapParams = GridSnapSettings(interaction.m_interactionId.m_viewportId);
+
             m_onMouseMoveCallback(CalculateManipulationDataAction(
                 m_fixed, m_startInternal, TransformUniformScale(m_worldFromLocal),
                 TransformNormalizedScale(m_localTransform),
-                GridSnapping(interaction.m_interactionId.m_viewportId),
-                GridSize(interaction.m_interactionId.m_viewportId), interaction.m_mousePick.m_rayOrigin,
+                gridSnapParams.m_gridSnap,
+                gridSnapParams.m_gridSize,
+                interaction.m_mousePick.m_rayOrigin,
                 interaction.m_mousePick.m_rayDirection, interaction.m_keyboardModifiers));
         }
     }
@@ -162,11 +169,14 @@ namespace AzToolsFramework
     {
         if (m_onLeftMouseUpCallback)
         {
+            const GridSnapParameters gridSnapParams = GridSnapSettings(interaction.m_interactionId.m_viewportId);
+
             m_onLeftMouseUpCallback(CalculateManipulationDataAction(
                 m_fixed, m_startInternal, TransformUniformScale(m_worldFromLocal),
                 TransformNormalizedScale(m_localTransform),
-                GridSnapping(interaction.m_interactionId.m_viewportId),
-                GridSize(interaction.m_interactionId.m_viewportId), interaction.m_mousePick.m_rayOrigin,
+                gridSnapParams.m_gridSnap,
+                gridSnapParams.m_gridSize,
+                interaction.m_mousePick.m_rayOrigin,
                 interaction.m_mousePick.m_rayDirection, interaction.m_keyboardModifiers));
         }
     }

@@ -16,6 +16,7 @@
 #include <AzCore/Serialization/EditContext.h>
 #include <AzCore/base.h>
 
+#include <AzFramework/AzFramework_Traits_Platform.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 
 #include <ISystem.h>
@@ -27,12 +28,19 @@
 
 #include <AzCore/IO/SystemFile.h>
 
+// The AWS Native SDK AWSAllocator triggers a warning due to accessing members of std::allocator directly.
+// AWSAllocator.h(70): warning C4996: 'std::allocator<T>::pointer': warning STL4010: Various members of std::allocator are deprecated in C++17.
+// Use std::allocator_traits instead of accessing these members directly.
+// You can define _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING or _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS to acknowledge that you have received this warning.
+
+AZ_PUSH_DISABLE_WARNING(4251 4996, "-Wunknown-warning-option")
 #include <aws/core/client/ClientConfiguration.h>
 #include <aws/core/http/HttpClient.h>
 #include <aws/core/http/HttpRequest.h>
 #include <aws/core/http/HttpResponse.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/utils/Outcome.h>
+AZ_POP_DISABLE_WARNING
 
 #include <AzCore/Jobs/JobContext.h>
 #include <AzCore/Jobs/JobManager.h>
@@ -67,7 +75,7 @@ namespace CloudCanvasCommon
                 ec->Class<CloudCanvasCommonSystemComponent>(COMPONENT_DISPLAY_NAME, COMPONENT_DESCRIPTION)
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, COMPONENT_CATEGORY)
-                        ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC(COMPONENT_CATEGORY))
+                        ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("System"))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                         ->DataElement(AZ::Edit::UIHandlers::Default, &CloudCanvasCommonSystemComponent::m_threadCount,
                             "Thread Count", "Number of threads dedicated to executing AWS API jobs. A value of 0 means that AWS API jobs execute on the global job thread pool.")
@@ -302,6 +310,7 @@ namespace CloudCanvasCommon
     int CloudCanvasCommonSystemComponent::GetEndpointHttpResponseCode(const AZStd::string& endPoint)
     {        
         auto config = Aws::Client::ClientConfiguration();
+        config.enableTcpKeepAlive = AZ_TRAIT_AZFRAMEWORK_AWS_ENABLE_TCP_KEEP_ALIVE_SUPPORTED;
         AZStd::string caFile;
         CloudCanvas::RequestRootCAFileResult requestResult;
         EBUS_EVENT_RESULT(requestResult, CloudCanvasCommon::CloudCanvasCommonRequestBus, RequestRootCAFile, caFile);
@@ -313,7 +322,7 @@ namespace CloudCanvasCommon
         std::shared_ptr<Aws::Http::HttpClient> httpClient = Aws::Http::CreateHttpClient(config);
         auto httpRequest(Aws::Http::CreateHttpRequest(Aws::String(endPoint.c_str()), Aws::Http::HttpMethod::HTTP_GET, Aws::Utils::Stream::DefaultResponseStreamFactoryMethod));
 
-        auto httpResponse = httpClient->MakeRequest(*httpRequest, nullptr, nullptr);
+        auto httpResponse = httpClient->MakeRequest(httpRequest, nullptr, nullptr);
 
         if (!httpResponse)
         {

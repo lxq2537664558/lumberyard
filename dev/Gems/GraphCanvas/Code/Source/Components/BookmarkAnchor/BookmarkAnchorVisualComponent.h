@@ -128,8 +128,8 @@ namespace GraphCanvas
 
         QPainterPath GetOutline() const override;
 
-        void SetZValue(int zValue) override;
-        int GetZValue() const override;
+        void SetZValue(qreal zValue) override;
+        qreal GetZValue() const override;
         ////
 
         // SceneMemberNotifications
@@ -142,11 +142,8 @@ namespace GraphCanvas
 
     private:
 
-        // Fix for VS2013
         BookmarkAnchorVisualComponent(const BookmarkAnchorVisualComponent&) = delete;
         const BookmarkAnchorVisualComponent& operator=(const BookmarkAnchorVisualComponent&) = delete;
-        ////
-
         AZStd::unique_ptr<BookmarkAnchorVisualGraphicsWidget>  m_graphicsWidget;        
     };
 }

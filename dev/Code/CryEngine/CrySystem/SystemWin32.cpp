@@ -96,10 +96,8 @@ const char* g_szModuleGroups[][2] = {
     {"CrySystem.dll", g_szGroupCore},
     {"CryNetwork.dll", g_szGroupCore},
     {"CryPhysics.dll", g_szGroupCore},
-    {"CrySoundSystem.dll", g_szGroupCore},
     {"CryFont.dll", g_szGroupCore},
     {"Cry3DEngine.dll", g_szGroupCore},
-    {"CryAction.dll", g_szGroupCore},
     {"CryRenderD3D9.dll", g_szGroupCore},
     {"CryRenderD3D10.dll", g_szGroupCore},
     {"CryRenderOGL.dll", g_szGroupCore},
@@ -154,15 +152,6 @@ void CSystem::DumpMemoryUsageStatistics(bool bUseKB)
 
     CrySizerStatsRenderer StatsRenderer (this, m_pMemStats, 10, 0);
     StatsRenderer.dump(bUseKB);
-
-    int iSizeInM = m_env.p3DEngine->GetTerrainSize();
-
-    //  ResourceCollector.ComputeDependencyCnt();
-
-    //  int iTerrainSectorSize = m_env.p3DEngine->GetTerrainSectorSize();
-
-    //  if(iTerrainSectorSize)
-    //      ResourceCollector.LogData(*GetILog(),AABB(Vec3(0,0,0),Vec3(iSizeInM,iSizeInM,0)),iSizeInM/iTerrainSectorSize);
 
     // since we've recalculated this mem stats for dumping, we'll want to calculate it anew the next time it's rendered
     SAFE_DELETE(m_pMemStats);
@@ -392,21 +381,6 @@ void CSystem::CollectMemStats (ICrySizer* pSizer, MemStatsPurposeEnum nPurpose, 
             m_env.pCryFont->GetMemoryUsage(pSizer);
             // m_pIFont and m_pIFontUi are both counted in pCryFont sizing if they exist.
             // no need to manually add them here.
-        }
-    }
-
-    if (Audio::AudioSystemRequestBus::HasHandlers())
-    {
-        SIZER_COMPONENT_NAME(pSizer, "CrySoundSystem");
-        {
-            {
-                SIZER_COMPONENT_NAME (pSizer, "$Allocations waste");
-                const SmallModuleInfo* info = FindModuleInfo(stats, "CrySoundSystem.dll");
-                if (info)
-                {
-                    pSizer->AddObject(info, info->memInfo.allocated - info->memInfo.requested);
-                }
-            }
         }
     }
 
@@ -1220,6 +1194,8 @@ void CSystem::FatalError(const char* format, ...)
         #include "Xenia/SystemWin32_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/SystemWin32_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/SystemWin32_cpp_salem.inl"
     #endif
 #endif
 
@@ -1246,6 +1222,8 @@ void CSystem::FatalError(const char* format, ...)
         #include "Xenia/SystemWin32_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/SystemWin32_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/SystemWin32_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -1294,6 +1272,8 @@ void CSystem::debug_GetCallStack(const char** pFunctions, int& nCount)
         #include "Xenia/SystemWin32_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/SystemWin32_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/SystemWin32_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -1389,9 +1369,6 @@ void CSystem::LogSystemInfo()
     // log Windows type
     Win32SysInspect::GetOS(m_env.pi.winVer, m_env.pi.win64Bit, szBuffer, sizeof(szBuffer));
     CryLogAlways(szBuffer);
-
-    // log user name
-    CryLog("User name: \"%s\"", GetUserName());
 
     // log system language
     GetLocaleInfo(LOCALE_SYSTEM_DEFAULT, LOCALE_SENGLANGUAGE, szLanguageBuffer, sizeof(szLanguageBuffer));

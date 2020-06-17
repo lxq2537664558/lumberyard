@@ -42,7 +42,7 @@ namespace GradientSignal
         using MutexType = AZStd::recursive_mutex;
         ////////////////////////////////////////////////////////////////////////
 
-        virtual ~GradientPreviewContextRequests() AZ_DEFAULT_METHOD;
+        virtual ~GradientPreviewContextRequests() = default;
 
         virtual AZ::EntityId GetPreviewEntity() const { return AZ::EntityId(); }
         virtual AZ::Aabb GetPreviewBounds() const { return AZ::Aabb::CreateNull(); }
@@ -52,7 +52,6 @@ namespace GradientSignal
         * Determines the order in which handlers receive events.
         */
         struct BusHandlerOrderCompare
-            : public AZStd::binary_function<GradientPreviewContextRequests*, GradientPreviewContextRequests*, bool>
         {
             bool operator()(GradientPreviewContextRequests* left, GradientPreviewContextRequests* right) const { return left->GetPreviewContextPriority() < right->GetPreviewContextPriority(); }
         };

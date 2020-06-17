@@ -20,6 +20,7 @@
 #include <AzCore/Debug/TraceMessageBus.h>
 #include "native/FileWatcher/FileWatcher.h"
 #include "native/AssetDatabase/AssetDatabase.h"
+#include "native/AssetManager/FileStateCache.h"
 #include "native/resourcecompiler/RCBuilder.h"
 #include "native/utilities/ApplicationManager.h"
 #include "native/utilities/assetUtils.h"
@@ -44,6 +45,7 @@ namespace AssetProcessor
     class AssetRequestHandler;
     class AssetServerHandler;
     class FileProcessor;
+    class BuilderConfigurationManager;
 }
 
 class ApplicationServer;
@@ -60,6 +62,7 @@ class BatchApplicationManager
     , public AZ::Debug::TraceMessageBus::Handler
     , protected AzToolsFramework::AssetDatabase::AssetDatabaseRequests::Bus::Handler
     , public AssetProcessor::DiskSpaceInfoBus::Handler
+    , protected AzToolsFramework::SourceControlNotificationBus::Handler
 {
     Q_OBJECT
 public:
@@ -68,6 +71,7 @@ public:
     ApplicationManager::BeforeRunStatus BeforeRun() override;
     void Destroy() override;
     bool Run() override;
+    void HandleFileRelocation() const;
     bool Activate() override;
     bool PostActivate() override;
 
@@ -103,9 +107,11 @@ public:
     //! TraceMessageBus Interface
     bool OnError(const char* window, const char* message) override;
 
-
     //! DiskSpaceInfoBus::Handler
     bool CheckSufficientDiskSpace(const QString& savePath, qint64 requiredSpace, bool shutdownIfInsufficient) override;
+
+    //! AzFramework::SourceControlNotificationBus::Handler
+    void ConnectivityStateChanged(const AzToolsFramework::SourceControlState newState) override;
 
     void RemoveOldTempFolders();
 
@@ -114,7 +120,7 @@ public:
 Q_SIGNALS:
     void CheckAssetProcessorManagerIdleState();
     void ConnectionStatusMsg(QString message);
-
+    void SourceControlReady();
     void OnBuildersRegistered();
 
 public Q_SLOTS:
@@ -131,11 +137,13 @@ protected:
     virtual void DestroyPlatformConfiguration();
     virtual void InitFileMonitor();
     virtual void DestroyFileMonitor();
+    virtual bool InitBuilderConfiguration();
     bool InitApplicationServer();
     void DestroyApplicationServer();
     virtual void InitConnectionManager();
     void DestroyConnectionManager();
     void InitAssetRequestHandler();
+    void InitFileStateCache();
     void CreateQtApplication() override;
 
     bool InitializeInternalBuilders();
@@ -148,6 +156,10 @@ protected:
     void DestroyAssetServerHandler();
     void InitFileProcessor();
     void ShutDownFileProcessor();
+    void InitSourceControl();
+
+    void InitMetrics();
+    void ShutDownMetrics();
 
     // IMPLEMENTATION OF -------------- AzToolsFramework::AssetDatabase::AssetDatabaseRequests::Bus::Listener
     bool GetAssetDatabaseLocation(AZStd::string& location) override;
@@ -168,10 +180,13 @@ public Q_SLOTS:
 private Q_SLOTS:
     void CheckForIdle();
 
-private:
+protected:
     int m_processedAssetCount = 0;
     int m_failedAssetsCount = 0;
+    int m_warningCount = 0;
+    int m_errorCount = 0;
     bool m_AssetProcessorManagerIdleState = false;
+    bool m_sourceControlReady = false;
     
     AZStd::vector<AZStd::unique_ptr<FolderWatchCallbackEx> > m_folderWatches;
     FileWatcher m_fileWatcher;
@@ -185,7 +200,12 @@ private:
     AssetProcessor::BuilderManager* m_builderManager = nullptr;
     AssetProcessor::AssetServerHandler* m_assetServerHandler = nullptr;
 
+
+    AZStd::unique_ptr<AssetProcessor::FileStateBase> m_fileStateCache;
+
     AZStd::unique_ptr<AssetProcessor::FileProcessor> m_fileProcessor;
+
+    AZStd::unique_ptr<AssetProcessor::BuilderConfigurationManager> m_builderConfig;
 
     // The internal builder
     AZStd::shared_ptr<AssetProcessor::InternalRecognizerBasedBuilder> m_internalBuilder;
@@ -212,6 +232,8 @@ private:
     AzToolsFramework::Ticker* m_ticker = nullptr; // for ticking the tickbus.
 
     QList<QMetaObject::Connection> m_connectionsToRemoveOnShutdown;
+    QString m_dependencyScanPattern;
+    int m_dependencyScanMaxIteration = AssetProcessor::MissingDependencyScanner::DefaultMaxScanIteration; // The maximum number of times to recurse when scanning a file for missing dependencies.
 };
 
 

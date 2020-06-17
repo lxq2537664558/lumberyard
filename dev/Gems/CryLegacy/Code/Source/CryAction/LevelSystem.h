@@ -89,7 +89,6 @@ private:
     string              m_minimapImagePath;
 
     string              m_levelPakFullPath;
-    string              m_levelMMPakFullPath;
 
     TStringVec          m_gamerules;
     int                 m_heightmapSize;
@@ -103,6 +102,7 @@ private:
     TAttributeList      m_levelAttributes;
 
     DynArray<string>    m_levelTypeList;
+    bool                m_isPak = false;
 };
 
 
@@ -221,6 +221,8 @@ public:
     // ILevelSystem
     virtual DynArray<string>* GetLevelTypeList();
     virtual void Rescan(const char* levelsFolder, const uint32 tag);
+    void ScanFolder(const char* subfolder, bool modFolder, const uint32 tag)  override;
+    void PopulateLevels(string searchPattern, string& folder, ICryPak* pPak, bool& modFolder, const uint32& tag, bool fromFileSystemOnly) override;
     virtual void LoadRotation();
     virtual int GetLevelCount();
     virtual ILevelInfo* GetLevelInfo(int level);
@@ -275,7 +277,6 @@ private:
     // lowercase string and replace backslashes with forward slashes
     // TODO: move this to a more general place in CryEngine
     string& UnifyName(string& name);
-    void ScanFolder(const char* subfolder, bool modFolder, const uint32 tag);
     void LogLoadingTime();
     bool LoadLevelInfo(CLevelInfo& levelInfo);
 

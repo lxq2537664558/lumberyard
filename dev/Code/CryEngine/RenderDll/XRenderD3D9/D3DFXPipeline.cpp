@@ -29,6 +29,10 @@
 #include "D3D_SVO.h"
 #endif
 
+#include <AzFramework/Debug/StatisticalProfilerProxy.h>
+
+
+
 long CD3D9Renderer::FX_SetVertexDeclaration(int StreamMask, const AZ::Vertex::Format& vertexFormat)
 {
     FUNCTION_PROFILER_RENDER_FLAT
@@ -63,6 +67,8 @@ long CD3D9Renderer::FX_SetVertexDeclaration(int StreamMask, const AZ::Vertex::Fo
         #include "Xenia/D3DFXPipeline_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DFXPipeline_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DFXPipeline_cpp_salem.inl"
     #endif
 #endif
 #endif
@@ -1636,7 +1642,16 @@ void CD3D9Renderer::FX_CommitStates(const SShaderTechnique* pTech, const SShader
 
     if (bUseMaterialState && (rRP.m_pCurObject->m_fAlpha < 1.0f) && !rRP.m_bIgnoreObjectAlpha)
     {
-        State = (State & ~(GS_BLEND_MASK | GS_DEPTHWRITE)) | (GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA);
+        if (pTech && pTech->m_NameCRC == m_techShadowGen)
+        {
+            // If rendering to a shadow map:
+            State = (State | GS_DEPTHWRITE);
+        }
+        else
+        {
+            // If not rendering to a shadow map:
+            State = (State & ~(GS_BLEND_MASK | GS_DEPTHWRITE)) | (GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA);
+        }
     }
 
     State &= ~rRP.m_ForceStateAnd;
@@ -1994,11 +2009,9 @@ void CD3D9Renderer::FX_SetColorDontCareActions(int const nTarget,
 #ifdef CRY_USE_METAL
         DXMETALSetColorDontCareActions(srt->m_pTarget, loadDontCare, storeDontCare);
 #endif
-        //  Confetti BEGIN: Igor Lobanchikov
 #if defined(ANDROID)
         DXGLSetColorDontCareActions(srt->m_pTarget, loadDontCare, storeDontCare);
 #endif
-        //  Confetti End: Igor Lobanchikov
     }
 }
 
@@ -2017,11 +2030,9 @@ void CD3D9Renderer::FX_SetDepthDontCareActions(int const nTarget,
 #ifdef CRY_USE_METAL
         DXMETALSetDepthDontCareActions(srt->m_pDepth, loadDontCare, storeDontCare);
 #endif
-        //  Confetti BEGIN: Igor Lobanchikov
 #if defined(ANDROID)
         DXGLSetDepthDontCareActions(srt->m_pDepth, loadDontCare, storeDontCare);
 #endif
-        //  Confetti End: Igor Lobanchikov
     }
 }
 
@@ -2040,17 +2051,15 @@ void CD3D9Renderer::FX_SetStencilDontCareActions(int const nTarget,
 #ifdef CRY_USE_METAL
         DXMETALSetStencilDontCareActions(srt->m_pDepth, loadDontCare, storeDontCare);
 #endif
-        //  Confetti BEGIN: Igor Lobanchikov
 #if defined(ANDROID)
         DXGLSetStencilDontCareActions(srt->m_pDepth, loadDontCare, storeDontCare);
 #endif
-        //  Confetti End: Igor Lobanchikov
     }
 }
 
 void CD3D9Renderer::FX_TogglePLS(bool const enable)
 {
-#if defined(OPENGL_ES)
+#if defined(OPENGL_ES) && !defined(DESKTOP_GLES)
     DXGLTogglePLS(&GetDeviceContext(), enable);
 #endif
 }
@@ -2617,6 +2626,11 @@ void CD3D9Renderer::FX_DrawShader_InstancedHW(CShader* ef, SShaderPass* slw)
     }
 
     rRP.m_FlagsShader_RT = nRTFlags;
+
+    if (CRenderer::CV_r_SlimGBuffer)
+    {
+        rRP.m_FlagsShader_RT |= g_HWSR_MaskBit[HWSR_SLIM_GBUFFER];
+    }
 
     short dwCBufSlot = 0;
 
@@ -3251,7 +3265,8 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
 {
     DETAILED_PROFILE_MARKER("FX_DrawBatches");
     FUNCTION_PROFILER_RENDER_FLAT
-    SRenderPipeline& RESTRICT_REFERENCE rRP = m_RP;
+
+        SRenderPipeline& RESTRICT_REFERENCE rRP = m_RP;
     SThreadInfo& RESTRICT_REFERENCE rTI = rRP.m_TI[rRP.m_nProcessThreadID];
 
     // Set culling mode
@@ -3271,10 +3286,10 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
         if (!pOD || !(pSkinningData = pOD->m_pSkinningData))
         {
             bHWSkinning = false;
-            Warning ("Warning: Skinned geometry used without character instance");
+            Warning("Warning: Skinned geometry used without character instance");
         }
     }
-    IF (bHWSkinning && (rRP.m_pCurObject->m_ObjFlags & FOB_SKINNED) && !CV_r_character_nodeform, 0)
+    IF(bHWSkinning && (rRP.m_pCurObject->m_ObjFlags & FOB_SKINNED) && !CV_r_character_nodeform, 0)
     {
         FX_DrawBatchesSkinned(pSh, pPass, pSkinningData);
     }
@@ -3303,7 +3318,7 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
         bRes &= pCurPS->mfSetPS(HWSF_SETTEXTURES);
         bRes &= pCurVS->mfSetVS(HWSF_SETTEXTURES);
 
-        CHWShader_D3D* pCurHS, *pCurDS;
+        CHWShader_D3D* pCurHS, * pCurDS;
         bool bTessEnabled = FX_SetTessellationShaders(pCurHS, pCurDS, pPass);
 
         if (bRes)
@@ -3351,7 +3366,7 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
                             CHWShader_D3D::UpdatePerMaterialConstantBuffer();
 
                             pRE->mfPrepare(false);
-                            CREMeshImpl* pM = (CREMeshImpl*) pRE;
+                            CREMeshImpl* pM = (CREMeshImpl*)pRE;
                             if (pM->m_CustomData || pCurRes != pRes) // Custom data can indicate some shader parameters are from mesh
                             {
                                 pCurVS->UpdatePerBatchConstantBuffer();
@@ -3394,7 +3409,7 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
 
                                 if (pElemBase->mfGetType() == eDATA_Mesh)
                                 {
-                                    CREMeshImpl* pMesh = (CREMeshImpl*) pElemBase;
+                                    CREMeshImpl* pMesh = (CREMeshImpl*)pElemBase;
                                     IRenderMesh* pRenderMesh = pMesh ? pMesh->m_pRenderMesh : NULL;
 
                                     FX_TrackStats(pObj, pRenderMesh);
@@ -3433,7 +3448,7 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
                             {
                                 CHWShader_D3D::mfBindGS(NULL, NULL);
                             }
-  #ifdef TESSELLATION_RENDERER
+#ifdef TESSELLATION_RENDERER
                             if (pCurDS)
                             {
                                 pCurDS->UpdatePerInstanceConstantBuffer();
@@ -3442,7 +3457,7 @@ void CD3D9Renderer::FX_DrawBatches(CShader* pSh, SShaderPass* pPass)
                             {
                                 pCurHS->UpdatePerInstanceConstantBuffer();
                             }
-  #endif
+#endif
 
                             AZ_Assert(rRIs[nO], "current render item is null");
                             m_PerInstanceConstantBufferPool.SetConstantBuffer(rRIs[nO]);
@@ -3991,8 +4006,13 @@ void CD3D9Renderer::FX_DrawTechnique(CShader* ef, SShaderTechnique* pTech)
         FX_DrawShader_General(ef, pTech);
         break;
     case eSHDT_Light:
-    case eSHDT_Terrain:
         FX_DrawShader_General(ef, pTech);
+        break;
+    case eSHDT_Terrain:
+    {
+        AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::LegacyTerrain, "FX_DrawTechnique");
+        FX_DrawShader_General(ef, pTech);
+    }
         break;
     case eSHDT_Fur:
         FX_DrawShader_Fur(ef, pTech);
@@ -4558,6 +4578,17 @@ void CD3D9Renderer::FX_FlushShader_General()
             }
         }
 #endif
+
+        if (CRenderer::CV_r_DeferredShadingLBuffersFmt == 2)
+        {
+            rd->m_RP.m_FlagsShader_RT |= g_HWSR_MaskBit[HWSR_DEFERRED_RENDER_TARGET_OPTIMIZATION];
+        }
+        
+        if (CRenderer::CV_r_SlimGBuffer)
+        {
+            rd->m_RP.m_FlagsShader_RT |= g_HWSR_MaskBit[HWSR_SLIM_GBUFFER];
+        }
+     
         // If the object is transparent and if the object has the UAV bound.
         bool multilayerUAVBound = (rRP.m_ObjFlags & FOB_AFTER_WATER) != 0;
         if (rRP.m_pShaderResources && rRP.m_pShaderResources->IsTransparent() && multilayerUAVBound)
@@ -5764,4 +5795,3 @@ bool CD3D9Renderer::FX_DrawToRenderTarget(CShader* pShader, CShaderResources* pR
 
     return bRes;
 }
-

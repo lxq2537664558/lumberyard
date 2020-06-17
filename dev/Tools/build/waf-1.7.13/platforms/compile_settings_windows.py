@@ -10,10 +10,14 @@
 #
 # Original file Copyright Crytek GMBH or its affiliates, used under license.
 #
+
+# System Imports
+import os
+
+# waflib imports
 from waflib.Configure import conf
 from waflib.Errors import WafError
-from lumberyard import deprecated
-import os
+
 
 @conf
 def load_windows_common_settings(conf):
@@ -42,16 +46,14 @@ def register_win_x64_external_ly_identity(self, compiler, configuration):
     platform = 'windows'
     processor = 'intel64'
 
-    if compiler not in ('vs2013', 'vs2015', 'vs2017'):
-        raise WafError("Invalid compiler value {}", compiler)
     if configuration not in ('Debug', 'Release'):
         raise WafError("Invalid configuration value {}", configuration)
 
     target_platform = 'win_x64'
     ly_identity_base_path = self.CreateRootRelativePath('Tools/InternalSDKs/LyIdentity')
     include_path = os.path.join(ly_identity_base_path, 'include')
-    stlib_path = os.path.join(ly_identity_base_path, 'lib', platform, processor, compiler, configuration)
-    shlib_path = os.path.join(ly_identity_base_path, 'bin', platform, processor, compiler, configuration)
+    stlib_path = os.path.join(ly_identity_base_path, 'lib', platform, processor, configuration)
+    shlib_path = os.path.join(ly_identity_base_path, 'bin', platform, processor, configuration)
     self.register_3rd_party_uselib('LyIdentity_shared',
                                    target_platform,
                                    includes=[include_path],
@@ -77,16 +79,14 @@ def register_win_x64_external_ly_metrics(self, compiler, configuration):
     platform = 'windows'
     processor = 'intel64'
 
-    if compiler not in ('vs2013', 'vs2015', 'vs2017'):
-        raise WafError("Invalid compiler value {}", compiler)
     if configuration not in ('Debug', 'Release'):
         raise WafError("Invalid configuration value {}", configuration)
 
     target_platform = 'win_x64'
     ly_identity_base_path = self.CreateRootRelativePath('Tools/InternalSDKs/LyMetrics')
     include_path = os.path.join(ly_identity_base_path, 'include')
-    stlib_path = os.path.join(ly_identity_base_path, 'lib', platform, processor, compiler, configuration)
-    shlib_path = os.path.join(ly_identity_base_path, 'bin', platform, processor, compiler, configuration)
+    stlib_path = os.path.join(ly_identity_base_path, 'lib', platform, processor, configuration)
+    shlib_path = os.path.join(ly_identity_base_path, 'bin', platform, processor, configuration)
 
     self.register_3rd_party_uselib('LyMetricsShared_shared',
                                    target_platform,

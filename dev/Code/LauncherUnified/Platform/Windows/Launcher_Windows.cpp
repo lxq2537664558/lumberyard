@@ -12,8 +12,10 @@
 #include <Launcher_precompiled.h>
 #include <Launcher.h>
 
-#include <CryLibrary.h>
+#include <common/Launcher_host.h>
 
+#include <CryLibrary.h>
+#include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <ShellAPI.h>
@@ -88,6 +90,29 @@
 // of the platform specific versions.
 extern void InitRootDir(char szExeFileName[] = 0, uint nExeSize = 0, char szExeRootName[] = 0, uint nRootSize = 0);
 
+#if AZ_TESTS_ENABLED
+
+int main(int argv, char **argc)
+{
+    InitRootDir();
+
+    // Calculate the running executable's full path
+    // https://msdn.microsoft.com/en-us/library/windows/desktop/ms683197(v=vs.85).aspx
+    char executablePath[AZ_MAX_PATH_LEN] = {'\0'};
+    DWORD pathLen = GetModuleFileNameA(nullptr, executablePath, AZ_ARRAY_SIZE(executablePath));
+
+    // Remove the last trailing windows path separator so we end up with just the folder path
+    char* lastPathSeparator = strrchr(executablePath, '\\');
+    if (lastPathSeparator)
+    {
+        lastPathSeparator[1] = '\0';
+    }
+
+    LumberyardLauncher::ReturnCode status = LumberyardLauncher::RunUnitTests(executablePath, argv, argc);
+    return static_cast<int>(status);
+}
+
+#else
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
@@ -96,14 +121,19 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     using namespace LumberyardLauncher;
 
     PlatformMainInfo mainInfo;
+    mainInfo.m_appResourcesPath = GetAppResourcePathForHostPlatforms();
+    if (mainInfo.m_appResourcesPath[0] == '\0')
+    {
+        // Unable to resolve the application resource path because we cannot find the application descriptor (game.xml)
+        return static_cast<int>(ReturnCode::ErrAppDescriptor);
+    }
+
     mainInfo.m_instance = GetModuleHandle(0);
 
-    // The check for the presence of -load in the command line
-    // is to maintain the same behavior as the legacy launcher.
-    const bool commandLineContainsLoad = (strstr(lpCmdLine, " -load ") != nullptr);
-    bool ret = commandLineContainsLoad ?
-               mainInfo.CopyCommandLine(lpCmdLine) :
-               mainInfo.CopyCommandLine(GetCommandLineA());
+    extern int __argc;
+    extern char ** __argv;
+    
+    mainInfo.CopyCommandLine(__argc, __argv);
 
 #if defined(DEDICATED_SERVER)
     unsigned buf[4];
@@ -117,7 +147,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         }
     }
 
-    ret |= mainInfo.AddArgument(reinterpret_cast<char*>(buf));
+    if (!mainInfo.AddArgument(reinterpret_cast<char*>(buf)))
+    {
+        return static_cast<int>(ReturnCode::ErrCommandLine);
+    }
+
+
 #endif
 
     // Prevent allocator from growing in small chunks
@@ -127,9 +162,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     sysHeapDesc.m_heap.m_systemChunkSize = 64 * 1024 * 1024;
     AZ::AllocatorInstance<AZ::SystemAllocator>::Create(sysHeapDesc);
 
-    ReturnCode status = ret ? 
-        Run(mainInfo) : 
-        ReturnCode::ErrCommandLine;
+    ReturnCode status = Run(mainInfo);
 
 #if !defined(_RELEASE)
     bool noPrompt = (strstr(mainInfo.m_commandLine, "-noprompt") != nullptr);
@@ -143,7 +176,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     }
 
 #if !defined(AZ_MONOLITHIC_BUILD)
-    if (ret)
+
     {
         // HACK HACK HACK - is this still needed?!?!
         // CrySystem module can get loaded multiple times (even from within CrySystem itself)
@@ -167,3 +200,4 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     return static_cast<int>(status);
 }
+#endif // AZ_TESTS_ENABLED

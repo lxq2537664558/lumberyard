@@ -46,6 +46,8 @@
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -83,6 +85,8 @@ void CDeviceManager::Init()
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 #if !DEVICE_MANAGER_IMMEDIATE_STATE_WRITE
@@ -111,6 +115,8 @@ void CDeviceManager::RT_Tick()
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 }
@@ -203,6 +209,8 @@ void* CDeviceManager::GetBackingStorage(D3DBuffer* buffer)
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
     return NULL;
@@ -216,6 +224,8 @@ void CDeviceManager::FreebackingStorage(void* base_ptr)
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
 }
@@ -233,6 +243,8 @@ HRESULT CDeviceManager::CreateFence(DeviceFenceHandle& query)
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
 # if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -267,6 +279,8 @@ HRESULT CDeviceManager::ReleaseFence(DeviceFenceHandle query)
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
 # if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -295,6 +309,8 @@ HRESULT CDeviceManager::IssueFence(DeviceFenceHandle query)
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
 # if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -339,6 +355,8 @@ HRESULT CDeviceManager::SyncFence(DeviceFenceHandle query, bool block, bool flus
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
 # if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -355,6 +373,20 @@ HRESULT CDeviceManager::SyncFence(DeviceFenceHandle query, bool block, bool flus
             if (hr != S_OK && hr != S_FALSE)
             {
                 CHECK_HRESULT(hr);
+
+                if (hr == DXGI_ERROR_DEVICE_REMOVED)
+                {
+                    // If the device has been removed we will be stuck here if this is a blocking sync (i.e. block == true) ).
+                    // It's a critical error, though, so we have to bail out and handle it elsewhere.
+                    ID3D11Device* device = nullptr;
+                    gcpRendD3D->GetDeviceContext().GetDevice(&device);
+                    if (device)
+                    {
+                        const HRESULT removedReason = device->GetDeviceRemovedReason();
+                        CryWarning(VALIDATOR_MODULE_RENDERER, VALIDATOR_WARNING, "Graphical device was removed for the following reason: %x", removedReason);
+                    }
+                    return hr;
+                }
             }
 #     endif
         } while (block && hr != S_OK);
@@ -371,6 +403,8 @@ HRESULT CDeviceManager::InvalidateCpuCache(void* buffer_ptr, size_t size, size_t
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
     return S_OK;
@@ -384,6 +418,8 @@ HRESULT CDeviceManager::InvalidateGpuCache(D3DBuffer* buffer, void* buffer_ptr, 
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
     return S_OK;
@@ -413,6 +449,8 @@ HRESULT CDeviceManager::CreateDirectAccessBuffer(uint32 nSize, uint32 elemSize, 
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 
@@ -466,6 +504,8 @@ void CDeviceManager::InvalidateBuffer(D3DBuffer* buffer, void* base_ptr, size_t 
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 # endif
 }
@@ -1085,6 +1125,8 @@ void CDeviceManager::DisplayMemoryUsage()
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 }
@@ -1107,6 +1149,8 @@ int CDeviceTexture::Cleanup()
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -1118,16 +1162,19 @@ int CDeviceTexture::Cleanup()
     }
 
 #ifdef DEVMAN_USE_STAGING_POOL
-    if (m_pStagingResource[0])
+    if (m_pStagingResourceDownload)
     {
-        gcpRendD3D->m_DevMan.ReleaseStagingResource(m_pStagingResource[0]);
-        m_pStagingResource[0] = NULL;
+        gcpRendD3D->m_DevMan.ReleaseStagingResource(m_pStagingResourceDownload);
+        m_pStagingResourceDownload = nullptr;
     }
 
-    if (m_pStagingResource[1])
+    for (int i = 0; i < NUM_UPLOAD_STAGING_RES; i++)
     {
-        gcpRendD3D->m_DevMan.ReleaseStagingResource(m_pStagingResource[1]);
-        m_pStagingResource[1] = NULL;
+        if (m_pStagingResourceUpload[i])
+        {
+            gcpRendD3D->m_DevMan.ReleaseStagingResource(m_pStagingResourceUpload[i]);
+            m_pStagingResourceUpload[i] = nullptr;
+        }
     }
 #endif
 
@@ -1137,6 +1184,8 @@ int CDeviceTexture::Cleanup()
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 
@@ -1158,6 +1207,8 @@ CDeviceTexture::~CDeviceTexture()
         #include "Xenia/DeviceManager_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/DeviceManager_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/DeviceManager_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -1334,3 +1385,42 @@ void CDeviceTexture::RemoveFromTextureMemoryTracking()
         m_isTracked = false;
     }
 } 
+
+D3DResource* CDeviceTexture::GetCurrUploadStagingResource()
+{
+#ifdef DEVMAN_USE_STAGING_POOL
+    int resourceIndex = gcpRendD3D->GetFrameID() % NUM_UPLOAD_STAGING_RES;
+    return m_pStagingResourceUpload[resourceIndex];
+#else
+    return nullptr;
+#endif
+}
+
+D3DResource* CDeviceTexture::GetCurrDownloadStagingResource()
+{
+#ifdef DEVMAN_USE_STAGING_POOL
+    return m_pStagingResourceDownload;
+#else
+    return nullptr;
+#endif
+}
+
+void** CDeviceTexture::GetCurrUploadStagingMemoryPtr()
+{
+#ifdef DEVMAN_USE_STAGING_POOL
+    int resourceIndex = gcpRendD3D->GetFrameID() % NUM_UPLOAD_STAGING_RES;
+    return &m_pStagingMemoryUpload[resourceIndex];
+#else
+    return nullptr;
+#endif
+}
+
+void** CDeviceTexture::GetCurrDownloadStagingMemoryPtr()
+{
+#ifdef DEVMAN_USE_STAGING_POOL
+    return &m_pStagingMemoryDownload;
+#else
+    return nullptr;
+#endif
+}
+

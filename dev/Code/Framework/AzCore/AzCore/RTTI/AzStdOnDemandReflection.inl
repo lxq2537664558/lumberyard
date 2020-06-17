@@ -544,6 +544,11 @@ namespace AZ
             return AZ::Failure();
         }
 
+        static bool IsScriptEventType()
+        {
+            return AZStd::is_same<T, AZ::EntityId>::value;
+        }
+
         static void Reflect(ReflectContext* context)
         {
             if (BehaviorContext* behaviorContext = azrtti_cast<BehaviorContext*>(context))
@@ -554,6 +559,7 @@ namespace AZ
                     ->Attribute(AZ::Script::Attributes::ToolTip, &ScriptCanvasOnDemandReflection::OnDemandToolTip<ContainerType>::Get)
                     ->Attribute(AZ::Script::Attributes::Category, &ScriptCanvasOnDemandReflection::OnDemandCategoryName<ContainerType>::Get)
                     ->Attribute(AZ::Script::Attributes::Storage, AZ::Script::Attributes::StorageType::ScriptOwn)
+                    ->Attribute(AZ::Script::Attributes::EnableAsScriptEventParamType, &IsScriptEventType)
                     ->template Method<void(ContainerType::*)(typename ContainerType::const_reference)>("push_back", &ContainerType::push_back)
                         ->Attribute(AZ::Script::Attributes::Deprecated, true)
                         ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
@@ -701,6 +707,7 @@ namespace AZ
                 auto getErrorFunc = [](OutcomeType* outcomePtr) { return outcomePtr->GetError(); };
                 // note we can reflect iterator types and support iterators, as of know we want to keep it simple
                 behaviorContext->Class<OutcomeType>()
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                     ->Attribute(AZ::ScriptCanvasAttributes::PrettyName, &ScriptCanvasOnDemandReflection::OnDemandPrettyName<OutcomeType>::Get)
                     ->Attribute(AZ::Script::Attributes::ToolTip, &ScriptCanvasOnDemandReflection::OnDemandToolTip<OutcomeType>::Get)
@@ -731,6 +738,7 @@ namespace AZ
                 auto getValueFunc = [](OutcomeType* outcomePtr) { return outcomePtr->GetValue(); };
                 // note we can reflect iterator types and support iterators, as of know we want to keep it simple
                 behaviorContext->Class<OutcomeType>()
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                     ->Attribute(AZ::ScriptCanvasAttributes::AllowInternalCreation, true)
                     ->Attribute(AZ::ScriptCanvasAttributes::PrettyName, &ScriptCanvasOnDemandReflection::OnDemandPrettyName<OutcomeType>::Get)
@@ -760,6 +768,7 @@ namespace AZ
                 auto getErrorFunc = [](OutcomeType* outcomePtr) { return outcomePtr->GetError(); };
                 // note we can reflect iterator types and support iterators, as of know we want to keep it simple
                 behaviorContext->Class<OutcomeType>()
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                     ->Attribute(AZ::ScriptCanvasAttributes::AllowInternalCreation, true)
                     ->Attribute(AZ::ScriptCanvasAttributes::PrettyName, &ScriptCanvasOnDemandReflection::OnDemandPrettyName<OutcomeType>::Get)
@@ -788,6 +797,7 @@ namespace AZ
             {
                 // note we can reflect iterator types and support iterators, as of know we want to keep it simple
                 behaviorContext->Class<OutcomeType>()
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                     ->Attribute(AZ::ScriptCanvasAttributes::AllowInternalCreation, true)
                     ->Attribute(AZ::ScriptCanvasAttributes::PrettyName, &ScriptCanvasOnDemandReflection::OnDemandPrettyName<OutcomeType>::Get)

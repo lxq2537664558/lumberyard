@@ -59,12 +59,17 @@ namespace AzToolsFramework
 {
     namespace AssetEditor
     {
-        using AssetCheckoutAndSaveCallback = AZStd::function<void(bool, const AZStd::string&)>;
+        using AssetCheckoutCallback = AZStd::function<void(bool, const AZStd::string&, const AZStd::string&)>;
 
-        void AssetCheckoutAndSaveCommon(const AZ::Data::AssetId& id, AZ::Data::Asset<AZ::Data::AssetData> asset, AZ::SerializeContext* serializeContext, AssetCheckoutAndSaveCallback callback)
+        void AssetCheckoutCommon(const AZ::Data::AssetId& id, AZ::Data::Asset<AZ::Data::AssetData> asset, AZ::SerializeContext* serializeContext, AssetCheckoutCallback assetCheckoutAndSaveCallback)
         {
             AZStd::string assetPath;
             AZ::Data::AssetCatalogRequestBus::BroadcastResult(assetPath, &AZ::Data::AssetCatalogRequests::GetAssetPathById, id);
+            if (assetPath.empty())
+            {
+                AZ_Assert(!assetPath.empty(), "A valid path needs to be resolved, if this failed, the provided asset path is not a valid asset.");
+                return;
+            }
 
             AZStd::string assetFullPath;
             AssetSystemRequestBus::Broadcast(&AssetSystem::AssetSystemRequest::GetFullSourcePathFromRelativeProductPath, assetPath, assetFullPath);
@@ -73,35 +78,26 @@ namespace AzToolsFramework
             {
                 using SCCommandBus = SourceControlCommandBus;
                 SCCommandBus::Broadcast(&SCCommandBus::Events::RequestEdit, assetFullPath.c_str(), true,
-                    [id, asset, assetFullPath, serializeContext, callback](bool /*success*/, const SourceControlFileInfo& info)
+                    [id, asset, assetFullPath, serializeContext, assetCheckoutAndSaveCallback](bool /*success*/, const SourceControlFileInfo& info)
                     {
                         if (!info.IsReadOnly())
                         {
-                        AZ::Outcome<bool, AZStd::string> outcome = AZ::Success(true);
-                        AzToolsFramework::AssetEditor::AssetEditorValidationRequestBus::EventResult(outcome, id, &AzToolsFramework::AssetEditor::AssetEditorValidationRequests::IsAssetDataValid, asset);
-                        if (!outcome.IsSuccess())
-                        {
-                            callback(false, outcome.GetError());
-                        }
-                        else
-                        {
-                            AssetEditorValidationRequestBus::Event(id, &AssetEditorValidationRequests::PreAssetSave, asset);
-
-                            if (AZ::Utils::SaveObjectToFile(assetFullPath, AZ::DataStream::ST_XML, asset.Get(), asset.Get()->RTTI_GetType(), serializeContext))
+                            AZ::Outcome<bool, AZStd::string> outcome = AZ::Success(true);
+                            AzToolsFramework::AssetEditor::AssetEditorValidationRequestBus::EventResult(outcome, id, &AzToolsFramework::AssetEditor::AssetEditorValidationRequests::IsAssetDataValid, asset);
+                            if (!outcome.IsSuccess())
                             {
-                                callback(true, "");
+                                assetCheckoutAndSaveCallback(false, outcome.GetError(), assetFullPath);
                             }
                             else
                             {
-                                AZStd::string error = AZStd::string::format("Could not write asset file: %s.", assetFullPath.c_str());
-                                callback(false, error);
+                                AssetEditorValidationRequestBus::Event(id, &AssetEditorValidationRequests::PreAssetSave, asset);
+                                assetCheckoutAndSaveCallback(true, "", assetFullPath);
                             }
                         }
-                    }
                         else
                         {
                             AZStd::string error = AZStd::string::format("Could not check out asset file: %s.", assetFullPath.c_str());
-                            callback(false, error);
+                            assetCheckoutAndSaveCallback(false, error, assetFullPath);
                         }
                     }
                     );
@@ -109,7 +105,7 @@ namespace AzToolsFramework
             else
             {
                 AZStd::string error = AZStd::string::format("Could not resolve path name for asset {%s}.", id.ToString<AZStd::string>().c_str());
-                callback(false, error);
+                assetCheckoutAndSaveCallback(false, error, nullptr);
             }
         }
 
@@ -117,6 +113,7 @@ namespace AzToolsFramework
         {
             static QString assetCreated = QStringLiteral("Asset created!");
             static QString assetSaved = QStringLiteral("Asset saved!");
+            static QString assetSaving = QStringLiteral("Asset saving!");
             static QString assetLoaded = QStringLiteral("Asset loaded!");
             static QString unableToSave = QStringLiteral("Failed to save asset due to validation error, check the log!");
             static QString emptyString = QStringLiteral("");
@@ -220,14 +217,16 @@ namespace AzToolsFramework
 
             m_saveAssetAction = fileMenu->addAction("&Save");
             m_saveAssetAction->setShortcut(QKeySequence::Save);
-            m_saveAssetAction->setEnabled(true);
             connect(m_saveAssetAction, &QAction::triggered, this, &AssetEditorWidget::SaveAsset);
 
             m_saveAsAssetAction = fileMenu->addAction("&Save As");
             m_saveAsAssetAction->setShortcut(QKeySequence::SaveAs);
-            m_saveAsAssetAction->setEnabled(true);
-
             connect(m_saveAsAssetAction, &QAction::triggered, this, &AssetEditorWidget::SaveAssetAs);
+
+            // "Save" and "Save As..." actions are disabled by default,
+            // and they are activated when an asset is created/open
+            m_saveAssetAction->setEnabled(false);
+            m_saveAsAssetAction->setEnabled(false);
 
             QMenu* viewMenu = mainMenu->addMenu(tr("&View"));
 
@@ -248,6 +247,11 @@ namespace AzToolsFramework
             PopulateRecentMenu();
         }
 
+        AssetEditorWidget::~AssetEditorWidget()
+        {
+            AZ::SystemTickBus::Handler::BusDisconnect();
+        }
+
         void AssetEditorWidget::CreateAsset(AZ::Data::AssetType assetType)
         {
             auto typeIter = AZStd::find_if(m_genericAssetTypes.begin(), m_genericAssetTypes.end(), [assetType](const AZ::Data::AssetType& testType) { return assetType == testType; });
@@ -266,12 +270,11 @@ namespace AzToolsFramework
         {
             m_dirty = false;
 
-            AZ::Data::AssetBus::Handler::BusDisconnect(asset.GetId());            
+            AZ::Data::AssetBus::Handler::BusDisconnect(asset.GetId());
 
             // Clone the asset
             AZ::Data::AssetId newAssetId = AZ::Data::AssetId(AZ::Uuid::CreateRandom());
             m_inMemoryAsset = AZ::Data::AssetManager::Instance().CreateAsset(newAssetId, asset.GetType());
-
             auto serializeContext = AZ::EntityUtils::GetApplicationSerializeContext();
             serializeContext->CloneObjectInplace((*m_inMemoryAsset.GetData()), asset.GetData());
 
@@ -285,6 +288,14 @@ namespace AzToolsFramework
             {
                 SetStatusText(Status::assetLoaded);
             }
+
+            UpdateMenusOnAssetOpen();
+        }
+
+        void AssetEditorWidget::OnAssetReloaded(AZ::Data::Asset<AZ::Data::AssetData> asset)
+        {
+            // Keep a reference to the reloaded asset data
+            OnAssetReady(asset);
         }
 
         void AssetEditorWidget::UpdatePropertyEditor(AZ::Data::Asset<AZ::Data::AssetData>& asset)
@@ -348,6 +359,16 @@ namespace AzToolsFramework
                 SaveAsset();
             }
             return true;
+        }
+
+        bool AssetEditorWidget::WaitingToSave() const
+        {
+            return m_waitingToSave;
+        }
+
+        void AssetEditorWidget::SetCloseAfterSave()
+        {
+            m_closeAfterSave = true;
         }
 
         bool AssetEditorWidget::SaveAsDialog(AZ::Data::Asset<AZ::Data::AssetData>& asset)
@@ -544,10 +565,31 @@ namespace AzToolsFramework
             }
             else
             {
+                if (m_inMemoryAsset)
+                {
+                    AZ::Data::AssetBus::Handler::BusDisconnect(m_inMemoryAsset.GetId());
+                }
+               
                 AZ::Data::AssetBus::Handler::BusConnect(asset.GetId());
 
                 // Need to disable editing until OnAssetReady.
                 m_propertyEditor->setEnabled(false);
+            }
+        }
+
+        void AssetEditorWidget::GenerateSaveDataSnapshot()
+        {
+            //Generate data now so that if there's a wait for the source control system, the data saved will be as it was when the save was called.
+            AZStd::vector<AZ::u8> newSaveData;
+
+            // Make a stream and save a snapshot of the asset to it.
+            AZ::IO::ByteContainerStream<AZStd::vector<AZ::u8> > dstByteStream(&newSaveData);
+
+            AssetEditorValidationRequestBus::Event(m_sourceAssetId, &AssetEditorValidationRequests::PreAssetSave, m_inMemoryAsset);
+
+            if (AZ::Utils::SaveObjectToStream(dstByteStream, AZ::DataStream::ST_XML, m_inMemoryAsset.Get(), m_inMemoryAsset.Get()->RTTI_GetType(), m_serializeContext))
+            {
+                AZStd::swap(newSaveData, m_saveData);
             }
         }
 
@@ -559,18 +601,52 @@ namespace AzToolsFramework
             }
             else if (m_dirty)
             {
-                AssetCheckoutAndSaveCommon(m_sourceAssetId, m_inMemoryAsset, m_serializeContext,
-                [this](bool success, const AZStd::string& error)
-                {
-                    if (success)
-                    {
-                        m_dirty = false;
-                        m_saveAssetAction->setEnabled(false);
-                        m_saveAsAssetAction->setEnabled(false);
+                SetStatusText(Status::assetSaving);
 
+                GenerateSaveDataSnapshot();
+
+                // Clear the dirty flag now so that attempting to close the window during a save doesn't ask the user to save again, 
+                // unless there are further changes.
+                m_dirty = false;
+                m_saveAssetAction->setEnabled(false);
+                m_saveAsAssetAction->setEnabled(false);
+
+                if (WaitingToSave())
+                {
+                    // Don't need to do the save, as we've just overwritten the data that the previously queued save will write out.
+                    return;
+                }
+                m_waitingToSave = true;
+                AssetCheckoutCommon(m_sourceAssetId, m_inMemoryAsset, m_serializeContext,
+                [this](bool checkoutSuccess, const AZStd::string& error, const AZStd::string& assetFullPath)
+                {
+                    AZStd::string saveError = error;
+                    bool saveSuccessful = false;
+
+                    if (checkoutSuccess)
+                    {
+                        saveError = AZStd::string::format("Could not write asset file: %s.", assetFullPath.c_str());
+                        if (!m_saveData.empty())
+                        {
+                            if (AZ::Utils::SaveStreamToFile(assetFullPath, m_saveData))
+                            {
+                                m_saveData.clear();
+                                saveSuccessful = true;
+                            }
+                        }
+                    }
+
+                    if (saveSuccessful)
+                    {
                         Q_EMIT OnAssetSavedSignal();
                         m_propertyEditor->QueueInvalidation(Refresh_AttributesAndValues);
                         SetStatusText(Status::assetSaved);
+
+                        if (m_closeAfterSave)
+                        {
+                            m_closeAfterSave = false;
+                            parentWidget()->parentWidget()->close();
+                        }
                     }
                     else
                     {
@@ -580,8 +656,10 @@ namespace AzToolsFramework
                         m_saveAsAssetAction->setEnabled(false);
 
                         SetStatusText(Status::unableToSave);
-                        Q_EMIT OnAssetSaveFailedSignal(error);
+                        Q_EMIT OnAssetSaveFailedSignal(saveError);
                     }
+
+                    m_waitingToSave = false;
                 }
                 );
             }
@@ -683,6 +761,7 @@ namespace AzToolsFramework
 
             if (m_inMemoryAsset)
             {
+                AZ::Data::AssetBus::Handler::BusDisconnect(m_inMemoryAsset.GetId());
                 m_inMemoryAsset.Release();
             }
 
@@ -759,7 +838,15 @@ namespace AzToolsFramework
             SetStatusText(Status::emptyString);
         }
 
-        void AssetEditorWidget::SetStatusText(const QString& assetStatus)
+        void AssetEditorWidget::OnSystemTick()
+        {
+            if (!m_queuedAssetStatus.isEmpty())
+            {
+                ApplyStatusText();
+            }
+        }
+
+        void AssetEditorWidget::ApplyStatusText()
         {
             QString statusString;
 
@@ -772,15 +859,26 @@ namespace AzToolsFramework
                 statusString = QString("%1");
             }
 
-            statusString = statusString.arg(m_currentAsset).arg(assetStatus);
+            statusString = statusString.arg(m_currentAsset).arg(m_queuedAssetStatus);
 
-            if (!assetStatus.isEmpty())
+            if (!m_queuedAssetStatus.isEmpty())
             {
                 statusString.append(" - ");
-                statusString.append(assetStatus);
+                statusString.append(m_queuedAssetStatus);
             }
 
             m_statusBar->textEdit->setPlainText(statusString);
+
+            m_queuedAssetStatus.clear();
+
+            AZ::SystemTickBus::Handler::BusDisconnect();
+
+        }
+
+        void AssetEditorWidget::SetStatusText(const QString& assetStatus)
+        {
+            m_queuedAssetStatus = assetStatus;
+            AZ::SystemTickBus::Handler::BusConnect();
         }
 
         void AssetEditorWidget::AddRecentPath(const AZStd::string& recentPath)
@@ -814,6 +912,13 @@ namespace AzToolsFramework
                     }
                 }
             }
+        }
+
+        void AssetEditorWidget::UpdateMenusOnAssetOpen()
+        {
+            // Activate "Save" and "Save As..." actions
+            m_saveAssetAction->setEnabled(true);
+            m_saveAsAssetAction->setEnabled(true);
         }
 
     } // namespace AssetEditor

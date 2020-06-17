@@ -15,7 +15,17 @@
             "_comment": "Texture Atlas"
         }
     ],
-    "GemFormatVersion": 3,
+    "Modules": [
+        {
+            "Type": "GameModule"
+        },
+        {
+            "Name": "Editor",
+            "Type": "EditorModule",
+            "Extends":  "GameModule"
+        }
+    ],
+    "GemFormatVersion": 4,
     "Uuid": "0fefab3f13364722b2eab3b96ce2bf20",
     "Name": "LyShine",
     "DisplayName": "LyShine",

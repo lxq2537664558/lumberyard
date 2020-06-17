@@ -43,6 +43,7 @@
 
 #include <aws/core/utils/Outcome.h>
 #include <AzToolsFramework/UI/UICore/WidgetHelpers.h>
+#include <AzFramework/AzFramework_Traits_Platform.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <aws/core/http/HttpClientFactory.h> 
 #include <aws/core/http/HttpClient.h>
@@ -415,6 +416,8 @@ bool DeviceFarmDriver::SendUpload(const Upload& upload)
     }
 
     Aws::Client::ClientConfiguration clientConfiguration = Aws::Client::ClientConfiguration();
+    // WinHttp doesn't support the enableTcpKeepAlive option
+    clientConfiguration.enableTcpKeepAlive = AZ_TRAIT_AZFRAMEWORK_AWS_ENABLE_TCP_KEEP_ALIVE_SUPPORTED;
 
     // Device Farm only works in the lovely state of Oregon
     clientConfiguration.region = Aws::Region::US_WEST_2;
@@ -436,7 +439,7 @@ bool DeviceFarmDriver::SendUpload(const Upload& upload)
 
     httpRequest->SetContentType("application/octet-stream");
 
-    const auto httpResponse(httpClient->MakeRequest(*httpRequest, nullptr, nullptr));
+    const auto httpResponse(httpClient->MakeRequest(httpRequest, nullptr, nullptr));
 
     return httpResponse->GetResponseCode() == Aws::Http::HttpResponseCode::OK;
 }

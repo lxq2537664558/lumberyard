@@ -97,20 +97,30 @@ namespace PhysX
         /// Enable Global Collision Debug Draw
         enum class GlobalCollisionDebugState
         {
-            AlwaysOn,         // Collision draw debug all entites 
-            AlwaysOff,        // Collision debug draw disabled
-            Manual            // Set up in the entity
+            AlwaysOn,         ///< Collision draw debug all entities.
+            AlwaysOff,        ///< Collision debug draw disabled.
+            Manual            ///< Set up in the entity.
         };
         GlobalCollisionDebugState m_globalCollisionDebugDraw = GlobalCollisionDebugState::Manual;
+
+        /// Color scheme for debug collision
+        enum class GlobalCollisionDebugColorMode
+        {
+            MaterialColor,   ///< Use debug color specified in the material library
+            ErrorColor       ///< Show default color and flashing red for colliders with errors.
+        };
+        GlobalCollisionDebugColorMode m_globalCollisionDebugDrawColorMode = GlobalCollisionDebugColorMode::MaterialColor;
     };
 
-    /// Configuration structure for PhysX.
-    /// Used to initialise the PhysX Gem.
+    // LUMBERYARD_DEPRECATED(LY-109358)
+    /// @deprecated Please use PhysXConfiguration instead.
     class Configuration
     {
     public:
+
         AZ_CLASS_ALLOCATOR(Configuration, AZ::SystemAllocator, 0);
         AZ_RTTI(Configuration, "{9C342C95-3E27-437C-9C15-FEE651C824DD}");
+
         virtual ~Configuration() = default;
 
         Settings m_settings; ///< PhysX specific settings.
@@ -122,36 +132,81 @@ namespace PhysX
         // Configuration is loaded very early on when the asset system is not yet initialized
         // We have to set the NoLoad rule here to avoid having a dummy asset with no valid data
         AZ::Data::Asset<Physics::MaterialLibraryAsset> m_materialLibrary 
-            = AZ::Data::AssetLoadBehavior::NoLoad;  ///< Project-wide Physics Material library.
+            = AZ::Data::AssetLoadBehavior::NoLoad;  ///< Project-wide Default Physics Material library.
+    };
+
+    /// Configuration structure for PhysX.
+    /// Used to initialise the PhysX Gem.
+    class PhysXConfiguration
+    {
+    public:
+        AZ_CLASS_ALLOCATOR(PhysXConfiguration, AZ::SystemAllocator, 0);
+        AZ_TYPE_INFO(PhysXConfiguration, "{5E050D96-04E0-4863-8F4F-1E2E2B567022}");
+
+        Settings m_settings; ///< PhysX specific settings.
+        EditorConfiguration m_editorConfiguration; ///< Editor configuration for PhysX.
+    };
+
+    /// Configuration requests bus traits. Singleton pattern.
+    class ConfigurationRequestsTraits
+        : public AZ::EBusTraits
+    {
+    public:
+        static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::Single;
     };
 
     /// Configuration requests.
     class ConfigurationRequests
-        : public AZ::EBusTraits
     {
     public:
+        AZ_TYPE_INFO(ConfigurationRequests, "{5FEC38FF-CA8D-4071-AA78-AC07549D4387}");
 
-        virtual ~ConfigurationRequests() {}
+        ConfigurationRequests() = default;        
 
-        /// Gets the PhysX configuration.
+        // AZ::Interface requires these to be deleted.
+        ConfigurationRequests(ConfigurationRequests&&) = delete;
+        ConfigurationRequests& operator=(ConfigurationRequests&&) = delete;
+
+        // LUMBERYARD_DEPRECATED(LY-109358)
+        /// @deprecated Please use the alternative configuration getters such as
+        /// SystemRequests::GetWorldConfiguration, SystemRequests::GetMaterialLibraryPtr,
+        /// CollisionRequests::GetCollisionConfiguration, ConfigurationRequests::GetPhysXConfiguration instead.
         virtual const Configuration& GetConfiguration() = 0;
-
-        /// Sets the PhysX configuration.
+        // LUMBERYARD_DEPRECATED(LY-109358)
+        /// @deprecated Please use the alternative configuration getters such as
+        /// SystemRequests::SetWorldConfiguration, SystemRequests::SetMaterialLibraryPtr,
+        /// CollisionRequests::SetCollisionConfiguration, ConfigurationRequests::SetPhysXConfiguration instead.
         virtual void SetConfiguration(const Configuration& configuration) = 0;
+
+        virtual const PhysXConfiguration& GetPhysXConfiguration() = 0;
+        virtual void SetPhysXConfiguration(const PhysXConfiguration& configuration) = 0;
+
+    protected:
+        virtual ~ConfigurationRequests() = default;
     };
 
-    using ConfigurationRequestBus = AZ::EBus<ConfigurationRequests>;
+    using ConfigurationRequestBus = AZ::EBus<ConfigurationRequests, ConfigurationRequestsTraits>;
 
     /// Configuration notifications.
     class ConfigurationNotifications
         : public AZ::EBusTraits
     {
     public:
-        /// Raised when the PhysX configuration has been loaded.
+        // LUMBERYARD_DEPRECATED(LY-109358)
+        /// @deprecated Please use OnPhysXConfigurationLoaded instead.
         virtual void OnConfigurationLoaded() {};
+        /// Raised when the PhysX configuration has been loaded.
+        virtual void OnPhysXConfigurationLoaded() {};
 
-        /// Raised when the PhysX configuration has been refreshed.
+        // LUMBERYARD_DEPRECATED(LY-109358)
+        /// @deprecated Please use OnPhysXConfigurationRefreshed instead.
         virtual void OnConfigurationRefreshed(const Configuration&) {};
+        /// Raised when the PhysX configuration has been refreshed.
+        virtual void OnPhysXConfigurationRefreshed(const PhysXConfiguration&) {};
+
+        /// Raised when the default material library has changed
+        virtual void OnDefaultMaterialLibraryChanged(const AZ::Data::AssetId&) {}
 
     protected:
         ~ConfigurationNotifications() = default;

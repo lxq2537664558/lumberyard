@@ -11,20 +11,24 @@
 */
 
 #include <SliceBuilder/Source/SliceBuilderWorker.h>
-#include <SliceBuilder/Source/TraceDrillerHook.h>
-#include <SliceBuilder/Source/TypeFingerprinter.h>
+#include <AssetBuilderSDK/SerializationDependencies.h>
+#include <AzCore/Asset/AssetCommon.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/Serialization/EditContext.h>
+#include <AzFramework/FileFunc/FileFunc.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <AzFramework/IO/LocalFileIO.h>
 #include <AzCore/Debug/Trace.h>
 #include <AzCore/std/sort.h>
 #include <AzCore/IO/IOUtils.h>
+#include <AzCore/JSON/stringbuffer.h>
+#include <AzCore/JSON/writer.h>
 #include <AzCore/Slice/SliceAsset.h>
 #include <AzCore/Slice/SliceAssetHandler.h>
 #include <AzCore/Slice/SliceComponent.h>
 #include <AzCore/Serialization/ObjectStream.h>
 #include <AzCore/Serialization/Utils.h>
+#include <AzCore/Serialization/Json/JsonSerialization.h>
 #include <AzCore/Asset/AssetSerializer.h>
 #include <AzCore/Component/ComponentExport.h>
 #include <AzCore/Component/ComponentApplication.h>
@@ -32,83 +36,62 @@
 #include <AzToolsFramework/ToolsComponents/EditorComponentBase.h>
 #include <AzToolsFramework/Slice/SliceCompilation.h>
 #include <AzToolsFramework/Slice/SliceUtilities.h>
+#include <AzToolsFramework/API/EditorAssetSystemAPI.h>
+#include "AzFramework/Asset/SimpleAsset.h"
 
 namespace SliceBuilder
 {
     namespace
     {
-        TypeFingerprint CalculateFingerprintForComponentServices(AZ::SliceComponent& slice)
+        AzToolsFramework::Fingerprinting::TypeFingerprint CalculateFingerprintForSlice(AZ::SliceComponent& slice, const AzToolsFramework::Fingerprinting::TypeFingerprinter& typeFingerprinter, AZ::SerializeContext& serializeContext)
         {
-            TypeFingerprint result = 0;
-
-            // Ensures hash will change if a service is moved from, say, required to dependent.
-            static const size_t kRequiredServiceKey = AZ_CRC("RequiredServiceKey", 0x22e125a6);
-            static const size_t kDependentServiceKey = AZ_CRC("DependentServiceKey", 0x380e6c63);
-            static const size_t kProvidedServiceKey = AZ_CRC("ProvidedServiceKey", 0xd3cc7058);
-            static const size_t kIncompatibleServiceKey = AZ_CRC("IncompatibleServiceKey", 0x95ee560f);
-
-            // Hash service configuration for all components within the slice.
-            AZStd::vector<AZ::Entity*> entities;
-            slice.GetEntities(entities);
-            AZ::ComponentDescriptor::DependencyArrayType services;
-            for (AZ::Entity* entity : entities)
-            {
-                for (AZ::Component* component : entity->GetComponents())
-                {
-                    AZ::ComponentDescriptor* componentDescriptor = nullptr;
-                    AZ::ComponentDescriptorBus::EventResult(componentDescriptor, component->RTTI_GetType(), &AZ::ComponentDescriptorBus::Events::GetDescriptor);
-                    if (componentDescriptor)
-                    {
-                        services.clear();
-                        componentDescriptor->GetRequiredServices(services, component);
-                        AZStd::sort(services.begin(), services.end());
-                        AZStd::hash_combine(result, kRequiredServiceKey);
-                        AZStd::hash_range(result, services.begin(), services.end());
-
-                        services.clear();
-                        componentDescriptor->GetDependentServices(services, component);
-                        AZStd::sort(services.begin(), services.end());
-                        AZStd::hash_combine(result, kDependentServiceKey);
-                        AZStd::hash_range(result, services.begin(), services.end());
-
-                        services.clear();
-                        componentDescriptor->GetProvidedServices(services, component);
-                        AZStd::sort(services.begin(), services.end());
-                        AZStd::hash_combine(result, kProvidedServiceKey);
-                        AZStd::hash_range(result, services.begin(), services.end());
-
-                        services.clear();
-                        componentDescriptor->GetIncompatibleServices(services, component);
-                        AZStd::sort(services.begin(), services.end());
-                        AZStd::hash_combine(result, kIncompatibleServiceKey);
-                        AZStd::hash_range(result, services.begin(), services.end());
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        TypeFingerprint CalculateFingerprintForSlice(AZ::SliceComponent& slice, const TypeFingerprinter& typeFingerprinter, AZ::SerializeContext& serializeContext)
-        {
-            TypeFingerprint serializationFingerprint = typeFingerprinter.GenerateFingerprintForAllTypesInObject(&slice);
-            TypeFingerprint servicesFingerprint = CalculateFingerprintForComponentServices(slice);
-
-            AZStd::hash_combine(serializationFingerprint, servicesFingerprint);
-            return serializationFingerprint;
+            return typeFingerprinter.GenerateFingerprintForAllTypesInObject(&slice);
         }
     } // namespace anonymous
 
     static const char* const s_sliceBuilder = "SliceBuilder";
+    static const char* const s_sliceBuilderSettingsFilename = "SliceBuilderSettings.json";
 
     SliceBuilderWorker::SliceBuilderWorker()
     {
         AZ::SerializeContext* serializeContext = nullptr;
         AZ::ComponentApplicationBus::BroadcastResult(serializeContext, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
         AZ_Assert(serializeContext, "SerializeContext not found");
-        m_typeFingerprinter = AZStd::make_unique<TypeFingerprinter>(*serializeContext);
+        m_typeFingerprinter = AZStd::make_unique<AzToolsFramework::Fingerprinting::TypeFingerprinter>(*serializeContext);
 
         AssetBuilderSDK::AssetBuilderCommandBus::Handler::BusConnect(GetUUID());
+
+        bool fileFound = false;
+
+        AZ::Data::AssetInfo settingsAssetInfo;
+        AZStd::string relativePath;
+        AzToolsFramework::AssetSystemRequestBus::BroadcastResult(fileFound, &AzToolsFramework::AssetSystemRequestBus::Events::GetSourceInfoBySourcePath, s_sliceBuilderSettingsFilename, settingsAssetInfo, relativePath);
+
+        if (fileFound)
+        {
+            AZStd::string sliceBuilderSettingsPath;
+            AzFramework::StringFunc::Path::Join(relativePath.c_str(), settingsAssetInfo.m_relativePath.c_str(), sliceBuilderSettingsPath, true, true, true);
+
+            // Attempt to load the Slice Builder Settings file
+            AZ::IO::LocalFileIO localFileIO;
+            auto result = AzFramework::FileFunc::ReadJsonFile(sliceBuilderSettingsPath.c_str(), &localFileIO);
+            if (result.IsSuccess())
+            {
+                AZ::JsonSerializationResult::ResultCode serializaionResult = AZ::JsonSerialization::Load(m_settings, result.GetValue());
+                if (serializaionResult.GetProcessing() == AZ::JsonSerializationResult::Processing::Halted)
+                {
+                    m_settingsWarning = "Error in Slice Builder Settings File.\nUsing Default Slice Builder Settings.";
+                }
+            }
+            else
+            {
+                m_settingsWarning = "Failed to load Slice Builder Settings File.\nUsing Default Slice Builder Settings.";
+            }
+        }
+        else
+        {
+            m_settingsWarning = "Slice Builder Settings File Missing.\nUsing Default Slice Builder Settings.";
+        }
     }
 
     SliceBuilderWorker::~SliceBuilderWorker() = default;
@@ -118,7 +101,7 @@ namespace SliceBuilder
         m_isShuttingDown = true;
     }
 
-    void SliceBuilderWorker::CreateJobs(const AssetBuilderSDK::CreateJobsRequest& request, AssetBuilderSDK::CreateJobsResponse& response) const
+    void SliceBuilderWorker::CreateJobs(const AssetBuilderSDK::CreateJobsRequest& request, AssetBuilderSDK::CreateJobsResponse& response)
     {
         // Check for shutdown
         if (m_isShuttingDown)
@@ -131,7 +114,7 @@ namespace SliceBuilder
         AzFramework::StringFunc::Path::ConstructFull(request.m_watchFolder.c_str(), request.m_sourceFile.c_str(), fullPath, false);
         AzFramework::StringFunc::Path::Normalize(fullPath);
 
-        TraceDrillerHook traceDrillerHook(true);
+        AssetBuilderSDK::AssertAndErrorAbsorber assertAndErrorAbsorber(true);
 
         AZ_TracePrintf(s_sliceBuilder, "CreateJobs for slice \"%s\"\n", fullPath.c_str());
 
@@ -143,8 +126,10 @@ namespace SliceBuilder
             return;
         }
 
+        AZStd::vector<AssetBuilderSDK::SourceFileDependency> sourceFileDependencies;
+
         // Asset filter always returns false to prevent parsing dependencies, but makes note of the slice dependencies
-        auto assetFilter = [&response](const AZ::Data::Asset<AZ::Data::AssetData>& asset)
+        auto assetFilter = [&sourceFileDependencies](const AZ::Data::Asset<AZ::Data::AssetData>& asset)
         {
             if (asset.GetType() == AZ::AzTypeInfo<AZ::SliceAsset>::Uuid())
             {
@@ -155,7 +140,7 @@ namespace SliceBuilder
                     AssetBuilderSDK::SourceFileDependency dependency;
                     dependency.m_sourceFileDependencyUUID = asset.GetId().m_guid;
 
-                    response.m_sourceFileDependencyList.push_back(dependency);
+                    sourceFileDependencies.push_back(dependency);
                 }
             }
 
@@ -166,14 +151,21 @@ namespace SliceBuilder
         asset.Create(AZ::Data::AssetId(AZ::Uuid::CreateRandom()));
         AZ::SliceAssetHandler assetHandler;
         assetHandler.SetFilterFlags(AZ::ObjectStream::FilterFlags::FILTERFLAG_IGNORE_UNKNOWN_CLASSES);
+
+        m_sliceDataPatchError = false;
+        m_sliceHasLegacyDataPatches = false;
+
+        // Listen for data patch events indicating a legacy slice file
+        AZ::DataPatchNotificationBus::Handler::BusConnect();
         assetHandler.LoadAssetData(asset, &stream, assetFilter);
+        AZ::DataPatchNotificationBus::Handler::BusDisconnect();
 
         // Flush asset database events to ensure no asset references are held by closures queued on Ebuses.
         AZ::Data::AssetManager::Instance().DispatchEvents();
 
         // Fail gracefully if any errors occurred while serializing in the editor slice.
         // i.e. missing assets or serialization errors.
-        if (traceDrillerHook.GetErrorCount() > 0)
+        if (assertAndErrorAbsorber.GetErrorCount() > 0)
         {
             AZ_Error("", false, "Exporting of createjobs response for \"%s\" failed due to errors loading editor slice.", fullPath.c_str());
             return;
@@ -183,30 +175,74 @@ namespace SliceBuilder
 
         if (!sourcePrefab)
         {
-            AZ_Error(s_sliceBuilder, false, "Failed find the slice component in the slice asset!");
+            AZ_Error(s_sliceBuilder, false, "Failed to find the slice component in the slice asset!");
             return; // this should fail!
         }
 
-        if (sourcePrefab->IsDynamic())
+        bool requiresUpgrade = m_sliceHasLegacyDataPatches;
+        bool sliceWritable = AZ::IO::SystemFile::IsWritable(fullPath.c_str());
+        bool createDynamicSlice = sourcePrefab->IsDynamic();
+
+        AZ::SerializeContext* context;
+        AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+        AzToolsFramework::Fingerprinting::TypeFingerprint sourceSliceTypeFingerprint = CalculateFingerprintForSlice(*sourcePrefab, *m_typeFingerprinter, *context);
+
+        const char* compilerVersion = "9";
+        for (const AssetBuilderSDK::PlatformInfo& info : request.m_enabledPlatforms)
         {
-            AZ::SerializeContext* context;
-            AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
-            TypeFingerprint sourceSliceTypeFingerprint = CalculateFingerprintForSlice(*sourcePrefab, *m_typeFingerprinter, *context);
+            AssetBuilderSDK::JobDescriptor jobDescriptor;
+            jobDescriptor.m_priority = 0;
+            jobDescriptor.m_critical = true;
+            jobDescriptor.m_jobKey = "Process Slice";
 
-            const char* compilerVersion = "6";
+            jobDescriptor.SetPlatformIdentifier(info.m_identifier.c_str());
+            jobDescriptor.m_additionalFingerprintInfo = AZStd::string(compilerVersion)
+                .append(AZStd::string::format("|%llu", static_cast<uint64_t>(sourceSliceTypeFingerprint)));
 
-            for (const AssetBuilderSDK::PlatformInfo& info : request.m_enabledPlatforms)
+            for (const auto& sourceDependency : sourceFileDependencies)
             {
-                AssetBuilderSDK::JobDescriptor jobDescriptor;
-                jobDescriptor.m_priority = 0;
-                jobDescriptor.m_critical = true;
-                jobDescriptor.m_jobKey = "Dynamic Slice";
-                jobDescriptor.SetPlatformIdentifier(info.m_identifier.c_str());
-                jobDescriptor.m_additionalFingerprintInfo = AZStd::string(compilerVersion)
-                    .append(AZStd::string::format("|%llu", static_cast<uint64_t>(sourceSliceTypeFingerprint)));
-
-                response.m_createJobOutputs.push_back(jobDescriptor);
+                jobDescriptor.m_jobDependencyList.emplace_back("Process Slice", info.m_identifier.c_str(), AssetBuilderSDK::JobDependencyType::Fingerprint, sourceDependency);
             }
+
+            // Include the upgrade status of the slice in the fingerprint.
+            // There are 3 possible states:
+            // 1. The slice doesn't require an upgrade
+            // 2. The slice requires an upgrade but it can't be upgraded.
+            // 3. The slice requires and will receive an upgrade
+            if (!requiresUpgrade)
+            {
+                jobDescriptor.m_additionalFingerprintInfo.append("|NoUpgrade");
+            }
+            else
+            {
+                if (!sliceWritable || !m_settings.m_enableSliceConversion)
+                {
+                    jobDescriptor.m_additionalFingerprintInfo.append("|NeedsUpgrade");
+                }
+                else
+                {
+                    jobDescriptor.m_additionalFingerprintInfo.append("|WillUpgrade");
+                }
+            }
+
+            if (!m_settingsWarning.empty())
+            {
+                jobDescriptor.m_jobParameters.insert(AZStd::make_pair(AZ::u32(AZ_CRC("JobParam_SettingsFileWarning", 0xae8d98ac)), AZStd::string("Requires Re-save")));
+            }
+
+            if (requiresUpgrade)
+            {
+                jobDescriptor.m_jobParameters.insert(AZStd::make_pair(AZ::u32(AZ_CRC("JobParam_UpgradeSlice", 0x4be52dd5)), AZStd::string("Requires Re-save")));
+
+                // Source file changes are Platform Agnostic. Avoid extra work by only scheduling it once.
+                requiresUpgrade = false;
+            }
+
+            if (createDynamicSlice)
+            {
+                jobDescriptor.m_jobParameters.insert(AZStd::make_pair(AZ::u32(AZ_CRC("JobParam_MakeDynamicSlice", 0xa89310ab)), AZStd::string("Create Dynamic Slice")));
+            }
+            response.m_createJobOutputs.push_back(jobDescriptor);
         }
 
         response.m_result = AssetBuilderSDK::CreateJobsResultCode::Success;
@@ -214,9 +250,6 @@ namespace SliceBuilder
 
     void SliceBuilderWorker::ProcessJob(const AssetBuilderSDK::ProcessJobRequest& request, AssetBuilderSDK::ProcessJobResponse& response) const
     {
-        // Source slice is copied directly to the cache as-is, for use in-editor.
-        // If slice is tagged as dynamic, we also conduct a runtime export, which converts editor->runtime components and generates a new .dynamicslice file.
-
         // Check for shutdown
         if (m_isShuttingDown)
         {
@@ -225,7 +258,12 @@ namespace SliceBuilder
             return;
         }
 
-        TraceDrillerHook traceDrillerHook(true);
+        // Emit a settings file warning if required. We wait until now so the warnings will be clearly visible in the AP GUI.
+        if (request.m_jobDescription.m_jobParameters.find(AZ_CRC("JobParam_SettingsFileWarning", 0xae8d98ac)) != request.m_jobDescription.m_jobParameters.end())
+        {
+            // .../dev/SliceBuilderSettings.json must exist and must be readable.
+            AZ_Warning(s_sliceBuilder, false, m_settingsWarning.c_str());
+        }
 
         AZStd::string fullPath;
         AZStd::string fileNameOnly;
@@ -235,117 +273,202 @@ namespace SliceBuilder
 
         AZ_TracePrintf(s_sliceBuilder, "Processing slice \"%s\".\n", fullPath.c_str());
         
-        // Serialize in the source slice to determine if we need to generate a .dynamicslice.
+        // Serialize in the source slice for processing.
         AZ::IO::FileIOStream stream(fullPath.c_str(), AZ::IO::OpenMode::ModeRead);
         if (!stream.IsOpen())
         {
-            AZ_Warning(s_sliceBuilder, false, "Exporting of .dynamicslice for \"%s\" failed because the source file could not be opened.", fullPath.c_str());
+            AZ_Warning(s_sliceBuilder, false, "Slice Processing for \"%s\" failed because the source file could not be opened.", fullPath.c_str());
             return;
         }
 
-        AZ::SerializeContext* context;
-        AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
-
-        AZ::Data::Asset<AZ::SliceAsset> sourceAsset;
-        sourceAsset.Create(AZ::Data::AssetId(AZ::Uuid::CreateRandom()));
-
+        AZ::Data::Asset<AZ::SliceAsset> exportSliceAsset;
         AZStd::vector<AssetBuilderSDK::ProductDependency> productDependencies;
+        AssetBuilderSDK::ProductPathDependencySet productPathDependencySet;
+        AZ::PlatformTagSet platformTags;
 
-        // Asset filter is used to record dependencies.  Only returns true for slices
-        auto assetFilter = [&productDependencies](const AZ::Data::Asset<AZ::Data::AssetData>& filterAsset)
+        const AZStd::unordered_set<AZStd::string>& platformTagStrings = request.m_platformInfo.m_tags;
+        for (const AZStd::string& platformTagString : platformTagStrings)
         {
-            productDependencies.emplace_back(filterAsset.GetId(), 0);
-
-            return AZ::Data::AssetFilterSourceSlicesOnly(filterAsset);
-        };
-
-        AZ::SliceAssetHandler assetHandler(context);
-        assetHandler.LoadAssetData(sourceAsset, &stream, assetFilter);
-        sourceAsset.SetHint(fullPath);
-
-        // Flush asset manager events to ensure no asset references are held by closures queued on Ebuses.
-        AZ::Data::AssetManager::Instance().DispatchEvents();
-
-        // Fail gracefully if any errors occurred while serializing in the editor slice.
-        // i.e. missing assets or serialization errors.
-        if (traceDrillerHook.GetErrorCount() > 0)
-        {
-            AZ_Error(s_sliceBuilder, false, "Exporting of .dynamicslice for \"%s\" failed due to errors loading editor slice.", fullPath.c_str());
-            return;
+            platformTags.insert(AZ::Crc32(platformTagString.c_str(), platformTagString.size(), true));
         }
 
-        // If the slice is designated as dynamic, generate the dynamic slice (.dynamicslice).
-        AZ::SliceComponent* sourceSlice = (sourceAsset.Get()) ? sourceAsset.Get()->GetComponent() : nullptr;
-
-        if (!sourceSlice)
+        // Dynamic Slice Creation
+        if (request.m_jobDescription.m_jobParameters.find(AZ_CRC("JobParam_MakeDynamicSlice", 0xa89310ab)) != request.m_jobDescription.m_jobParameters.end())
         {
-            AZ_Error(s_sliceBuilder, false, "Failed find the slice component in the slice asset!");
-            return; // this should fail!
+            if (GetDynamicSliceAssetAndDependencies(&stream, fullPath.c_str(), platformTags, exportSliceAsset, productDependencies, productPathDependencySet))
+            {
+                AZStd::string dynamicSliceOutputPath;
+                AzFramework::StringFunc::Path::Join(request.m_tempDirPath.c_str(), fileNameOnly.c_str(), dynamicSliceOutputPath, true, true, true);
+                AzFramework::StringFunc::Path::ReplaceExtension(dynamicSliceOutputPath, "dynamicslice");
+
+                // Save runtime slice to disk.
+                // Use SaveObjectToFile because it writes to a byte stream first and then to disk
+                // which is much faster than SaveObjectToStream(outputStream...) when writing large slices
+                if (AZ::Utils::SaveObjectToFile<AZ::Entity>(dynamicSliceOutputPath.c_str(), AzToolsFramework::SliceUtilities::GetSliceStreamFormat(), exportSliceAsset.Get()->GetEntity()))
+                {
+                    AZ_TracePrintf(s_sliceBuilder, "Output file %s", dynamicSliceOutputPath.c_str());
+                }
+                else
+                {
+                    AZ_Error(s_sliceBuilder, false, "Failed to open output file %s", dynamicSliceOutputPath.c_str());
+                    return;
+                }
+
+                AssetBuilderSDK::JobProduct jobProduct(dynamicSliceOutputPath);
+                jobProduct.m_productAssetType = azrtti_typeid<AZ::DynamicSliceAsset>();
+                jobProduct.m_productSubID = AZ::DynamicSliceAsset::GetAssetSubId();
+                jobProduct.m_dependencies = AZStd::move(productDependencies);
+                jobProduct.m_pathDependencies = AZStd::move(productPathDependencySet);
+                response.m_outputProducts.push_back(AZStd::move(jobProduct));
+            }
         }
 
-        if (sourceSlice->IsDynamic())
+        // Slice Upgrades
+        if (request.m_jobDescription.m_jobParameters.find(AZ_CRC("JobParam_UpgradeSlice", 0x4be52dd5)) != request.m_jobDescription.m_jobParameters.end())
         {
-            if (traceDrillerHook.GetErrorCount() > 0)
+            AZ_TracePrintf(s_sliceBuilder, "Slice Upgrade: Starting Upgrade Process");
+            // Check to see if the conditions for the builder to operate are met
+            // The work is done here rather than in create jobs so that all warnings are clearly visible in the AP
+            bool sliceWritable = AZ::IO::SystemFile::IsWritable(fullPath.c_str());
+            if (!m_settings.m_enableSliceConversion || !sliceWritable)
             {
-                AZ_Error(s_sliceBuilder, false, "Exporting of .dynamicslice for \"%s\" failed due to errors instantiating entities.", fullPath.c_str());
-                return;
-            }
+                static const char* const s_OutOfDate = "This slice file is out of date: ";
+                static const char* const s_ToEnable = "To enable automatic upgrades:";
+                static const char* const s_FixSettings1 = "In the settings file ";
+                static const char* const s_FixSettings2 = ", Set 'EnableSliceConversion' to true and restart the Asset Processor";
+                static const char* const s_FixReadOnly = "Make sure the slice file isn't marked read-only. If using perforce, check out the slice file.";
 
-            AZStd::string dynamicSliceOutputPath;
-            AzFramework::StringFunc::Path::Join(request.m_tempDirPath.c_str(), fileNameOnly.c_str(), dynamicSliceOutputPath, true, true, true);
-            AzFramework::StringFunc::Path::ReplaceExtension(dynamicSliceOutputPath, "dynamicslice");
+                // The Slice isn't marked as read only but Slice Upgrades aren't Enabled in the builder settings file
+                if(!m_settings.m_enableSliceConversion && sliceWritable)
+                {
+                    AZ_Warning(s_sliceBuilder, false, "%s%s\n%s\n%s%s%s", s_OutOfDate, fullPath.c_str(), s_ToEnable, s_FixSettings1, s_sliceBuilderSettingsFilename, s_FixSettings2);
+                }
 
-            AZ::SliceComponent::EntityList sourceEntities;
-            sourceSlice->GetEntities(sourceEntities);
+                // Slice Upgrades are enabled in the builder settings file but the slice file is marked as read-only
+                if (!sliceWritable && m_settings.m_enableSliceConversion)
+                {
+                    AZ_Warning(s_sliceBuilder, false, "%s%s\n%s\n%s", s_OutOfDate, fullPath.c_str(), s_ToEnable, s_FixReadOnly);
+                }
 
-            AZ::PlatformTagSet platformTags;
-            const AZStd::unordered_set<AZStd::string>& platformTagStrings = request.m_platformInfo.m_tags;
-            for (const AZStd::string& platformTagString : platformTagStrings)
-            {
-                platformTags.insert(AZ::Crc32(platformTagString.c_str(), platformTagString.size(), true));
-            }
-
-            // Compile the source slice into the runtime slice (with runtime components). Note that
-            // we may be handling either world or UI entities, so we need handlers for both.
-            AzToolsFramework::WorldEditorOnlyEntityHandler worldEditorOnlyEntityHandler;
-            AzToolsFramework::UiEditorOnlyEntityHandler uiEditorOnlyEntityHandler;
-            AzToolsFramework::EditorOnlyEntityHandlers handlers =
-            {
-                &worldEditorOnlyEntityHandler,
-                &uiEditorOnlyEntityHandler,
-            };
-            AzToolsFramework::SliceCompilationResult sliceCompilationResult =
-                AzToolsFramework::CompileEditorSlice(sourceAsset, platformTags, *context, handlers);
-
-            if (!sliceCompilationResult)
-            {
-                AZ_Error("Slice compilation", false, "Slice compilation failed: %s", sliceCompilationResult.GetError().c_str());
-                return;
-            }
-
-            AZ::Data::Asset<AZ::SliceAsset> exportSliceAsset = sliceCompilationResult.GetValue();
-
-            AZ::SliceComponent::EntityList outputEntities;
-            exportSliceAsset.Get()->GetComponent()->GetEntities(outputEntities);
-
-            // Save runtime slice to disk.
-            // Use SaveObjectToFile because it writes to a byte stream first and then to disk
-            // which is much faster than SaveObjectToStream(outputStream...) when writing large slices
-            if (AZ::Utils::SaveObjectToFile<AZ::Entity>(dynamicSliceOutputPath.c_str(), AzToolsFramework::SliceUtilities::GetSliceStreamFormat(), exportSliceAsset.Get()->GetEntity()))
-            {
-                AZ_TracePrintf(s_sliceBuilder, "Output file %s", dynamicSliceOutputPath.c_str());
+                // Slice Upgrades are disabled in the builder settings file and the slice is marked as read-only.
+                if (!m_settings.m_enableSliceConversion && !sliceWritable)
+                {
+                    AZ_Warning(s_sliceBuilder, false, "%s%s\n%s\n1. %s%s%s\n2. %s", s_OutOfDate, fullPath.c_str(), s_ToEnable, s_FixSettings1, s_sliceBuilderSettingsFilename, s_FixSettings2, s_FixReadOnly);
+                }
             }
             else
             {
-                AZ_Error(s_sliceBuilder, false, "Failed to open output file %s", dynamicSliceOutputPath.c_str());
-                return;
-            }
+                AZ_TracePrintf(s_sliceBuilder, "Slice Upgrade: Instantiating Slice");
 
-            AssetBuilderSDK::JobProduct jobProduct(dynamicSliceOutputPath);
-            jobProduct.m_productAssetType = azrtti_typeid<AZ::DynamicSliceAsset>();
-            jobProduct.m_productSubID = 2;
-            jobProduct.m_dependencies = AZStd::move(productDependencies);
-            response.m_outputProducts.push_back(AZStd::move(jobProduct));
+                AZ::SerializeContext* context;
+                AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+
+                AZ::Data::Asset<AZ::SliceAsset> sourceAsset;
+                sourceAsset.Create(AZ::Data::AssetId(AZ::Uuid::CreateRandom()));
+
+                AZ::SliceAssetHandler assetHandler(context);
+                stream.Seek(0, AZ::IO::GenericStream::ST_SEEK_BEGIN);
+                assetHandler.LoadAssetData(sourceAsset, &stream, &AZ::Data::AssetFilterSourceSlicesOnly);
+                sourceAsset.SetHint(fullPath);
+
+                // Make sure the original file stream is closed so it can be replaced
+                stream.Close();
+
+                // If the slice is designated as dynamic, generate the dynamic slice (.dynamicslice).
+                AZ::SliceComponent* sourceSlice = (sourceAsset.Get()) ? sourceAsset.Get()->GetComponent() : nullptr;
+
+                if(!sourceSlice)
+                {
+                    AZ_Error(s_sliceBuilder, false, "Failed to load the source file as a slice");
+                    return;
+                }
+
+                if (sourceSlice->Instantiate() != AZ::SliceComponent::InstantiateResult::Success)
+                {
+                    AZ_Error(s_sliceBuilder, false, "Failed to Upgrade Slice - Slice Instantiation Failed.");
+                    return;
+                }
+
+                AZ_TracePrintf(s_sliceBuilder, "Slice Upgrade: Recomputing Data Patches");
+
+                // Recompute all the data patches associated with our object
+                // This step is required to upgrade the data patch format stored in slices
+                for (auto& slice : sourceSlice->GetSlices())
+                {
+                    slice.ComputeDataPatch();
+                }
+
+                // Save the slice as a new source file next to the old source file
+                // Generate the new source file name
+                AZStd::string tempPath(fullPath);
+                AZStd::string tempFilename;
+                AzFramework::StringFunc::Path::GetFileName(tempPath.c_str(), tempFilename);
+
+                // Prepend the filename with a temporary value
+                // Using the @tmp#_ prefix guarantees the new file will be ignored by the asset processor
+                tempFilename.insert(0, "$tmp0_");
+                AzFramework::StringFunc::Path::ReplaceFullName(tempPath, tempFilename.c_str());
+
+                AZ_TracePrintf(s_sliceBuilder, "Slice Upgrade: Writing new slice to temporary file");
+
+                // Save the upgraded slice to disk.
+                if (!AZ::Utils::SaveObjectToFile<AZ::Entity>(tempPath.c_str(), AzToolsFramework::SliceUtilities::GetSliceStreamFormat(), sourceAsset.Get()->GetEntity()))
+                {
+                    AZ_Error(s_sliceBuilder, false, "Failed to Upgrade Slice - Could not open replacement slice file for writing.");
+                    return;
+                }
+
+                if (!AZ::IO::SystemFile::Exists(tempPath.c_str()))
+                {
+                    AZ_Error(s_sliceBuilder, false, "Failed to Upgrade Slice - Could not write replacement slice file.");
+                    return;
+                }
+
+                AZStd::string oldPath(fullPath);
+                AZStd::string oldFilename;
+                AzFramework::StringFunc::Path::GetFileName(oldPath.c_str(), oldFilename);
+
+                // Prepend the filename with a temporary value
+                // Using the @tmp#_ prefix guarantees the new file will be ignored by the asset processor
+                oldFilename = "$tmp1_" + oldFilename;
+                AzFramework::StringFunc::Path::ReplaceFullName(oldPath, oldFilename.c_str());
+
+                AZ_TracePrintf(s_sliceBuilder, "Slice Upgrade: Swaping temp file with original");
+
+                // Rename the source slice file
+                if (!AZ::IO::SystemFile::Rename(fullPath.c_str(), oldPath.c_str(), true))
+                {
+                    AZ_Error(s_sliceBuilder, false, "Failed to Upgrade Slice - Could not rename existing file.");
+                    return;
+                }
+
+                if (!AZ::IO::SystemFile::Rename(tempPath.c_str(), fullPath.c_str(), false))
+                {
+                    // Attempt to undo the previous rename operation to return to the original state
+                    AZ::IO::SystemFile::Rename(oldPath.c_str(), fullPath.c_str(), true);
+
+                    AZ_Error(s_sliceBuilder, false, "Failed to Upgrade Slice Could not rename new slice temp file.");
+                    return;
+                }
+
+                AZ_TracePrintf(s_sliceBuilder, "Slice Upgraded: %s", fullPath.c_str());
+
+                // To avoid potential data loss, only delete the old file if there is a data patching error detected
+                if (m_sliceDataPatchError)
+                {
+                    static const char* const s_overrideWarning = "At least one Data Patch Upgrade wasn't completed:";
+                    static const char* const s_checkLogs = "Please check the slice processing log for more information.";
+                    static const char* const s_originalSliceAvailable = "The original slice file has been preserved at: ";
+                    static const char* const s_recomendReload = "It's recomended that this slice be loaded into the editor and repaired before upgrading.";
+
+                    AZ_Warning(s_sliceBuilder, false, "%s\n%s\n%s%s\n%s", s_overrideWarning, s_checkLogs, s_originalSliceAvailable, oldPath.c_str(), s_recomendReload);
+                }
+                else
+                {
+                    AZ_TracePrintf(s_sliceBuilder, "Removing original slice file.");
+                    AZ::IO::SystemFile::Delete(oldPath.c_str());
+                }
+            }
         }
 
         response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
@@ -353,8 +476,103 @@ namespace SliceBuilder
         AZ_TracePrintf(s_sliceBuilder, "Finished processing slice %s\n", fullPath.c_str());
     }
 
+    bool SliceBuilderWorker::GetDynamicSliceAssetAndDependencies(AZ::IO::GenericStream* stream, const char* fullPath, const AZ::PlatformTagSet& platformTags, AZ::Data::Asset<AZ::SliceAsset>& outSliceAsset, AZStd::vector<AssetBuilderSDK::ProductDependency>& outProductDependencies, AssetBuilderSDK::ProductPathDependencySet& productPathDependencySet) const
+    {
+        AssetBuilderSDK::AssertAndErrorAbsorber assertAndErrorAbsorber(true);
+
+        AZ::SerializeContext* context;
+        AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+
+        AZ::Data::Asset<AZ::SliceAsset> sourceAsset;
+        sourceAsset.Create(AZ::Data::AssetId(AZ::Uuid::CreateRandom()));
+
+        AZ::SliceAssetHandler assetHandler(context);
+        assetHandler.LoadAssetData(sourceAsset, stream, &AZ::Data::AssetFilterSourceSlicesOnly);
+        sourceAsset.SetHint(fullPath);
+
+        // Flush asset manager events to ensure no asset references are held by closures queued on Ebuses.
+        AZ::Data::AssetManager::Instance().DispatchEvents();
+
+        // Fail gracefully if any errors occurred while serializing in the editor slice.
+        // i.e. missing assets or serialization errors.
+        if (assertAndErrorAbsorber.GetErrorCount() > 0)
+        {
+            AZ_Error(s_sliceBuilder, false, "Exporting of .dynamicslice for \"%s\" failed due to errors loading editor slice.", fullPath);
+            return false;
+        }
+
+        // If the slice is designated as dynamic, generate the dynamic slice (.dynamicslice).
+        AZ::SliceComponent* sourceSlice = (sourceAsset.Get()) ? sourceAsset.Get()->GetComponent() : nullptr;
+
+        if (!sourceSlice)
+        {
+            AZ_Error(s_sliceBuilder, false, "Failed to find the slice component in the slice asset!");
+            return false; // this should fail!
+        }
+
+        if (!sourceSlice->IsDynamic())
+        {
+            AZ_Error(s_sliceBuilder, false, "Slice must be a dynamicslice in order to be processed: %s\n", fullPath);
+            return false;
+        }
+
+        if (assertAndErrorAbsorber.GetErrorCount() > 0)
+        {
+            AZ_Error(s_sliceBuilder, false, "Exporting of .dynamicslice for \"%s\" failed due to errors instantiating entities.", fullPath);
+            return false;
+        }
+
+        AZ::SliceComponent::EntityList sourceEntities;
+        sourceSlice->GetEntities(sourceEntities);
+
+        // Compile the source slice into the runtime slice (with runtime components). Note that
+        // we may be handling either world or UI entities, so we need handlers for both.
+        AzToolsFramework::WorldEditorOnlyEntityHandler worldEditorOnlyEntityHandler;
+        AzToolsFramework::UiEditorOnlyEntityHandler uiEditorOnlyEntityHandler;
+        AzToolsFramework::EditorOnlyEntityHandlers handlers =
+        {
+            &worldEditorOnlyEntityHandler,
+            &uiEditorOnlyEntityHandler,
+        };
+        AzToolsFramework::SliceCompilationResult sliceCompilationResult =
+            AzToolsFramework::CompileEditorSlice(sourceAsset, platformTags, *context, handlers);
+
+        if (!sliceCompilationResult)
+        {
+            AZ_Error("Slice compilation", false, "Slice compilation failed: %s", sliceCompilationResult.GetError().c_str());
+            return false;
+        }
+
+        outSliceAsset = sliceCompilationResult.GetValue();
+
+        // Gather product dependencies from the compiled asset, not the source asset. In some cases asset references can change during asset compliation.
+        AssetBuilderSDK::GatherProductDependencies(*context, outSliceAsset.Get()->GetEntity(), outProductDependencies, productPathDependencySet);
+
+        return true;
+    }
+
     AZ::Uuid SliceBuilderWorker::GetUUID()
     {
         return AZ::Uuid::CreateString("{b92ad60c-d301-4484-8647-bb889ed717a2}");
+    }
+
+    void SliceBuilderWorker::OnLegacyDataPatchLoadFailed()
+    {
+        // Even if a legacy patch fails to load, the slice file is out of date and requires a re-save
+        m_sliceHasLegacyDataPatches = true;
+
+        // Note that ther is an error in the data patch so the job should be flagged with a warning to prevent
+        // the old file from being removed, mitigating the risk of data loss.
+        m_sliceDataPatchError = true;
+    }
+
+    void SliceBuilderWorker::OnLegacyDataPatchLoaded()
+    {
+        m_sliceHasLegacyDataPatches = true;
+    }
+
+    bool SliceBuilderWorker::SliceUpgradesAllowed() const
+    {
+        return m_settings.m_enableSliceConversion;
     }
 }

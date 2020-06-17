@@ -13,10 +13,12 @@
 
 #include "EditorCommon.h"
 #include "CanvasHelpers.h"
+#include "AssetDropHelpers.h"
 #include <AzCore/IO/SystemFile.h>
 #include <AzCore/std/sort.h>
 #include <AzToolsFramework/API/EditorAssetSystemAPI.h>
 #include <AzToolsFramework/Slice/SliceUtilities.h>
+#include <AzToolsFramework/AssetBrowser/AssetBrowserEntry.h>
 #include <AzQtComponents/Components/StyledDockWidget.h>
 #include <LyShine/UiComponentTypes.h>
 #include <LyShine/Bus/UiEditorCanvasBus.h>
@@ -135,6 +137,8 @@ EditorWindow::EditorWindow(QWidget* parent, Qt::WindowFlags flags)
     SaveStartupLocalizationFolderSetting();
 
     PropertyHandlers::Register();
+
+    setAcceptDrops(true);
 
     // Store local copy of startup localization value
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, AZ_QCOREAPPLICATION_SETTINGS_ORGANIZATION_NAME);
@@ -1281,7 +1285,7 @@ void EditorWindow::SaveActiveCanvasEditState()
         // Save hierarchy state
         const QTreeWidgetItemRawPtrQList& selection = m_hierarchy->selectedItems();
         canvasEditState.m_selectedElements = SelectionHelpers::GetSelectedElementIds(m_hierarchy, selection, false);
-        canvasEditState.m_hierarchyScrollValue = m_hierarchy->verticalScrollBar() ? m_hierarchy->verticalScrollBar()->value() : 0.0f;
+        canvasEditState.m_hierarchyScrollValue = m_hierarchy->verticalScrollBar() ? m_hierarchy->verticalScrollBar()->value() : 0;
 
         // Save properties state
         canvasEditState.m_propertiesScrollValue = m_properties->GetProperties()->GetScrollValue();
@@ -1289,7 +1293,7 @@ void EditorWindow::SaveActiveCanvasEditState()
         // Save animation state
         canvasEditState.m_uiAnimationEditState.m_time = 0.0f;
         canvasEditState.m_uiAnimationEditState.m_timelineScale = 1.0f;
-        canvasEditState.m_uiAnimationEditState.m_timelineScrollOffset = 0.0f;
+        canvasEditState.m_uiAnimationEditState.m_timelineScrollOffset = 0;
         EBUS_EVENT_RESULT(canvasEditState.m_uiAnimationEditState, UiEditorAnimationStateBus, GetCurrentEditState);
 
         canvasEditState.m_inited = true;
@@ -1634,7 +1638,7 @@ void EditorWindow::ToggleEditorMode()
             if (canvasSize.GetX() == 0.0f && canvasSize.GetY() == 0.0f)
             {
                 // special value of (0,0) means use the viewport size
-                canvasSize = AZ::Vector2(m_viewport->size().width(), m_viewport->size().height());
+                canvasSize = AZ::Vector2(aznumeric_cast<float>(m_viewport->size().width()), aznumeric_cast<float>(m_viewport->size().height()));
             }
 
             AZ::Entity* clonedCanvas = nullptr;
@@ -2432,6 +2436,60 @@ void EditorWindow::closeEvent(QCloseEvent* closeEvent)
     SaveEditorWindowSettings();
 
     QMainWindow::closeEvent(closeEvent);
+}
+
+void EditorWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+    AssetDropHelpers::AssetList canvasAssets;
+    if (AssetDropHelpers::AcceptsMimeType(event->mimeData()))
+    {
+        AssetDropHelpers::DecodeUiCanvasAssetsFromMimeData(event->mimeData(), canvasAssets);
+    }
+
+    if (!canvasAssets.empty())
+    {
+        event->accept();
+    }
+    else
+    {
+        event->ignore();
+    }
+}
+
+void EditorWindow::dropEvent(QDropEvent* event)
+{
+    AssetDropHelpers::AssetList canvasAssets;
+    if (AssetDropHelpers::AcceptsMimeType(event->mimeData()))
+    {
+        AssetDropHelpers::DecodeUiCanvasAssetsFromMimeData(event->mimeData(), canvasAssets);
+    }
+
+    QStringList canvasFilenames;
+    for (const AZ::Data::AssetId& canvasAssetId : canvasAssets)
+    {
+        const AzToolsFramework::AssetBrowser::SourceAssetBrowserEntry* source = AzToolsFramework::AssetBrowser::SourceAssetBrowserEntry::GetSourceByUuid(canvasAssetId.m_guid);
+        if (!source)
+        {
+            continue;
+        }
+
+        AZStd::string fullEntryPath = source->GetFullPath();
+        if (!fullEntryPath.empty())
+        {
+            canvasFilenames.push_back(QString(fullEntryPath.c_str()));
+        }
+    }
+
+    // If in Preview mode, exit back to Edit mode
+    if (m_editorMode == UiEditorMode::Preview)
+    {
+        ToggleEditorMode();
+    }
+
+    OpenCanvases(canvasFilenames);
+
+    activateWindow();
+    m_viewport->setFocus();
 }
 
 void EditorWindow::SetupCentralWidget()

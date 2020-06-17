@@ -23,9 +23,9 @@
 
 namespace EMotionFX
 {
-    AZ_CLASS_ALLOCATOR_IMPL(ActorMorphTargetPicker, AZ::SystemAllocator, 0)
-    AZ_CLASS_ALLOCATOR_IMPL(ActorSingleMorphTargetHandler, AZ::SystemAllocator, 0)
-    AZ_CLASS_ALLOCATOR_IMPL(ActorMultiMorphTargetHandler, AZ::SystemAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(ActorMorphTargetPicker, EditorAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(ActorSingleMorphTargetHandler, EditorAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(ActorMultiMorphTargetHandler, EditorAllocator, 0)
 
     ActorMorphTargetPicker::ActorMorphTargetPicker(bool multiSelection, QWidget* parent)
         : QWidget(parent)
@@ -94,8 +94,14 @@ namespace EMotionFX
         }
         EMotionFX::Actor* actor = actorInstance->GetActor();
 
-        // Select the previously selected morph targets.
         EMotionFX::MorphSetup* morphSetup = actor->GetMorphSetup(0);
+        if (!morphSetup)
+        {
+            QMessageBox::warning(this, "No Morph Targets", "The actor has no morph targets.");
+            return;
+        }
+
+        // Select the previously selected morph targets.
         AZStd::vector<uint32> selection;
         if (!m_morphTargetNames.empty())
         {

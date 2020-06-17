@@ -19,10 +19,10 @@
 #include "UIFrameworkAPI.h"
 #include <AzToolsFramework/UI/LegacyFramework/Core/EditorFrameworkAPI.h>
 
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // '...' needs to have dll-interface to be used by clients of class '...'
 #include <QtCore/QObject>
 #include <QtWidgets/QWidget>
 #include <QtWidgets/QTableView>
-AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QStandardItem::d_ptr': class 'QScopedPointer<QStandardItemPrivate,QScopedPointerDeleter<T>>' needs to have dll-interface to be used by clients of class 'QStandardItem'
 #include <QtGui/QStandardItemModel>
 AZ_POP_DISABLE_WARNING
 
@@ -72,6 +72,7 @@ namespace AzToolsFramework
         , public AZ::Component
         , FrameworkMessages::Handler
         , LegacyFramework::CoreMessageBus::Handler
+        , public AZ::SystemTickBus::Handler
     {
         Q_OBJECT
     public:
@@ -82,6 +83,8 @@ namespace AzToolsFramework
 
         Framework();
         virtual ~Framework(void);
+
+        void OnSystemTick();
 
         //////////////////////////////////////////////////////////////////////////
         // AZ::Component
@@ -155,7 +158,6 @@ namespace AzToolsFramework
             HotkeyData() {}
             HotkeyData(const HotkeyDescription& desc)
                 : m_desc(desc) {}
-#if _MSC_VER >= 1900
             HotkeyData(const HotkeyData& other)
                 : m_desc(other.m_desc)
                 , m_actionsBound(other.m_actionsBound)
@@ -166,7 +168,6 @@ namespace AzToolsFramework
                 m_actionsBound = other.m_actionsBound;
                 return *this;
             }
-#endif
 
             void SelfBindActions();
         };

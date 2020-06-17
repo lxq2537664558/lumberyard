@@ -17,11 +17,9 @@
 #include "StdAfx.h"
 #include <ICryAnimation.h>
 
-#include "terrain.h"
 #include "StatObj.h"
 #include "ObjMan.h"
 #include "VisAreas.h"
-#include "terrain_sector.h"
 #include "3dEngine.h"
 #include "CullBuffer.h"
 #include "3dEngine.h"
@@ -251,6 +249,14 @@ void CObjManager::RenderObject(IRenderNode* pEnt,
             return;
         }
         break;
+#ifdef LY_TERRAIN_RUNTIME
+    case eERType_TerrainSystem:
+        if (!passInfo.RenderTerrain())
+        {
+            return;
+        }
+        break;
+#endif
     default:
         if (!passInfo.RenderEntities())
         {

@@ -8,22 +8,28 @@
 # this module scrapes the dependencies from stderr using -H
 
 
-import os, sys, tempfile, threading, re
-
-from waflib import Context, Errors, Logs, Task, Utils
-from waflib.Tools import c_preproc, c, cxx
-from waflib.TaskGen import feature, after, after_method, before_method
-import waflib.Node
+# System Imports
+import os
+import re
+import sys
+import tempfile
+import threading
 import subprocess
 
-from cry_utils import get_command_line_limit
+# waflib imports
+from waflib import Context, Errors, Logs, Task, Utils
+import waflib.Node
+from waflib.Tools import c_preproc, c, cxx
+from waflib.TaskGen import feature, after, after_method, before_method
+
+# lmbrwaflib imports
+from lmbrwaflib.cry_utils import get_command_line_limit
 
 # clang dependencies are a set of dots indicating include depth, followed by the absolute path
 #   ex:  ... /dev/Code/Framework/AzCore/AzCore/base.h
 re_clang_include = re.compile(r'\.\.* (.*)$')
 
-supported_compilers = ['clang', 'clang++',
-]
+supported_compilers = ['clang', 'clang++']
 
 lock = threading.Lock()
 nodes = {}  # Cache the path -> Node lookup
@@ -97,7 +103,7 @@ def exec_command_clang(self, *k, **kw):
 
 
 #############################################################################
-def wrap_class_clang(class_name):
+def wrap_class_clang(class_name, eligible_compilers):
     """
     @response file workaround for command-line length limits
     The indicated task class is replaced by a subclass to prevent conflicts in case the class is wrapped more than once
@@ -110,19 +116,19 @@ def wrap_class_clang(class_name):
     derived_class = type(class_name, (cls,), {})
 
     def exec_command(self, *k, **kw):
-        if self.env.CC_NAME in supported_compilers:
+        if self.env.CC_NAME in eligible_compilers:
             return exec_command_clang(self, *k, **kw)
         else:
             return super(derived_class, self).exec_command(*k, **kw)
 
     def exec_response_command(self, cmd, **kw):
-        if self.env.CC_NAME in supported_compilers:
+        if self.env.CC_NAME in eligible_compilers:
             return exec_response_command_clang(self, cmd, **kw)
         else:
             return super(derived_class, self).exec_response_command(cmd, **kw)
 
     def quote_response_command(self, *k, **kw):
-        if self.env.CC_NAME in supported_compilers:
+        if self.env.CC_NAME in eligible_compilers:
             return quote_response_command_clang(self, *k, **kw)
         else:
             return super(derived_class, self).quote_response_command(*k, **kw)
@@ -139,13 +145,13 @@ def wrap_class_clang(class_name):
 #############################################################################
 ## Wrap call exec commands
 for k in 'c cxx pch_clang cprogram cxxprogram cshlib cxxshlib cstlib cxxstlib'.split():
-    wrap_class_clang(k)
+    wrap_class_clang(k, supported_compilers)
 
 
 #############################################################################
 ## Task to create pch files
 class pch_clang(waflib.Task.Task):
-    run_str = '${CXX} -x c++-header ${ARCH_ST:ARCH} ${CXXFLAGS} ${CPPFLAGS} ${FRAMEWORKPATH_ST:FRAMEWORKPATH} ${CPPPATH_ST:INCPATHS} ${DEFINES_ST:DEFINES} ${SRC} -o ${TGT}'
+    run_str = '${CXX} -x c++-header ${ARCH_ST:ARCH} ${CXXFLAGS} ${CPPFLAGS} ${FRAMEWORKPATH_ST:FRAMEWORKPATH} ${CPPPATH_ST:INCPATHS} ${SYSTEM_CPPPATH_ST:SYSTEM_INCPATHS} ${DEFINES_ST:DEFINES} ${SRC} -o ${TGT}'
     scan = c_preproc.scan
     color = 'BLUE'
     nocache = True
@@ -233,7 +239,7 @@ def add_pch_clang(self):
             # if rtti is enabled for this source file then we need to make sure
             # rtti is enabled in the pch otherwise clang will fail to compile
             if ('-fno-rtti' not in t.env['CXXFLAGS']):
-                pch_task.env['CXXFLAGS'] = list(filter(lambda r:not r.startswith('-fno-rtti'), pch_task.env['CXXFLAGS']))
+                pch_task.env['CXXFLAGS'] = list([r for r in pch_task.env['CXXFLAGS'] if not r.startswith('-fno-rtti')])
 
             # Append PCH to task input to ensure correct ordering.  The task won't proceed until this is generated
             t.dep_nodes.append(pch_file)
@@ -290,11 +296,11 @@ def path_to_node(base_node, path, cached_nodes, b_drive_hack):
 
 #############################################################################
 ## dependency handler
-def wrap_compiled_task_clang(classname):
+def wrap_compiled_task_clang(classname, eligible_compilers):
     derived_class = type(classname, (waflib.Task.classes[classname],), {})
 
     def post_run(self):
-        if self.env.CC_NAME not in supported_compilers:
+        if self.env.CC_NAME not in eligible_compilers:
             return super(derived_class, self).post_run()
 
         if getattr(self, 'cached', None):
@@ -309,19 +315,35 @@ def wrap_compiled_task_clang(classname):
         except AttributeError:
             cached_nodes = bld.cached_nodes = {}
 
+        def check_std_paths(node):
+            return (node.is_child_of(bld.srcnode) or node.is_child_of(bld.bldnode))
+
+        def check_all_paths(node):
+            return (check_std_paths(node) or node.is_child_of(bld.engine_node))
+
+        is_node_trackable = check_std_paths if bld.is_engine_local() else check_all_paths
+
         # convert paths to nodes
         for path in self.clangdeps_paths:
             node = None
             assert os.path.isabs(path)
 
-            drive_hack = False
+            # Skip potential self-dependency
+            if '<built-in>' in path:
+                continue
+
+            try:
+                drive_hack = self.env['APPLY_CLANG_DRIVE_HACK'] or False
+            except:
+                drive_hack = False
+
             node = path_to_node(bld.root, path, cached_nodes, drive_hack)
 
             if not node:
                 raise ValueError('could not find %r for %r' % (path, self))
             else:
                 if not c_preproc.go_absolute:
-                    if not (node.is_child_of(bld.srcnode) or node.is_child_of(bld.bldnode)):
+                    if not is_node_trackable(node):
                         # System library
                         Logs.debug('clangdeps: Ignoring system include %r' % node)
                         continue
@@ -348,7 +370,7 @@ def wrap_compiled_task_clang(classname):
 
     def scan(self):
         # no previous signature or dependencies have changed for this node
-        if self.env.CC_NAME not in supported_compilers:
+        if self.env.CC_NAME not in eligible_compilers:
             return super(derived_class, self).scan()
 
         resolved_nodes = self.generator.bld.node_deps.get(self.uid(), [])
@@ -356,7 +378,7 @@ def wrap_compiled_task_clang(classname):
         return (resolved_nodes, unresolved_names)
 
     def exec_command(self, cmd, **kw):
-        if self.env.CC_NAME not in supported_compilers:
+        if self.env.CC_NAME not in eligible_compilers:
             return super(derived_class, self).exec_command(cmd, **kw)
 
         try:
@@ -442,13 +464,53 @@ def wrap_compiled_task_clang(classname):
 
         return ret
 
-
     derived_class.post_run = post_run
     derived_class.scan = scan
     derived_class.exec_command = exec_command
 
 
+def wrap_shlib_task_linux_clang(classname):
+    """
+    Wrap a shared library link task to support post-link validation of the shared object on linux
+    :param classname:   The name of the task class to wrap
+    """
+
+    if Utils.unversioned_sys_platform() != 'linux':
+        # Skip for non-linux platforms
+        return
+
+    derived_class = type(classname, (waflib.Task.classes[classname],), {})
+
+    def post_run(self):
+        if self.outputs:
+            error_msg_list = []
+            # Inspect all of the outputs and only process shared libraries (.so)
+            for output_node in self.outputs:
+                output_path_abs = output_node.abspath()
+                if not output_path_abs.lower().endswith('.so'):
+                    continue
+
+                # Run an 'ldd -r' command on the output shared library. The '-r' flag will process data and function
+                # relocation for the shared library and will uncover any undefined symbols that we may not catch
+                # during the linker process
+                output = subprocess.check_output(['ldd', '-r', output_path_abs]).decode(sys.stdout.encoding or 'iso8859-1', 'replace')
+                output_lines = output.split('\n')
+                for output_line in output_lines:
+                    if output_line.startswith('undefined symbol:'):
+                        error_msg_list.append("Linux Clang Error for {}:\n\t{}\n".format(output_path_abs, output_line))
+
+            if error_msg_list:
+                self.err_msg = '\n'.join(error_msg_list)
+                raise Errors.BuildError([self])
+
+        waflib.Task.Task.post_run(self)
+
+    derived_class.post_run = post_run
+
+
 #############################################################################
 ## Wrap compile commands to track dependencies for these types of files
 for compile_task in ('c', 'cxx', 'pch_clang'):
-    wrap_compiled_task_clang(compile_task)
+    wrap_compiled_task_clang(compile_task, supported_compilers)
+
+wrap_shlib_task_linux_clang('cxxshlib')

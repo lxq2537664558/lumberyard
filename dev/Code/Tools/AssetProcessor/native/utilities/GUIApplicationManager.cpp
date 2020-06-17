@@ -41,6 +41,8 @@
 #include <AzCore/base.h>
 #include <AzCore/Debug/Trace.h>
 #include <AzToolsFramework/Asset/AssetProcessorMessages.h>
+#include <AzToolsFramework/Asset/AssetUtils.h>
+#include <AzFramework/StringFunc/StringFunc.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Serialization/SerializeContext.h>
 
@@ -49,8 +51,7 @@
 #endif
 
 #if defined(AZ_PLATFORM_MAC)
-#include <AppKit/NSRunningApplication.h>
-#include <CoreServices/CoreServices.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 #include "MacDockIconHandler.h"
 #endif
@@ -85,6 +86,7 @@ namespace
             binaryDir.remove(tempFile);
         }
     }
+    
 }
 
 
@@ -92,8 +94,8 @@ GUIApplicationManager::GUIApplicationManager(int* argc, char*** argv, QObject* p
     : BatchApplicationManager(argc, argv, parent)
 {
 #if defined(AZ_PLATFORM_MAC)
-    // Since AP is not a proper Mac application yet it will not receive keyboard focus
-    // unless we tell the OS specifically to treat it as a foreground application
+    // Since AP is not shipped as a '.app' package, it will not receive keyboard focus
+    // unless we tell the OS specifically to treat it as a foreground application.
     ProcessSerialNumber psn = { 0, kCurrentProcess };
     TransformProcessType(&psn, kProcessTransformToForegroundApplication);
 #endif
@@ -393,7 +395,7 @@ bool GUIApplicationManager::Run()
 
 void GUIApplicationManager::NegotiationFailed()
 {
-    QString message = QCoreApplication::translate("error", "An attempt to connect to the game or editor has failed. The game or editor appears to be running from a different folder. Please restart the asset processor from the correct branch.");
+    QString message = QCoreApplication::translate("error", "An attempt to connect to the game or editor has failed. The game or editor appears to be running from a different folder or a different project. Please restart the asset processor from the correct branch or make sure the game/editor is running the same project as the asset processor.");
     QMetaObject::invokeMethod(this, "ShowMessageBox", Qt::QueuedConnection, Q_ARG(QString, QString("Negotiation Failed")), Q_ARG(QString, message), Q_ARG(bool, false));
 }
 
@@ -423,7 +425,7 @@ void GUIApplicationManager::ShowMessageBox(QString title,  QString msg, bool isC
     }
 }
 
-bool GUIApplicationManager::OnError(const char* window, const char* message)
+bool GUIApplicationManager::OnError(const char* /*window*/, const char* message)
 {
     // if we're in a worker thread, errors must not pop up a dialog box
     if (AssetProcessor::GetThreadLocalJobId() != 0)
@@ -597,16 +599,18 @@ void GUIApplicationManager::FileChanged(QString path)
     }
     else if (AssetUtilities::NormalizeFilePath(path).endsWith("gems.json", Qt::CaseInsensitive))
     {
-        QList<AssetProcessor::GemInformation> oldGemsList = GetPlatformConfiguration()->GetGemsInformation();
-        QList<AssetProcessor::GemInformation> newGemsList;
-        GetPlatformConfiguration()->ReadGems(newGemsList);
+        AZStd::vector<AzToolsFramework::AssetUtils::GemInfo> oldGemsList = GetPlatformConfiguration()->GetGemsInformation();
+        AZStd::vector<AzToolsFramework::AssetUtils::GemInfo> newGemsList;
+        QDir assetRoot;
+        AssetUtilities::ComputeAssetRoot(assetRoot);
+        AzToolsFramework::AssetUtils::GetGemsInfo(GetSystemRoot().absolutePath().toUtf8().constData(), assetRoot.absolutePath().toUtf8().constData(), GetGameName().toUtf8().constData(), newGemsList);
 
         for (auto oldGemIter = oldGemsList.begin(); oldGemIter != oldGemsList.end();)
         {
             bool gemMatch = false;
             for (auto newGemIter = newGemsList.begin(); newGemIter != newGemsList.end();)
             {
-                if (QString::compare(oldGemIter->m_identifier, newGemIter->m_identifier, Qt::CaseInsensitive) == 0)
+                if (AzFramework::StringFunc::Equal(oldGemIter->m_identifier.c_str(), newGemIter->m_identifier.c_str()))
                 {
                     gemMatch = true;
                     newGemIter = newGemsList.erase(newGemIter);
@@ -628,11 +632,11 @@ void GUIApplicationManager::FileChanged(QString path)
         // oldGemslist should contain the list of gems that got removed and newGemsList should contain the list of gems that were added to the project
         // if the project requires to be built again then we will quit otherwise we can restart
         bool exitApp = false;
-        for (const AssetProcessor::GemInformation& gemInfo : newGemsList)
+        for (const AzToolsFramework::AssetUtils::GemInfo& gemInfo : newGemsList)
         {
             if (!gemInfo.m_assetOnly)
             {
-                AZ_TracePrintf(AssetProcessor::ConsoleChannel, "Gem %s was added to the project and require building. Quitting\n", gemInfo.m_displayName.toUtf8().data());
+                AZ_TracePrintf(AssetProcessor::ConsoleChannel, "Gem %s was added to the project and require building. Quitting\n", gemInfo.m_gemName.c_str());
                 exitApp = true;
             }
         }

@@ -26,6 +26,12 @@
             "_comment": "LyShine"
         },
         {
+            "Path": "Gems/SliceFavorites",
+            "Uuid": "1bfc7270d4a1490daac8aa8b072c4489",
+            "Version": "0.1.0",
+            "_comment": "SliceFavorites"
+        },
+        {
             "Path": "Gems/Footsteps",
             "Uuid": "257393f09006498ab706cc4d4c8d4721",
             "Version": "0.1.0",
@@ -62,6 +68,12 @@
             "_comment": "LightningArc"
         },
         {
+            "Path": "Gems/ExpressionEvaluation",
+            "Uuid": "4c6f9df57ca2468f93c8d860ee6a1167",
+            "Version": "0.1.0",
+            "_comment": "ExpressionEvaluation"
+        },
+        {
             "Path": "Gems/Clouds",
             "Uuid": "4f293a6f11ab4cd7b9db3017d12b5eda",
             "Version": "0.1.0",
@@ -78,6 +90,12 @@
             "Uuid": "5a149b6b3c964064bd4970f0e92f72e2",
             "Version": "0.1.0",
             "_comment": "TextureAtlas"
+        },
+        {
+            "Path": "Gems/AssetValidation",
+            "Uuid": "5a5c3c10b91d4b4ea8baef474c5b5d49",
+            "Version": "0.1.0",
+            "_comment": "AssetValidation"
         },
         {
             "Path": "Gems/StarterGameGem",
@@ -98,10 +116,22 @@
             "_comment": "Gestures"
         },
         {
+            "Path": "Gems/AudioEngineWwise",
+            "Uuid": "67a80e2ac865406c990f2715feb55f7f",
+            "Version": "0.1.0",
+            "_comment": "AudioEngineWwise"
+        },
+        {
             "Path": "Gems/UiBasics",
             "Uuid": "6bb61c9e547043f0afc5019d6d460b78",
             "Version": "0.1.0",
             "_comment": "UiBasics"
+        },
+        {
+            "Path": "Gems/AudioSystem",
+            "Uuid": "6f63f2b6d07f4b89b4b7c86ebee7feb8",
+            "Version": "0.1.0",
+            "_comment": "AudioSystem"
         },
         {
             "Path": "Gems/SceneProcessing",
@@ -164,10 +194,10 @@
             "_comment": "FastNoise"
         },
         {
-            "Path": "Gems/UserLoginDefault",
-            "Uuid": "c9c25313197f489a8e9e8e6037fc62eb",
+            "Path": "Gems/LegacyTerrain",
+            "Uuid": "c87f9fc3e7054f3482311da444e84456",
             "Version": "0.1.0",
-            "_comment": "UserLoginDefault"
+            "_comment": "LegacyTerrain"
         },
         {
             "Path": "Gems/GameEffectSystem",
@@ -180,6 +210,12 @@
             "Uuid": "d969b997bb7f4342ba0b3eedc378025d",
             "Version": "0.1.0",
             "_comment": "ScriptCanvasDiagnosticLibrary"
+        },
+        {
+            "Path": "Gems/SaveData",
+            "Uuid": "d96ab03f53d14c9e83f9b4528c8576d7",
+            "Version": "0.1.0",
+            "_comment": "SaveData"
         },
         {
             "Path": "Gems/Rain",

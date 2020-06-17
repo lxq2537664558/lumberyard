@@ -11,25 +11,13 @@
 */
 #pragma once
 
-#include <IGameFramework.h>
-
-#include <AzCore/Component/Component.h>
-#include <AzCore/Component/EntityBus.h>
 #include <AzCore/RTTI/TypeInfo.h>
-
 #include <LyShine/Bus/UiCanvasManagerBus.h>
-
 #include <LyShine/Bus/UiCanvasBus.h>
-#include <LyShine/Bus/UiInteractableBus.h>
-#include <LyShine/Bus/UiAnimationBus.h>
 #include <LyShine/UiEntityContext.h>
-#include <LyShine/UiComponentTypes.h>
-
-#include "UiElementComponent.h"
-#include "UiSerialize.h"
-#include "Animation/UiAnimationSystem.h"
-
 #include <IFont.h>
+
+class UiCanvasComponent;
 
 namespace AZ
 {
@@ -61,7 +49,7 @@ public: // member functions
     AZ::EntityId CreateCanvas() override;
     AZ::EntityId LoadCanvas(const AZStd::string& canvasPathname) override;
     void UnloadCanvas(AZ::EntityId canvasEntityId) override;
-    AZ::EntityId FindLoadedCanvasByPathName(const AZStd::string& canvasPathname) override;
+    AZ::EntityId FindLoadedCanvasByPathName(const AZStd::string& canvasPathname, bool loadIfNotFound = false) override;
     CanvasEntityList GetLoadedCanvases() override;
     void SetLocalUserIdInputFilterForAllCanvases(AzFramework::LocalUserId localUserId) override;
     // ~UiCanvasManagerBus
@@ -121,8 +109,8 @@ private: // member functions
 
     void SortCanvasesByDrawOrder();
 
-    UiCanvasComponent* FindCanvasComponentByPathname(const string& name);
-    UiCanvasComponent* FindEditorCanvasComponentByPathname(const string& name);
+    UiCanvasComponent* FindCanvasComponentByPathname(const AZStd::string& name);
+    UiCanvasComponent* FindEditorCanvasComponentByPathname(const AZStd::string& name);
 
     // Handle input event for all loaded canvases
     bool HandleInputEventForLoadedCanvases(const AzFramework::InputChannel::Snapshot& inputSnapshot,
@@ -136,7 +124,7 @@ private: // member functions
     // Generate and handle a mouse position input event for all loaded canvases
     void GenerateMousePositionInputEvent();
 
-    AZ::EntityId LoadCanvasInternal(const string& assetIdPathname, bool forEditor, const string& sourceAssetPathname, UiEntityContext* entityContext,
+    AZ::EntityId LoadCanvasInternal(const AZStd::string& assetIdPathname, bool forEditor, const AZStd::string& fullSourceAssetPathname, UiEntityContext* entityContext,
         const AZ::SliceComponent::EntityIdToEntityIdMap* previousRemapTable = nullptr, AZ::EntityId previousCanvasId = AZ::EntityId());
 
     void QueueCanvasForDeletion(AZ::EntityId canvasEntityId);

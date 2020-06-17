@@ -14,6 +14,8 @@
 #include <AzCore/PlatformDef.h> ///< Platform/compiler specific defines
 #include <AzCore/base_Platform.h>
 
+#include <AzCore/AzCore_Traits_Platform.h>
+
 #ifndef AZ_ARRAY_SIZE
 /// Return an array size for static arrays.
 #   define  AZ_ARRAY_SIZE(__a)  (sizeof(__a)/sizeof(__a[0]))
@@ -42,52 +44,14 @@ namespace AZ
     const char* GetPlatformName(PlatformID platform);
 } // namespace AZ
 
-
-#if defined(AZ_COMPILER_GCC) && ((AZ_COMPILER_GCC > 3) || ((AZ_COMPILER_GCC == 3) && (__GNUC_MINOR__ >= 4)))
-#define AZSTD_STATIC_ASSERT_BOOL_CAST(_x) ((_x) == 0 ? false : true)
-#else
-#define AZSTD_STATIC_ASSERT_BOOL_CAST(_x) (bool)(_x)
-#endif
-
 #define AZ_JOIN(X, Y) AZSTD_DO_JOIN(X, Y)
 #define AZSTD_DO_JOIN(X, Y) AZSTD_DO_JOIN2(X, Y)
 #define AZSTD_DO_JOIN2(X, Y) X##Y
 
-#ifdef AZ_COMPILER_MSVC
-#   if AZ_COMPILER_MSVC < 1600
-#       define AZ_STATIC_ASSERT(_Exp, _Str)                                        \
-    typedef ::AZ::static_assert_test<                                              \
-    sizeof(::AZ::STATIC_ASSERTION_FAILURE< AZSTD_STATIC_ASSERT_BOOL_CAST(_Exp) >)> \
-        AZ_JOIN (azstd_static_assert_typedef_, __COUNTER__)
-#   else // AZ_COMPILER_MSVC >= 1600
-#       define  AZ_STATIC_ASSERT(_Exp, _Str) static_assert((_Exp), _Str)
-#endif //
-#elif defined(AZ_COMPILER_CLANG) || defined(AZ_COMPILER_GCC)
-#   define AZ_STATIC_ASSERT(_Exp, _Str) static_assert((_Exp), _Str)
-#else
-// generic version
-namespace AZ
-{
-    template<bool x>
-    struct STATIC_ASSERTION_FAILURE;
-    template<>
-    struct STATIC_ASSERTION_FAILURE<true>
-    {
-        enum
-        {
-            value = 1
-        };
-    };
-    template<int x>
-    struct static_assert_test{};
-} //namespace AZ
-#define AZ_STATIC_ASSERT(_Exp, _Str)                                               \
-    typedef ::AZ::static_assert_test<                                              \
-    sizeof(::AZ::STATIC_ASSERTION_FAILURE< AZSTD_STATIC_ASSERT_BOOL_CAST(_Exp) >)> \
-        AZ_JOIN (azstd_static_assert_typedef_, __LINE__)
-#endif //
-
-//////////////////////////////////////////////////////////////////////////
+// LUMBERYARD_DEPRECATED_BEGIN
+#define AZ_STATIC_ASSERT(_Exp, _Str) static_assert((_Exp), _Str)
+#define AZSTD_STATIC_ASSERT_BOOL_CAST(_x) (bool)(_x)
+// LUMBERYARD_DEPRECATED_END
 
 /**
  * Macros for calling into strXXX functions. These are simple wrappers that call into the platform
@@ -282,10 +246,10 @@ namespace AZ
     } u128;
 
     template<typename T>
-    inline T SizeAlignUp(T s, size_t a) { return (s+(a-1)) & ~(a-1); }
+    inline T SizeAlignUp(T s, size_t a) { return static_cast<T>((s+(a-1)) & ~(a-1)); }
 
     template<typename T>
-    inline T SizeAlignDown(T s, size_t a)   { return (s) & ~(a-1); }
+    inline T SizeAlignDown(T s, size_t a) { return static_cast<T>((s) & ~(a-1)); }
 
     template<typename T>
     inline T* PointerAlignUp(T* p, size_t a)    { return reinterpret_cast<T*>((reinterpret_cast<size_t>(p)+(a-1)) & ~(a-1));    }
@@ -300,7 +264,7 @@ namespace AZ
     template<typename T, typename S>
     T AliasCast(S source)
     {
-        AZ_STATIC_ASSERT(sizeof(T) == sizeof(S), "Source and target should be the same size!");
+        static_assert(sizeof(T) == sizeof(S), "Source and target should be the same size!");
         union
         {
             S source;
@@ -317,11 +281,6 @@ namespace AZ
 // We have a separate force_inline define for math function. This is due to fact in the past there was an issue
 // with SSE and __force_inline. This is not longer an issue, so we can just deprecate this.
 # define AZ_MATH_FORCE_INLINE AZ_FORCE_INLINE
-
-#if defined(AZ_COMPILER_SNC)
-// warning 1646: two-argument (aligned) member new missing -- using single argument version <-- we handle this in our memory manager
-#pragma diag_suppress=1646
-#endif
 
 
 // \ref AZ::AliasCast
@@ -348,24 +307,24 @@ namespace AZ
 
 // Macros to default the auto-generated copy/move constructors and assignment operators for a class
 #define AZ_DEFAULT_COPY(_Class) _Class(const _Class&) = default; _Class& operator=(const _Class&) = default;
-// MSVC only supports default move constructors and assignment operators starting from version 14.0,
-// so we can't add macros for AZ_DEFAULT_MOVE/AZ_DEFAULT_COPY_MOVE while we're supporting MSVC 12.0
+#define AZ_DEFAULT_MOVE(_Class) _Class(_Class&&) = default; _Class& operator=(_Class&&) = default;
+#define AZ_DEFAULT_COPY_MOVE(_Class) AZ_DEFAULT_COPY(_Class) AZ_DEFAULT_MOVE(_Class)
 
 // Macro that can be used to avoid unreferenced variable warnings
 #define AZ_UNUSED(x) (void)x;
 
 #define AZ_DEFINE_ENUM_BITWISE_OPERATORS(EnumType) \
-inline EnumType operator | (EnumType a, EnumType b) \
+inline constexpr EnumType operator | (EnumType a, EnumType b) \
     { return EnumType(((AZStd::underlying_type<EnumType>::type)a) | ((AZStd::underlying_type<EnumType>::type)b)); } \
-inline EnumType &operator |= (EnumType &a, EnumType b) \
-    { return (EnumType &)(((AZStd::underlying_type<EnumType>::type &)a) |= ((AZStd::underlying_type<EnumType>::type)b)); } \
-inline EnumType operator & (EnumType a, EnumType b) \
+inline constexpr EnumType& operator |= (EnumType &a, EnumType b) \
+    { return a = a | b; } \
+inline constexpr EnumType operator & (EnumType a, EnumType b) \
     { return EnumType(((AZStd::underlying_type<EnumType>::type)a) & ((AZStd::underlying_type<EnumType>::type)b)); } \
-inline EnumType &operator &= (EnumType &a, EnumType b) \
-    { return (EnumType &)(((AZStd::underlying_type<EnumType>::type &)a) &= ((AZStd::underlying_type<EnumType>::type)b)); } \
-inline EnumType operator ~ (EnumType a) \
+inline constexpr EnumType& operator &= (EnumType &a, EnumType b) \
+    { return a = a & b; } \
+inline constexpr EnumType operator ~ (EnumType a) \
     { return EnumType(~((AZStd::underlying_type<EnumType>::type)a)); } \
-inline  EnumType operator ^ (EnumType a, EnumType b) \
+inline constexpr EnumType operator ^ (EnumType a, EnumType b) \
     { return EnumType(((AZStd::underlying_type<EnumType>::type)a) ^ ((AZStd::underlying_type<EnumType>::type)b)); } \
-inline EnumType &operator ^= (EnumType &a, EnumType b) \
-    { return (EnumType &)(((AZStd::underlying_type<EnumType>::type &)a) ^= ((AZStd::underlying_type<EnumType>::type)b)); }
+inline constexpr EnumType& operator ^= (EnumType &a, EnumType b) \
+    { return a = a ^ b; }

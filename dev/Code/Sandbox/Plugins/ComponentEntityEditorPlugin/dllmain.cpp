@@ -10,7 +10,7 @@
 *
 */
 
-#include "stdafx.h"
+#include "ComponentEntityEditorPlugin_precompiled.h"
 
 // All plugins suffer from the following warning:
 //  warning C4273: 'GetIEditor' : inconsistent dll linkage
@@ -27,7 +27,7 @@
 #include <Include/IEditorClassFactory.h>
 #include "ComponentEntityEditorPlugin.h"
 
-#if AZ_TRAIT_OS_PLATFORM_APPLE
+#if AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
 typedef HANDLE HINSTANCE;
 #define DLL_PROCESS_ATTACH 1
 #endif

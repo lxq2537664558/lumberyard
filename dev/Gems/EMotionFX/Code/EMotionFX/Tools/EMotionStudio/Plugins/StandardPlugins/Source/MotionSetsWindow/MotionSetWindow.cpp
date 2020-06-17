@@ -968,6 +968,7 @@ namespace EMStudio
     void MotionSetWindow::OnLoadEntries()
     {
         const AZStd::vector<AZStd::string> filenames = GetMainWindow()->GetFileManager()->LoadMotionsFileDialog(this);
+        GetMainWindow()->activateWindow();
         if (filenames.empty())
         {
             return;
@@ -1407,7 +1408,6 @@ namespace EMStudio
         {
             AZStd::string motionFileName;
             AZStd::string tempString;
-            const EMotionFX::MotionSet::MotionEntries& motionEntries = motionSet->GetMotionEntries();
             for (const auto& item : motionEntries)
             {
                 const EMotionFX::MotionSet::MotionEntry* motionEntry = item.second;

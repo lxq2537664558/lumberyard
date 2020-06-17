@@ -20,6 +20,8 @@
 #include <AzFramework/Asset/AssetCatalogBus.h>
 #include <AzFramework/IO/FileOperations.h>
 #include <AzCore/Jobs/LegacyJobExecutor.h>
+#include <AzFramework/Viewport/ViewportBus.h>
+#include <MathConversion.h>
 
 #include <LoadScreenBus.h>
 
@@ -36,6 +38,7 @@ namespace AzRTT
 #define RENDERER_H_SECTION_2 2
 #define RENDERER_H_SECTION_3 3
 #define RENDERER_H_SECTION_4 4
+#define RENDERER_H_SECTION_5 5
 #endif
 
 #if defined(AZ_RESTRICTED_PLATFORM)
@@ -44,6 +47,8 @@ namespace AzRTT
         #include "Xenia/Renderer_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_h_salem.inl"
     #endif
 #endif
 
@@ -153,7 +158,7 @@ typedef int (* pDrawModelFunc)(void);
 #define ZPASS_DEPTH_SORT_DEFAULT_VAL 1
 #define TEXSTREAMING_UPDATETYPE_DEFAULT_VAL 1
 
-#if defined(WIN32) || defined(APPLE) || defined(LINUX)
+#if defined(WIN32) || defined(APPLE) || defined(LINUX) || defined(SET_CBUFFER_NATIVE_DEPTH_DEAFULT_VAL_TO_1)
     #define CBUFFER_NATIVE_DEPTH_DEAFULT_VAL 1
 #else
     #define CBUFFER_NATIVE_DEPTH_DEAFULT_VAL 0
@@ -165,6 +170,8 @@ typedef int (* pDrawModelFunc)(void);
         #include "Xenia/Renderer_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_h_salem.inl"
     #endif
 #endif
 
@@ -544,12 +551,15 @@ private:
 struct SRenderPipeline;
 class CRenderer
     : public IRenderer
+    , public AzFramework::ViewportRequestBus::Handler
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION RENDERER_H_SECTION_3
     #if defined(AZ_PLATFORM_XENIA)
         #include "Xenia/Renderer_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_h_salem.inl"
     #endif
 #endif
 {
@@ -792,6 +802,8 @@ public:
         #include "Xenia/Renderer_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Renderer_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Renderer_h_salem.inl"
     #endif
 #endif
 
@@ -902,7 +914,7 @@ public:
     unsigned long GetNvidiaDriverVersion() const { return m_nvidiaDriverVersion; }
     void SetNvidiaDriverVersion(unsigned long version) { m_nvidiaDriverVersion = version; }
 
-    virtual int GetNumGeomInstances()
+    virtual int GetNumGeomInstances() const
     {
 #if !defined(RELEASE)
         return m_RP.m_PS[m_RP.m_nProcessThreadID].m_nInsts;
@@ -911,7 +923,7 @@ public:
 #endif
     };
 
-    virtual int GetNumGeomInstanceDrawCalls()
+    virtual int GetNumGeomInstanceDrawCalls() const
     {
 #if !defined(RELEASE)
         return m_RP.m_PS[m_RP.m_nProcessThreadID].m_nInstCalls;
@@ -920,7 +932,7 @@ public:
 #endif
     };
 
-    virtual int GetCurrentNumberOfDrawCalls()
+    virtual int GetCurrentNumberOfDrawCalls() const
     {
         int nDIPs = 0;
 #if defined(ENABLE_PROFILING_CODE)
@@ -933,7 +945,7 @@ public:
         return nDIPs;
     }
 
-    virtual void GetCurrentNumberOfDrawCalls(int& nGeneral, int& nShadowGen)
+    virtual void GetCurrentNumberOfDrawCalls(int& nGeneral, int& nShadowGen) const
     {
         int nDIPs = 0;
 #if defined(ENABLE_PROFILING_CODE)
@@ -949,10 +961,9 @@ public:
         nGeneral = nDIPs;
         nShadowGen = m_RP.m_PS[nThr].m_nDIPs[EFSLIST_SHADOW_GEN];
 #endif
-        return;
     }
 
-    virtual int GetCurrentNumberOfDrawCalls(const uint32 EFSListMask)
+    virtual int GetCurrentNumberOfDrawCalls(const uint32 EFSListMask) const
     {
         int nDIPs = 0;
 #if defined(ENABLE_PROFILING_CODE)
@@ -968,7 +979,7 @@ public:
         return nDIPs;
     }
 
-    virtual float GetCurrentDrawCallRTTimes(const uint32 EFSListMask)
+    virtual float GetCurrentDrawCallRTTimes(const uint32 EFSListMask) const
     {
         float fDIPTimes = 0.0f;
         int nThr = m_pRT->GetThreadList();
@@ -1058,7 +1069,7 @@ public:
     virtual void  DrawPrimitivesInternal(CVertexBuffer* src, int vert_num, const eRenderPrimitiveType prim_type) = 0;
 
     virtual bool    ChangeDisplay(unsigned int width, unsigned int height, unsigned int cbpp) = 0;
-    virtual void  ChangeViewport(unsigned int x, unsigned int y, unsigned int width, unsigned int height, bool bMainViewport = false) = 0;
+    virtual void  ChangeViewport(unsigned int x, unsigned int y, unsigned int width, unsigned int height, bool bMainViewport = false, float scaleWidth = 1.0f, float scaleHeight = 1.0f) = 0;
 
     virtual bool    SaveTga(unsigned char* sourcedata, int sourceformat, int w, int h, const char* filename, bool flip) const;
 
@@ -1189,6 +1200,35 @@ public:
     virtual int GetOverlayHeight() const { return m_nativeHeight; }
 #endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
 
+    // ViewportRequestBus::Handler
+    virtual AZ::Vector2 GetViewportSize() const override { return AZ::Vector2(static_cast<float>(GetOverlayWidth()), static_cast<float>(GetOverlayHeight())); }
+    
+    virtual AZ::Vector3 UnprojectViewportToWorldDirection(const AZ::Vector2& viewportPos) override 
+    {
+        const CCamera& camera = GetCamera();
+
+        Vec3 worldPos;
+        if (!camera.Unproject(Vec3(viewportPos.GetX(), viewportPos.GetY(), 0.f), worldPos))
+        {
+            return AZ::Vector3::CreateZero();
+        }
+
+        return LYVec3ToAZVec3((worldPos - camera.GetPosition()).GetNormalized());
+    }
+
+    virtual AZ::Vector2 ProjectWorldToViewportPosition(const AZ::Vector3& worldPos) override
+    { 
+        const CCamera& camera = GetCamera();
+
+        Vec3 screenPos;
+        if (camera.Project(AZVec3ToLYVec3(worldPos), screenPos))
+        {
+            return AZ::Vector2(screenPos.x, screenPos.y);
+        }
+
+        return AZ::Vector2::CreateZero();
+    }
+
     void SetPixelAspectRatio(float fPAR) {m_pixelAspectRatio = fPAR; }
     virtual float GetPixelAspectRatio() const { return (m_pixelAspectRatio); }
 
@@ -1229,7 +1269,7 @@ public:
     virtual CRenderView* GetRenderViewForThread(int nThreadID) final;
     Matrix44A GetCameraMatrix();
 
-    void GetPolyCount(int& nPolygons, int& nShadowPolys)
+    void GetPolyCount(int& nPolygons, int& nShadowPolys) const
     {
 #if defined(ENABLE_PROFILING_CODE)
         nPolygons = GetPolyCount();
@@ -1239,7 +1279,7 @@ public:
 #endif
     }
 
-    int GetPolyCount()
+    int GetPolyCount() const
     {
 #if defined(ENABLE_PROFILING_CODE)
         int nPolys = 0;
@@ -1806,9 +1846,10 @@ public:
     virtual void ClearShaderItem(SShaderItem* pShaderItem);
     virtual void UpdateShaderItem(SShaderItem* pShaderItem, _smart_ptr<IMaterial> pMaterial);
     virtual void ForceUpdateShaderItem(SShaderItem* pShaderItem, _smart_ptr<IMaterial> pMaterial);
-    virtual void RefreshShaderResourceConstants(SShaderItem* pShaderItem, _smart_ptr<IMaterial> pMaterial);
+    virtual void RefreshShaderResourceConstants(SShaderItem* pShaderItem, IMaterial* pMaterial);
 
     void RT_UpdateShaderItem (SShaderItem* pShaderItem, IMaterial* material);
+    void RT_RefreshShaderResourceConstants(SShaderItem* shaderItem) const;
 
     bool UseHalfFloatRenderTargets();
 
@@ -1831,6 +1872,25 @@ public:
     virtual void RemoveSyncWithMainListener(const ISyncMainWithRenderListener* pListener);
 
     IGPUParticleEngine* GetGPUParticleEngine() const { return m_gpuParticleEngine; }
+
+    void InitializeVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer) final
+    {
+        m_pRT->RC_InitializeVideoRenderer(pVideoRenderer);
+    }
+    void RT_InitializeVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer);
+
+    void CleanupVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer) final
+    {
+        m_pRT->RC_CleanupVideoRenderer(pVideoRenderer);
+    }
+    void RT_CleanupVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer);
+
+    void DrawVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer, const AZ::VideoRenderer::DrawArguments& drawArguments) final
+    {
+        m_pRT->RC_DrawVideoRenderer(pVideoRenderer, drawArguments);
+    }
+    virtual void RT_DrawVideoRenderer(AZ::VideoRenderer::IVideoRenderer* pVideoRenderer, const AZ::VideoRenderer::DrawArguments& drawArguments) = 0;
+
 protected:
     void EF_AddParticle(CREParticle* pParticle, SShaderItem& shaderItem, CRenderObject* pRO, const SRenderingPassInfo& passInfo);
     void EF_RemoveParticlesFromScene();
@@ -2041,7 +2101,7 @@ public:
     static int CV_r_DeferredShadingSortLights;
     static int CV_r_DeferredShadingAmbientSClear;
     static int CV_r_batchtype;
-#if defined(WIN32) || defined(WIN64) || defined(LINUX) || defined(APPLE)
+#if defined(WIN32) || defined(WIN64) || defined(LINUX) || defined(APPLE) || defined(USE_SILHOUETTEPOM_CVAR)
     //HACK: make sure we can only use it for dx11
     static int CV_r_SilhouettePOM;
 #else
@@ -2087,15 +2147,24 @@ public:
     static int CV_r_watervolumecausticsdensity;
     static int CV_r_watervolumecausticsresolution;
 #if !defined(CONSOLE)
-    static int CV_r_shadersorbis; // ACCEPTED_USE
+    static int CV_r_shadersorbis;
     static int CV_r_shadersdx10;
     static int CV_r_shadersdx11;
     static int CV_r_shadersGL4;
     static int CV_r_shadersGLES3;
-    static int CV_r_shadersdurango; // ACCEPTED_USE
+    static int CV_r_shadersdurango;
     static int CV_r_shadersMETAL;
     
-    static int CV_r_ProvoHardwareMode;
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION RENDERER_H_SECTION_5
+#if defined(AZ_PLATFORM_XENIA)
+#include "Xenia/Renderer_h_xenia.inl"
+#elif defined(AZ_PLATFORM_PROVO)
+#include "Provo/Renderer_h_provo.inl"
+#elif defined(AZ_PLATFORM_SALEM)
+#include "Salem/Renderer_h_salem.inl"
+#endif
+#endif
 
     static int CV_r_shadersPlatform;
 #endif
@@ -2135,6 +2204,15 @@ public:
     static int CV_r_StereoOutput;
     static int CV_r_StereoFlipEyes;
     static int CV_r_GetScreenShot;
+    enum class ScreenshotType : int // define as int to match the CVar
+    {
+        None               = 0,
+        HdrAndNormal       = 1,
+        Normal             = 2,
+        // Now for internal ScreenshotRequestBus use only.
+        NormalWithFilepath = 3,
+        NormalToBuffer     = 4
+    };
 
     static int CV_r_BreakOnError;
 
@@ -2435,6 +2513,7 @@ public:
     static float CV_r_texturesstreamingResidencyThrottle;
     static float CV_r_envcmupdateinterval;
     static float CV_r_envtexupdateinterval;
+    static int   CV_r_SlimGBuffer;
     static float CV_r_TextureLodDistanceRatio;
     static float CV_r_water_godrays_distortion;
     static float CV_r_waterupdateFactor;
@@ -2559,13 +2638,11 @@ public:
     static int CV_r_GMEM_DOF_Gather1_Quality;
     static int CV_r_GMEM_DOF_Gather2_Quality;
 
-    //  Confetti BEGIN: Igor Lobanchikov :END
     static int CV_r_RainUseStencilMasking;
 
     // Confetti Thomas Zeng: 0 = disable, 1 = enable
     static int CV_r_EnableComputeDownSampling;
 
-    //  Confetti BEGIN: Igor Lobanchikov :END is respected by OpenGL ES only
     static int CV_r_ForceFixedPointRenderTargets;
 
     // Confetti Vera
@@ -2587,6 +2664,9 @@ public:
 
     static float CV_r_minConsoleFontSize;
     static float CV_r_maxConsoleFontSize;
+
+    // Linux CVARS
+    static int CV_r_linuxSkipWindowCreation;
 
     // Graphics programmers: Use these in your code for local tests/debugging.
     // Delete all references in your code before you submit
@@ -2619,8 +2699,8 @@ public:
     virtual void EnableGPUTimers2(bool bEnabled) {};
     virtual void AllowGPUTimers2(bool bAllow) {}
 
-    virtual const RPProfilerStats* GetRPPStats(ERenderPipelineProfilerStats eStat, bool bCalledFromMainThread = true) { return NULL; }
-    virtual const RPProfilerStats* GetRPPStatsArray(bool bCalledFromMainThread = true) { return NULL; }
+    virtual const RPProfilerStats* GetRPPStats(ERenderPipelineProfilerStats eStat, bool bCalledFromMainThread = true) const { return nullptr; }
+    virtual const RPProfilerStats* GetRPPStatsArray(bool bCalledFromMainThread = true) const { return nullptr; }
 
     virtual int GetPolygonCountByType(uint32 EFSList, EVertexCostTypes vct, uint32 z, bool bCalledFromMainThread = true) { return 0; }
 
@@ -2646,6 +2726,31 @@ public:
             return m_RP.m_pRNDrawCallsInfoPerMesh[m_RP.m_nProcessThreadID];
         }
     }
+    
+    // Added functionality for retrieving previous frames stats to use this frame
+    virtual RNDrawcallsMapMesh& GetDrawCallsInfoPerMeshPreviousFrame(bool mainThread = true)
+    {
+        if (mainThread)
+        {
+            return m_RP.m_pRNDrawCallsInfoPerMeshPreviousFrame[m_RP.m_nFillThreadID];
+        }
+        else
+        {
+            return m_RP.m_pRNDrawCallsInfoPerMeshPreviousFrame[m_RP.m_nProcessThreadID];
+        }
+    }
+    virtual RNDrawcallsMapNode& GetDrawCallsInfoPerNodePreviousFrame(bool mainThread = true)
+    {
+        if (mainThread)
+        {
+            return m_RP.m_pRNDrawCallsInfoPerNodePreviousFrame[m_RP.m_nFillThreadID];
+        }
+        else
+        {
+            return m_RP.m_pRNDrawCallsInfoPerNodePreviousFrame[m_RP.m_nProcessThreadID];
+        }
+    }
+
     virtual int GetDrawCallsPerNode(IRenderNode* pRenderNode);
 
     //Routine to perform an emergency flush of a particular render node from the stats, as not all render node holders are delay-deleted
@@ -2665,8 +2770,10 @@ public:
     {
         for (int i = 0; i < RT_COMMAND_BUF_COUNT; i++)
         {
-            m_RP.m_pRNDrawCallsInfoPerMesh[ i ].clear();
-            m_RP.m_pRNDrawCallsInfoPerNode[ i ].clear();
+            m_RP.m_pRNDrawCallsInfoPerMesh[i].swap(m_RP.m_pRNDrawCallsInfoPerMeshPreviousFrame[i]);
+            m_RP.m_pRNDrawCallsInfoPerMesh[i].clear();
+            m_RP.m_pRNDrawCallsInfoPerNode[i].swap(m_RP.m_pRNDrawCallsInfoPerNodePreviousFrame[i]);
+            m_RP.m_pRNDrawCallsInfoPerNode[i].clear();
         }
     }
 #endif

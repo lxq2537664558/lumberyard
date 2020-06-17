@@ -19,17 +19,17 @@
 #include "StatObj.h"
 #include "ObjMan.h"
 #include "VisAreas.h"
-#include "terrain_sector.h"
 #include "CullBuffer.h"
 #include "3dEngine.h"
 #include "IndexedMesh.h"
 #include "Brush.h"
 #include "Vegetation.h"
-#include "terrain.h"
 #include "ObjectsTree.h"
 #include <IResourceManager.h>
 #include "DecalRenderNode.h"
 #include <cctype>
+#include <Terrain/ITerrainNode.h>
+#include <Terrain/Bus/LegacyTerrainBus.h>
 
 #include <StatObjBus.h>
 #include <Vegetation/StaticVegetationBus.h>
@@ -163,7 +163,6 @@ void CObjManager::UnloadObjects(bool bDeleteAll)
     //If this collection is not cleared on unload then character materials will
     //leak and most likely crash the engine across level loads.
     stl::free_container(m_collectedMaterials);
-
     stl::free_container(m_lstTmpCastingNodes);
     stl::free_container(m_decalsToPrecreate);
     stl::free_container(m_tmpAreas0);
@@ -1381,15 +1380,14 @@ void CObjManager::MakeDepthCubemapRenderItemList(CVisArea* pReceiverArea, const 
             Get3DEngine()->GetObjectTree()->FillDepthCubemapRenderList(cubemapAABB, passInfo, objectsList);
         }
 
-        if (GetTerrain() != nullptr && passInfo.RenderTerrain() && Get3DEngine()->m_bShowTerrainSurface)
+        if (passInfo.RenderTerrain())
         {
-            PodArray<CTerrainNode*> terrainNodes;
-            GetTerrain()->IntersectWithBox(cubemapAABB, &terrainNodes);
-
+            PodArray<ITerrainNode*> terrainNodes;
+            LegacyTerrain::LegacyTerrainDataRequestBus::Broadcast(&LegacyTerrain::LegacyTerrainDataRequests::IntersectWithBox, cubemapAABB, &terrainNodes);
             // make list of entities
             for (int s = 0; s < terrainNodes.Count(); s++)
             {
-                CTerrainNode* pNode = terrainNodes[s];
+                ITerrainNode* pNode = terrainNodes[s];
 
                 objectsList->Add(pNode);
             }

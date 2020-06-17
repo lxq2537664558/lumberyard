@@ -12,7 +12,8 @@
 
 #include "native/tests/AssetProcessorTest.h"
 
-#include "native/utilities/assetUtils.h"
+#include <AzToolsFramework/ToolsFileUtils/ToolsFileUtils.h>
+#include <AzCore/IO/SystemFile.h>
 
 #include <QDir>
 #include <QFileInfo>
@@ -127,10 +128,10 @@ TEST_F(AssetUtilitiesTest, UpdateToCorrectCase_ExistingFile_ReturnsTrue_Corrects
     
     for (QString triedThing : thingsToTry)
     {
-        QString lowercaseVersion = triedThing;
+        triedThing = NormalizeFilePath(triedThing);
         EXPECT_TRUE(UnitTestUtils::CreateDummyFile(tempPath.absoluteFilePath(triedThing)));
 
-        lowercaseVersion = lowercaseVersion.toLower();
+        QString lowercaseVersion = triedThing.toLower();
         // each one should be found.   If it fails, we'll pipe out the name of the file it fails on for extra context.
         
         EXPECT_TRUE(AssetUtilities::UpdateToCorrectCase(canonicalTempDirPath, lowercaseVersion)) << "File being Examined: " << lowercaseVersion.toUtf8().constData();
@@ -345,6 +346,36 @@ TEST_F(AssetUtilitiesTest, GenerateFingerprint_MultipleFile_Differs)
     EXPECT_NE(fingerprint1, fingerprint2);
     EXPECT_NE(fingerprint2, fingerprint3);
     EXPECT_NE(fingerprint3, fingerprint1);
+}
+
+TEST_F(AssetUtilitiesTest, GenerateFingerprint_OrderOnceJobDependency_NoChange)
+{
+    // OrderOnce Job dependency should not alter the fingerprint of the job
+    QTemporaryDir dir;
+    QDir tempPath(dir.path());
+    const char relFile1Path[] = "file.txt";
+    const char relFile2Path[] = "secondFile.txt";
+    QString absoluteTestFile1Path = tempPath.absoluteFilePath(relFile1Path);
+    QString absoluteTestFile2Path = tempPath.absoluteFilePath(relFile2Path);
+
+    EXPECT_TRUE(UnitTestUtils::CreateDummyFile(absoluteTestFile1Path, "contents"));
+    EXPECT_TRUE(UnitTestUtils::CreateDummyFile(absoluteTestFile2Path, "contents"));
+
+    AssetProcessor::JobDetails jobDetail;
+
+    jobDetail.m_jobEntry.m_databaseSourceName = relFile1Path;
+    jobDetail.m_jobEntry.m_watchFolderPath = tempPath.absolutePath();
+    jobDetail.m_fingerprintFiles.insert(AZStd::make_pair(absoluteTestFile1Path.toUtf8().constData(), relFile1Path));
+  
+    AZ::u32 fingerprintWithoutOrderOnceJobDependency = AssetUtilities::GenerateFingerprint(jobDetail);
+
+    AssetBuilderSDK::SourceFileDependency dep = { relFile2Path, AZ::Uuid::CreateNull() };
+    AssetBuilderSDK::JobDependency jobDep("key", "pc", AssetBuilderSDK::JobDependencyType::OrderOnce, dep);
+    jobDetail.m_jobDependencyList.push_back(AssetProcessor::JobDependencyInternal(jobDep));
+
+    AZ::u32 fingerprintWithOrderOnceJobDependency = AssetUtilities::GenerateFingerprint(jobDetail);
+
+    EXPECT_EQ(fingerprintWithoutOrderOnceJobDependency, fingerprintWithOrderOnceJobDependency);
 }
 
 namespace AssetUtilsTest

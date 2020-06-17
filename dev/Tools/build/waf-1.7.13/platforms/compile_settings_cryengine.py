@@ -10,12 +10,16 @@
 #
 # Original file Copyright Crytek GMBH or its affiliates, used under license.
 #
-    
-from waflib.Configure import conf
-from cry_utils import append_kw_entry, prepend_kw_entry, append_to_unique_list
-from waf_branch_spec import LUMBERYARD_COPYRIGHT_YEAR
+
+# waflib imports
 from waflib import Options
-import os
+from waflib.Configure import conf
+
+# lmbrwaflib imports
+from lmbrwaflib.cry_utils import append_kw_entry, prepend_kw_entry, append_to_unique_list
+
+# misc imports
+from waf_branch_spec import LUMBERYARD_COPYRIGHT_YEAR
 
 
 @conf
@@ -47,12 +51,6 @@ def set_editor_flags(self, kw):
 
     kw['client_only'] = True
 
-    prepend_kw_entry(kw,'includes',['.',
-                                    self.CreateRootRelativePath('Code/Sandbox/Editor'),
-                                    self.CreateRootRelativePath('Code/Sandbox/Editor/Include'),
-                                    self.CreateRootRelativePath('Code/Sandbox/Plugins/EditorCommon'),
-                                    self.CreateRootRelativePath('Code/CryEngine/CryCommon')])
-
     if 'priority_includes' in kw:
         prepend_kw_entry(kw,'includes',kw['priority_includes'])
 
@@ -68,9 +66,6 @@ def set_editor_flags(self, kw):
 @conf   
 def set_rc_flags(self, kw, ctx):
 
-    prepend_kw_entry(kw,'includes',['.',
-                                    self.CreateRootRelativePath('Code/CryEngine/CryCommon'),
-                                    self.CreateRootRelativePath('Code/Sandbox/Plugins/EditorCommon')])
     compileDefines =  ['RESOURCE_COMPILER',
                    'FORCE_STANDARD_ASSERT',
                    '_CRT_SECURE_NO_DEPRECATE=1',
@@ -85,9 +80,6 @@ def set_rc_flags(self, kw, ctx):
 ###############################################################################
 @conf
 def set_pipeline_flags(self, kw, ctx):
-
-    prepend_kw_entry(kw,'includes',['.',
-                                   self.CreateRootRelativePath('Code/CryEngine/CryCommon')])
 
     append_kw_entry(kw,'defines',['RESOURCE_COMPILER',
                                   'FORCE_STANDARD_ASSERT',

@@ -22,20 +22,11 @@
 
 namespace Physics
 {
-    void PhysicsTestEnvironment::SetupEnvironment()
-    {
-        AZ::AllocatorInstance<AZ::SystemAllocator>::Create();
-    }
-
-    void PhysicsTestEnvironment::TeardownEnvironment()
-    {
-        AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
-    }
-
     ErrorHandler::ErrorHandler(const char* errorPattern)
+        : m_errorCount(0)
+        , m_warningCount(0)
+        , m_errorPattern(errorPattern)
     {
-        m_errorPattern = AZStd::string(errorPattern);
-        m_errorCount = 0;
         AZ::Debug::TraceMessageBus::Handler::BusConnect();
     }
 
@@ -44,34 +35,40 @@ namespace Physics
         AZ::Debug::TraceMessageBus::Handler::BusDisconnect();
     }
 
-    int ErrorHandler::GetErrorCount()
+    int ErrorHandler::GetErrorCount() const
     {
         return m_errorCount;
     }
 
+    int ErrorHandler::GetWarningCount() const
+    {
+        return m_warningCount;
+    }
+
     bool ErrorHandler::SuppressExpectedErrors(const char* window, const char* message)
     {
-        if (AZStd::string(message).find(m_errorPattern) != -1)
-        {
-            m_errorCount++;
-            return true;
-        }
-
-        return false;
+        return AZStd::string(message).find(m_errorPattern) != AZStd::string::npos;
     }
 
     bool ErrorHandler::OnPreError(const char* window, const char* fileName, int line, const char* func, const char* message)
     {
+        m_errorCount++;
         return SuppressExpectedErrors(window, message);
     }
 
     bool ErrorHandler::OnPreWarning(const char* window, const char* fileName, int line, const char* func, const char* message)
     {
+        m_warningCount++;
+        return SuppressExpectedErrors(window, message);
+    }
+
+    bool ErrorHandler::OnPrintf(const char* window, const char* message)
+    {
         return SuppressExpectedErrors(window, message);
     }
 
     // helper functions
-    AZStd::shared_ptr<World> GenericPhysicsInterfaceTest::CreateTestWorld()
+    AZStd::shared_ptr<World> GenericPhysicsFixture::CreateTestWorld()
     {
         AZStd::shared_ptr<World> world;
         WorldConfiguration worldConfiguration;
@@ -177,7 +174,16 @@ namespace Physics
         }
     }
 
-    void UpdateDefaultWorld(float timeStep, AZ::u32 numSteps)
+    void UpdateWorldSplitSim(World* world, float timeStep, AZ::u32 numSteps)
+    {
+        for (AZ::u32 i = 0; i < numSteps; i++)
+        {
+            world->StartSimulation(timeStep);
+            world->FinishSimulation();
+        }
+    }
+
+    void UpdateDefaultWorld(AZ::u32 numSteps, float timeStep)
     {
         AZStd::shared_ptr<World> defaultWorld;
         DefaultWorldBus::BroadcastResult(defaultWorld, &DefaultWorldRequests::GetDefaultWorld);

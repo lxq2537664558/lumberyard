@@ -38,10 +38,16 @@
 
 #if defined (AZ_PLATFORM_WINDOWS)
 #define LEGACY_RC_RELATIVE_PATH "/rc/rc.exe"    // Location of the legacy RC compiler relative to the BinXX folder the asset processor resides in
-#elif defined (AZ_PLATFORM_MAC)
+#elif defined (AZ_PLATFORM_MAC) || defined(AZ_PLATFORM_LINUX)
 #define LEGACY_RC_RELATIVE_PATH "/rc/rc"    // Location of the legacy RC compiler relative to the BinXX folder the asset processor resides in
+#elif defined (AZ_PLATFORM_LINUX)
+#define LEGACY_RC_RELATIVE_PATH "/rc/rc" //KDAB verify it
 #else
 #error Unsupported Platform for RC
+#endif
+
+#if AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
+    #include <native/utilities/Utils_UnixLike.h>
 #endif
 
 
@@ -150,7 +156,7 @@ namespace AssetProcessor
             return false;
         }
 
-#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
+#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
 
         if (!AZ::IO::SystemFile::Exists(rcExecutableFullPath.toUtf8().data()))
         {
@@ -161,16 +167,16 @@ namespace AssetProcessor
         this->m_rcExecutableFullPath = rcExecutableFullPath;
         this->m_resourceCompilerInitialized = true;
         return true;
-#else // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
+#else // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE  || defined(AZ_PLATFORM_LINUX)
         AZ_TracePrintf(AssetProcessor::DebugChannel, "There is no implementation for how to compile assets on this platform");
         return false;
-#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
+#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
     }
 
     bool NativeLegacyRCCompiler::Execute(const QString& inputFile, const QString& watchFolder, const QString& platformIdentifier, 
         const QString& params, const QString& dest, const AssetBuilderSDK::JobCancelListener* jobCancelListener, Result& result) const
     {
-#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
+#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
         if (!this->m_resourceCompilerInitialized)
         {
             result.m_exitCode = JobExitCode_RCCouldNotBeLaunched;
@@ -192,6 +198,16 @@ namespace AssetProcessor
         processLaunchInfo.m_showWindow = false;
         processLaunchInfo.m_workingDirectory = m_systemRoot.absolutePath().toUtf8().data();
         processLaunchInfo.m_processPriority = AzToolsFramework::PROCESSPRIORITY_IDLE;
+
+        // for external projects on unix platforms, we need to propagate the project's loader 
+        // path to the builder subprocesses
+    #if AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
+        AZStd::vector<AZStd::string> evnVars;
+        if (GetExternalProjectEnv(evnVars))
+        {
+            processLaunchInfo.m_environmentVariables = &evnVars;
+        }
+    #endif // AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
 
         AZ_TracePrintf("RC Builder", "Executing RC.EXE: '%s' ...\n", processLaunchInfo.m_commandlineParameters.c_str());
         AZ_TracePrintf("Rc Builder", "Executing RC.EXE with working directory: '%s' ...\n", processLaunchInfo.m_workingDirectory.c_str());
@@ -234,10 +250,8 @@ namespace AssetProcessor
                     break;
                 }
             }
-
             tracer.Pump(); // empty whats left if possible.
         }
-
         if (!finishedOK)
         {
             if (watcher->IsProcessRunning())
@@ -270,12 +284,12 @@ namespace AssetProcessor
 
         return finishedOK;
 
-#else // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
+#else
         result.m_exitCode = JobExitCode_RCCouldNotBeLaunched;
         result.m_crashed = false;
         AZ_Error("RC Builder", false, "There is no implementation for how to compile assets via RC on this platform");
         return false;
-#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
+#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
     }
 
     QString NativeLegacyRCCompiler::BuildCommand(const QString& inputFile, const QString& watchFolder, const QString& platformIdentifier, const QString& params, const QString& dest)
@@ -370,7 +384,7 @@ namespace AssetProcessor
     };
 
     InternalAssetRecognizer::InternalAssetRecognizer(const AssetRecognizer& src, const QString& builderId, const QHash<QString, AssetPlatformSpec>& assetPlatformSpecByPlatform)
-        : AssetRecognizer(src.m_name, src.m_testLockSource, src.m_priority, src.m_isCritical, src.m_supportsCreateJobs, src.m_patternMatcher, src.m_version, src.m_productAssetType, src.m_checkServer)
+        : AssetRecognizer(src.m_name, src.m_testLockSource, src.m_priority, src.m_isCritical, src.m_supportsCreateJobs, src.m_patternMatcher, src.m_version, src.m_productAssetType, src.m_outputProductDependencies, src.m_checkServer)
         , m_builderId(builderId)
     {
         // assetPlatformSpecByPlatform is a hash table like
@@ -451,7 +465,7 @@ namespace AssetProcessor
         this->m_rcCompiler->RequestQuit();
     }
 
-    bool InternalRecognizerBasedBuilder::FindRC(QString& systemRootOut, QString& rcAbsolutePathOut)
+    bool InternalRecognizerBasedBuilder::FindRC(QString& rcAbsolutePathOut)
     {
         QString appRoot;
         QString filename;
@@ -480,7 +494,7 @@ namespace AssetProcessor
         QString rcFullPath;
 
         // Validate that the engine root contains the necessary rc.exe
-        if (!FindRC(systemRoot, rcFullPath))
+        if (!FindRC(rcFullPath))
         {
             return false;
         }
@@ -823,10 +837,9 @@ namespace AssetProcessor
             }
             QString rcParam = assetRecognizer->m_platformSpecsByPlatform[request.m_jobDescription.GetPlatformIdentifier().c_str()].m_extraRCParams;
 
-            //
             if (rcParam.compare(ASSET_PROCESSOR_CONFIG_KEYWORD_COPY) == 0)
             {
-                ProcessCopyJob(request, assetRecognizer->m_productAssetType, jobCancelListener, response);
+                ProcessCopyJob(request, assetRecognizer->m_productAssetType, assetRecognizer->m_outputProductDependencies, jobCancelListener, response);
             }
             else if (rcParam.compare(ASSET_PROCESSOR_CONFIG_KEYWORD_SKIP) == 0)
             {
@@ -836,7 +849,18 @@ namespace AssetProcessor
             }
             else
             {
-                ProcessLegacyRCJob(request, rcParam, assetRecognizer->m_productAssetType, jobCancelListener, response);
+                // If the job fails due to a networking issue, we will attempt to retry RetriesForJobNetworkError times
+                int retryCount = 0;
+
+                do 
+                {
+                    ++retryCount;
+                    ProcessLegacyRCJob(request, rcParam, assetRecognizer->m_productAssetType, jobCancelListener, response);
+
+                    AZ_Warning("RC Builder", response.m_resultCode != AssetBuilderSDK::ProcessJobResult_NetworkIssue, "RC.exe reported a network connection issue.  %s", 
+                        retryCount <= AssetProcessor::RetriesForJobNetworkError ? "Attempting to retry job." : "Maximum retry attempts exceeded, giving up.");
+                } while (response.m_resultCode == AssetBuilderSDK::ProcessJobResult_NetworkIssue && retryCount <= AssetProcessor::RetriesForJobNetworkError);
+                
             }
 
             if (jobCancelListener.IsCancelled())
@@ -963,12 +987,13 @@ namespace AssetProcessor
             if (jobCancelListener.IsCancelled())
             {
                 response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Cancelled;
+                return;
             }
-            else
+            else if (rcResult.m_crashed)
             {
-                response.m_resultCode = rcResult.m_crashed ? AssetBuilderSDK::ProcessJobResult_Crashed : AssetBuilderSDK::ProcessJobResult_Failed;
+                response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Crashed;
+                return;
             }
-            return;
         }
 
         // did the rc Compiler output a response file?
@@ -981,8 +1006,17 @@ namespace AssetProcessor
         
         if (!responseFromRCCompiler)
         {
-            // if the response was NOT loaded from a response file, we assume success (since RC did not crash or anything)
-            response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
+            if(rcResult.m_exitCode != 0)
+            {
+                // RC didn't crash and didn't write a response, but returned a failure code
+                response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Failed;
+                return;
+            }
+            else
+            {
+                // if the response was NOT loaded from a response file, we assume success (since RC did not crash or anything)
+                response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
+            }
         }
 
         if (jobCancelListener.IsCancelled())
@@ -1153,7 +1187,12 @@ namespace AssetProcessor
         }
     }
 
-    void InternalRecognizerBasedBuilder::ProcessCopyJob(const AssetBuilderSDK::ProcessJobRequest& request, AZ::Uuid productAssetType, const AssetBuilderSDK::JobCancelListener& jobCancelListener, AssetBuilderSDK::ProcessJobResponse& response)
+    void InternalRecognizerBasedBuilder::ProcessCopyJob(
+        const AssetBuilderSDK::ProcessJobRequest& request, 
+        AZ::Uuid productAssetType, 
+        bool outputProductDependencies, 
+        const AssetBuilderSDK::JobCancelListener& jobCancelListener, 
+        AssetBuilderSDK::ProcessJobResponse& response)
     {
         response.m_outputProducts.push_back(AssetBuilderSDK::JobProduct(request.m_fullPath, productAssetType));
         response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
@@ -1165,6 +1204,14 @@ namespace AssetProcessor
         }
         // Temporary solution to get around the fact that we don't have job dependencies
         TempSolution_TouchCopyJobActivity();
+
+        if (outputProductDependencies)
+        {
+            // Launch the external process when it requires the old cry code to parse a specific type of asset
+            QString rcParam = QString("/copyonly /outputproductdependencies /targetroot");
+            rcParam = QString("%1=\"%2\"").arg(rcParam).arg(request.m_tempDirPath.c_str());
+            ProcessLegacyRCJob(request, rcParam, productAssetType, jobCancelListener, response);
+        }
     }
 
     QFileInfoList InternalRecognizerBasedBuilder::GetFilesInDirectory(const QString& directoryPath)

@@ -29,6 +29,7 @@
 #include <EMotionFX/Source/Parameter/ParameterFactory.h>
 #include <EMotionFX/Source/Parameter/ValueParameter.h>
 #include <MCore/Source/AttributeFactory.h>
+#include <MCore/Source/LogManager.h>
 #include <MCore/Source/ReflectionSerializer.h>
 
 namespace CommandSystem
@@ -183,7 +184,7 @@ namespace CommandSystem
             for (EMotionFX::AnimGraphObject* affectedObject : affectedObjects)
             {
                 EMotionFX::ObjectAffectedByParameterChanges* affectedObjectByParameterChanges = azdynamic_cast<EMotionFX::ObjectAffectedByParameterChanges*>(affectedObject);
-                affectedObjectByParameterChanges->ParameterAdded(parameterIndex.GetValue());
+                affectedObjectByParameterChanges->ParameterAdded(name);
             }
         }
 
@@ -560,7 +561,7 @@ namespace CommandSystem
                 {
                     EMotionFX::ObjectAffectedByParameterChanges* affectedObjectByParameterChanges = azdynamic_cast<EMotionFX::ObjectAffectedByParameterChanges*>(affectedObject);
                     affectedObjectByParameterChanges->ParameterRemoved(mOldName);
-                    affectedObjectByParameterChanges->ParameterAdded(valueParameterIndex.GetValue());
+                    affectedObjectByParameterChanges->ParameterAdded(newName);
                 }
             }
 
@@ -764,6 +765,16 @@ namespace CommandSystem
             return true;
         }
 
+        // Remove the parameter from all corresponding anim graph instances if it is a value parameter
+        const size_t numInstances = animGraph->GetNumAnimGraphInstances();
+        for (size_t i = 0; i < numInstances; ++i)
+        {
+            EMotionFX::AnimGraphInstance* animGraphInstance = animGraph->GetAnimGraphInstance(i);
+            // Remove the parameter and add it to the new position
+            animGraphInstance->RemoveParameterValue(static_cast<uint32>(valueIndexBeforeMove.GetValue()));
+            animGraphInstance->InsertParameterValue(static_cast<uint32>(valueIndexAfterMove.GetValue()));
+        }
+
         EMotionFX::ValueParameterVector valueParametersAfterChange = animGraph->RecursivelyGetValueParameters();
 
         AZStd::vector<EMotionFX::AnimGraphObject*> affectedObjects;
@@ -774,16 +785,6 @@ namespace CommandSystem
         {
             EMotionFX::ObjectAffectedByParameterChanges* affectedObjectByParameterChanges = azdynamic_cast<EMotionFX::ObjectAffectedByParameterChanges*>(affectedObject);
             affectedObjectByParameterChanges->ParameterOrderChanged(valueParametersBeforeChange, valueParametersAfterChange);
-        }
-
-        // Remove the parameter from all corresponding anim graph instances if it is a value parameter
-        const size_t numInstances = animGraph->GetNumAnimGraphInstances();
-        for (size_t i = 0; i < numInstances; ++i)
-        {
-            EMotionFX::AnimGraphInstance* animGraphInstance = animGraph->GetAnimGraphInstance(i);
-            // Remove the parameter and add it to the new position
-            animGraphInstance->RemoveParameterValue(static_cast<uint32>(valueIndexBeforeMove.GetValue()));
-            animGraphInstance->InsertParameterValue(static_cast<uint32>(valueIndexAfterMove.GetValue()));
         }
 
         // Save the current dirty flag and tell the anim graph that something got changed.
@@ -977,7 +978,22 @@ namespace CommandSystem
         // 1. Remove all connections linked to parameter nodes inside blend trees for the parameters about to be removed back to front.
         RemoveConnectionsForParameters(animGraph, parameterNamesToRemove, *usedCommandGroup);
 
-        // 2. Remove the actual parameters.
+        // 2. Inform all objects affected that we are going to remove a parameter and let them make sure to add all necessary commands to prepare for it.
+        AZStd::vector<EMotionFX::AnimGraphObject*> affectedObjects;
+        animGraph->RecursiveCollectObjectsOfType(azrtti_typeid<EMotionFX::ObjectAffectedByParameterChanges>(), affectedObjects);
+        EMotionFX::GetAnimGraphManager().RecursiveCollectObjectsAffectedBy(animGraph, affectedObjects);
+        for (EMotionFX::AnimGraphObject* object : affectedObjects)
+        {
+            EMotionFX::ObjectAffectedByParameterChanges* affectedObject = azdynamic_cast<EMotionFX::ObjectAffectedByParameterChanges*>(object);
+            AZ_Assert(affectedObject != nullptr, "Can't cast object. Object must be inherited from ObjectAffectedByParameterChanges.");
+
+            for (const AZStd::string& parameterName : parameterNamesToRemove)
+            {
+                affectedObject->BuildParameterRemovedCommands(*usedCommandGroup, parameterName);
+            }
+        }
+
+        // 3. Remove the actual parameters.
         for (const AZStd::string& parameterName : parameterNamesToRemove)
         {
             commandString = AZStd::string::format("AnimGraphRemoveParameter -animGraphID %i -name \"%s\"", animGraph->GetID(), parameterName.c_str());

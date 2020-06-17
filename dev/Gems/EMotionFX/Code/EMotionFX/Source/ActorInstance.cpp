@@ -13,6 +13,7 @@
 #include "EMotionFXConfig.h"
 #include <MCore/Source/IDGenerator.h>
 #include <MCore/Source/Random.h>
+#include <MCore/Source/LogManager.h>
 
 #include "Actor.h"
 #include "ActorInstance.h"
@@ -384,7 +385,7 @@ namespace EMotionFX
     // updates the skinning matrices of all nodes
     void ActorInstance::UpdateSkinningMatrices()
     {
-        MCore::Matrix* skinningMatrices = mTransformData->GetSkinningMatrices();
+        AZ::Transform* skinningMatrices = mTransformData->GetSkinningMatrices();
         const Pose* pose = mTransformData->GetCurrentPose();
 
         const uint32 numNodes = GetNumEnabledNodes();
@@ -393,7 +394,7 @@ namespace EMotionFX
             const uint32 nodeNumber = GetEnabledNode(i);
             Transform skinningTransform = mActor->GetInverseBindPoseTransform(nodeNumber);
             skinningTransform.Multiply(pose->GetModelSpaceTransform(nodeNumber));
-            skinningMatrices[nodeNumber] = skinningTransform.ToMatrix();
+            skinningMatrices[nodeNumber] = skinningTransform.ToAZTransform();
         }
     }
 
@@ -1049,8 +1050,8 @@ namespace EMotionFX
                 // calculate the normal at the intersection point
                 if (outNormal)
                 {
-                    AZ::PackedVector3f* normals = (AZ::PackedVector3f*)mesh->FindVertexData(Mesh::ATTRIB_NORMALS);
-                    AZ::Vector3 norm = MCore::BarycentricInterpolate<AZ::Vector3>(closestBaryU, closestBaryV, AZ::Vector3(normals[closestIndices[0]]), AZ::Vector3(normals[closestIndices[1]]), AZ::Vector3(normals[closestIndices[2]]));
+                    AZ::Vector3* normals = (AZ::Vector3*)mesh->FindVertexData(Mesh::ATTRIB_NORMALS);
+                    AZ::Vector3  norm = MCore::BarycentricInterpolate<AZ::Vector3>(closestBaryU, closestBaryV, normals[closestIndices[0]], normals[closestIndices[1]], normals[closestIndices[2]]);
                     norm = closestTransform.TransformVector(norm);
                     norm.Normalize();
                     *outNormal = norm;
@@ -1210,9 +1211,10 @@ namespace EMotionFX
                 // calculate the normal at the intersection point
                 if (outNormal)
                 {
-                    AZ::PackedVector3f* normals = (AZ::PackedVector3f*)mesh->FindVertexData(Mesh::ATTRIB_NORMALS);
-                    AZ::Vector3 norm = MCore::BarycentricInterpolate<AZ::Vector3>(
-                        closestBaryU, closestBaryV, AZ::Vector3(normals[closestIndices[0]]), AZ::Vector3(normals[closestIndices[1]]), AZ::Vector3(normals[closestIndices[2]]));
+                    AZ::Vector3* normals = (AZ::Vector3*)mesh->FindVertexData(Mesh::ATTRIB_NORMALS);
+                    AZ::Vector3  norm = MCore::BarycentricInterpolate<AZ::Vector3>(
+                            closestBaryU, closestBaryV,
+                            normals[closestIndices[0]], normals[closestIndices[1]], normals[closestIndices[2]]);                   
                     norm = closestTransform.TransformVector(norm);
                     norm.Normalize();
                     *outNormal = norm;
@@ -1351,16 +1353,17 @@ namespace EMotionFX
     {
         m_requestedLODLevel = level;
     }
+
     void ActorInstance::UpdateLODLevel()
     {
         // Switch LOD level in case a change was requested.
         if (mLODLevel != m_requestedLODLevel)
         {
+            // Enable and disable all nodes accordingly (do not call this after setting the new mLODLevel)
+            SetSkeletalLODLevelNodeFlags(m_requestedLODLevel);
+
             // Make sure the LOD level is valid and update it.
             mLODLevel = MCore::Clamp<uint32>(m_requestedLODLevel, 0, mActor->GetNumLODLevels() - 1);
-
-            // Enable and disable all nodes accordingly (do not call this after setting the new mLODLevel)
-            SetSkeletalLODLevelNodeFlags(mLODLevel);
 
             /*// update the transform data
                 MorphSetup* morphSetup = mActor->GetMorphSetup(mLODLevel);
@@ -1469,56 +1472,48 @@ namespace EMotionFX
     }
 
     // draw a skeleton using lines, calling the drawline callbacks in the event handlers
-    void ActorInstance::DrawSkeleton(Pose& pose, const AZ::Color& color)
+    void ActorInstance::DrawSkeleton(const Pose& pose, const AZ::Color& color)
     {
-        Skeleton* skeleton = mActor->GetSkeleton();
-
         DebugDraw& debugDraw = GetDebugDraw();
         DebugDraw::ActorInstanceData* drawData = debugDraw.GetActorInstanceData(this);
         drawData->Lock();
-
-        const uint32 numNodes = mEnabledNodes.GetLength();
-        for (uint32 i = 0; i < numNodes; ++i)
-        {
-            const uint32 nodeIndex = mEnabledNodes[i];
-            const uint32 parentIndex = skeleton->GetNode(nodeIndex)->GetParentIndex();
-            if (parentIndex != MCORE_INVALIDINDEX32)
-            {
-                const AZ::Vector3 startPos = pose.GetWorldSpaceTransform(nodeIndex).mPosition;
-                const AZ::Vector3 endPos = pose.GetWorldSpaceTransform(parentIndex).mPosition;
-                drawData->DrawLine(startPos, endPos, color);
-            }
-        }
+        drawData->DrawPose(pose, color);
         drawData->Unlock();
     }
 
-    // Remove the trajectory transform from the input transformation.
-    void ActorInstance::MotionExtractionCompensate(Transform& inOutMotionExtractionNodeTransform, EMotionExtractionFlags motionExtractionFlags)
+    void ActorInstance::MotionExtractionCompensate(Transform& inOutMotionExtractionNodeTransform, const Transform& localSpaceBindPoseTransform, EMotionExtractionFlags motionExtractionFlags)
     {
-        MCORE_ASSERT(mActor->GetMotionExtractionNodeIndex() != MCORE_INVALIDINDEX32);
-
         Transform trajectoryTransform = inOutMotionExtractionNodeTransform;
 
         // Make sure the z axis is really pointing up and project it onto the ground plane.
-        if (trajectoryTransform.mRotation.CalcForwardAxis().GetZ() > 0.0f) // Pick the closest, so if we point more upwards already, we take 1.0, otherwise take -1.0. Sometimes Y would point up, sometimes down.
+        const AZ::Vector3 forwardAxis = MCore::CalcForwardAxis(trajectoryTransform.mRotation);
+        if (forwardAxis.GetZ() > 0.0f) // Pick the closest, so if we point more upwards already, we take 1.0, otherwise take -1.0. Sometimes Y would point up, sometimes down.
         {
-            trajectoryTransform.mRotation.RotateFromTo(trajectoryTransform.mRotation.CalcForwardAxis(), AZ::Vector3(0.0f, 0.0f, 1.0f));
+            MCore::RotateFromTo(trajectoryTransform.mRotation, forwardAxis, AZ::Vector3(0.0f, 0.0f, 1.0f));
         }
         else
         {
-            trajectoryTransform.mRotation.RotateFromTo(trajectoryTransform.mRotation.CalcForwardAxis(), AZ::Vector3(0.0f, 0.0f, -1.0f));
+            MCore::RotateFromTo(trajectoryTransform.mRotation, forwardAxis, AZ::Vector3(0.0f, 0.0f, -1.0f));
         }
 
         trajectoryTransform.ApplyMotionExtractionFlags(motionExtractionFlags);
 
         // Get the projected bind pose transform.
-        Transform bindTransformProjected = mTransformData->GetBindPose()->GetLocalSpaceTransform(mActor->GetMotionExtractionNodeIndex());
+        Transform bindTransformProjected = localSpaceBindPoseTransform;
         bindTransformProjected.ApplyMotionExtractionFlags(motionExtractionFlags);
 
         // Remove the projected rotation and translation from the transform to prevent the double transform.
-        inOutMotionExtractionNodeTransform.mRotation = (bindTransformProjected.mRotation.Conjugated() * trajectoryTransform.mRotation).Conjugated() * inOutMotionExtractionNodeTransform.mRotation;
+        inOutMotionExtractionNodeTransform.mRotation = (bindTransformProjected.mRotation.GetConjugate() * trajectoryTransform.mRotation).GetConjugate() * inOutMotionExtractionNodeTransform.mRotation;
         inOutMotionExtractionNodeTransform.mPosition = inOutMotionExtractionNodeTransform.mPosition - (trajectoryTransform.mPosition - bindTransformProjected.mPosition);
         inOutMotionExtractionNodeTransform.mRotation.Normalize();
+    }
+
+    void ActorInstance::MotionExtractionCompensate(Transform& inOutMotionExtractionNodeTransform, EMotionExtractionFlags motionExtractionFlags)
+    {
+        MCORE_ASSERT(mActor->GetMotionExtractionNodeIndex() != MCORE_INVALIDINDEX32);
+        Transform bindPoseTransform = mTransformData->GetBindPose()->GetLocalSpaceTransform(mActor->GetMotionExtractionNodeIndex());
+
+        MotionExtractionCompensate(inOutMotionExtractionNodeTransform, bindPoseTransform, motionExtractionFlags);
     }
 
     // Remove the trajectory transform from the motion extraction node to prevent double transformation.
@@ -1537,15 +1532,9 @@ namespace EMotionFX
         currentPose->SetLocalSpaceTransform(motionExtractIndex, transform);
     }
 
-    // Apply the motion extraction delta transform to the actor instance.
-    void ActorInstance::ApplyMotionExtractionDelta(const Transform& trajectoryDelta)
+    void ActorInstance::ApplyMotionExtractionDelta(Transform& inOutTransform, const Transform& trajectoryDelta)
     {
-        if (mActor->GetMotionExtractionNodeIndex() == MCORE_INVALIDINDEX32)
-        {
-            return;
-        }
-
-        Transform curTransform = mLocalTransform;
+        Transform curTransform = inOutTransform;
 #ifndef EMFX_SCALE_DISABLED
         curTransform.mPosition += trajectoryDelta.mPosition * curTransform.mScale;
 #else
@@ -1555,7 +1544,18 @@ namespace EMotionFX
         curTransform.mRotation *= trajectoryDelta.mRotation;
         curTransform.mRotation.Normalize();
 
-        mLocalTransform = curTransform;
+        inOutTransform = curTransform;
+    }
+
+    // Apply the motion extraction delta transform to the actor instance.
+    void ActorInstance::ApplyMotionExtractionDelta(const Transform& trajectoryDelta)
+    {
+        if (mActor->GetMotionExtractionNodeIndex() == MCORE_INVALIDINDEX32)
+        {
+            return;
+        }
+
+        ApplyMotionExtractionDelta(mLocalTransform, trajectoryDelta);
     }
 
     // apply the currently set motion extraction delta transform to the actor instance
@@ -1598,7 +1598,7 @@ namespace EMotionFX
                 AZ::Vector3 axisVector(0.0f, 0.0f, 0.0f);
                 axisVector.SetElement(axis, 1.0f);
                 const float angle = static_cast<float>(i);
-                SetLocalSpaceRotation(MCore::Quaternion(axisVector, MCore::Math::DegreesToRadians(angle)));
+                SetLocalSpaceRotation(MCore::CreateFromAxisAndAngle(axisVector, MCore::Math::DegreesToRadians(angle)));
 
                 UpdateTransformations(0.0f, true);
                 UpdateMeshDeformers(0.0f);

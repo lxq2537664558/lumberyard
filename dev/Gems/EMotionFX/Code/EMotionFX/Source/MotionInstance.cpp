@@ -818,51 +818,9 @@ namespace EMotionFX
         const float realTimePassed = newTime - oldTime;
 
         // process motion events
-        if (GetMotionEventsEnabled() && !GetIsPaused() && !MCore::Compare<float>::CheckIfIsClose(realTimePassed, 0.0f, MCore::Math::epsilon) && mWeight >= mEventWeightThreshold)
+        if (GetMotionEventsEnabled() && !GetIsPaused() && !MCore::Compare<float>::CheckIfIsClose(realTimePassed, 0.0f, MCore::Math::epsilon) && mWeight >= mEventWeightThreshold && !GetHasEnded())
         {
-            float curTimeValue = mCurrentTime;
-            float oldTimeValue = mLastCurTime;
-
-            // if a loop has happened we need to do some extra work
-            if (GetHasLooped())
-            {
-                // if we're playing forward
-                if (mPlayMode == PLAYMODE_FORWARD)
-                {
-                    mMotion->GetEventTable()->ProcessEvents(oldTimeValue, mClipEndTime + 0.0001f, this);
-                    oldTimeValue = mClipStartTime;
-                }
-                else // we're playing backward
-                {
-                    mMotion->GetEventTable()->ProcessEvents(mClipStartTime - 0.0001f, oldTimeValue, this);
-                    oldTimeValue = mClipEndTime;
-                }
-            }
-
-            // process the remaining part
-            if (!GetHasEnded())
-            {
-                // if forward playback
-                if (oldTimeValue < curTimeValue)
-                {
-                    // if we end up exactly on the max time, include it
-                    if (MCore::Math::Abs(curTimeValue - mClipEndTime) < 0.00001f)
-                    {
-                        curTimeValue = mClipEndTime + 0.0001f;
-                    }
-                }
-                else // backward playback
-                {
-                    // if the end time is exactly at 0 seconds, include events on 0.0
-                    if (curTimeValue < mClipStartTime + 0.00001f)
-                    {
-                        curTimeValue = mClipStartTime - 0.0001f;
-                    }
-                }
-
-                // process the events
-                mMotion->GetEventTable()->ProcessEvents(oldTimeValue, curTimeValue, this);
-            }
+            mMotion->GetEventTable()->ProcessEvents(mLastCurTime, mCurrentTime, this);
         }
     }
 
@@ -874,54 +832,11 @@ namespace EMotionFX
         const float realTimePassed = newTime - oldTime;
 
         // process motion events
-        if (GetMotionEventsEnabled() && !GetIsPaused() && !MCore::Compare<float>::CheckIfIsClose(realTimePassed, 0.0f, MCore::Math::epsilon) && mWeight >= mEventWeightThreshold)
+        if (GetMotionEventsEnabled() && !GetIsPaused() && !MCore::Compare<float>::CheckIfIsClose(realTimePassed, 0.0f, MCore::Math::epsilon) && mWeight >= mEventWeightThreshold && !GetHasEnded())
         {
-            float curTimeValue = mCurrentTime;
-            float oldTimeValue = mLastCurTime;
-
-            // if a loop has happened we need to do some extra work
-            if (GetHasLooped())
-            {
-                // if we're playing forward
-                if (mPlayMode == PLAYMODE_FORWARD)
-                {
-                    mMotion->GetEventTable()->ExtractEvents(oldTimeValue, mClipEndTime + 0.0001f, this, outBuffer);
-                    oldTimeValue = mClipStartTime - 0.00001f;
-                }
-                else // we're playing backward
-                {
-                    mMotion->GetEventTable()->ExtractEvents(oldTimeValue, mClipStartTime - 0.0001f, this, outBuffer);
-                    oldTimeValue = mClipEndTime + 0.00001f;
-                }
-            }
-
-            // process the remaining part
-            if (!GetHasEnded())
-            {
-                // if forward playback
-                if (oldTimeValue < curTimeValue)
-                {
-                    // if we end up exactly on the max time, include it
-                    if (MCore::Math::Abs(curTimeValue - mClipEndTime) < 0.00001f)
-                    {
-                        curTimeValue = mClipEndTime + 0.0001f;
-                    }
-                }
-                else // backward playback
-                {
-                    // if the end time is exactly at 0 seconds, include events on 0.0
-                    if (curTimeValue < mClipStartTime + 0.00001f)
-                    {
-                        curTimeValue = mClipStartTime - 0.0001f;
-                    }
-                }
-
-                // process the events
-                mMotion->GetEventTable()->ExtractEvents(oldTimeValue, curTimeValue, this, outBuffer);
-            }
+            mMotion->GetEventTable()->ExtractEvents(mLastCurTime, mCurrentTime, this, outBuffer);
         }
     }
-
 
 
     // gather events that get triggered between two given time values
@@ -939,7 +854,6 @@ namespace EMotionFX
         // extract the events
         mMotion->GetEventTable()->ExtractEvents(oldTime, newTime, this, outBuffer);
     }
-
 
 
     // update the motion by an old and new time value
@@ -1022,19 +936,13 @@ namespace EMotionFX
 
                     if (maxTime > 0.0f)
                     {
-                        currentTime = newTime;//mClipStartTime + MCore::Math::SafeFMod(currentTime-mClipStartTime, maxTime - mClipStartTime);
+                        currentTime = newTime;
                     }
                     else
                     {
                         currentTime = 0.0f;
                     }
                 }
-
-                /*          if (currentTime < 0.0f)
-                            {
-                                while (currentTime < 0.0f)
-                                    currentTime = maxTime + currentTime;
-                            }*/
             }
             else // not looping forever
             {
@@ -1421,10 +1329,10 @@ namespace EMotionFX
     //  remove all event handlers
     void MotionInstance::RemoveAllEventHandlers()
     {
-#ifdef DEBUG
+#ifdef AZ_DEBUG_BUILD
         for (const EventHandlerVector& eventHandlers : m_eventHandlersByEventType)
         {
-            AZ_Assert(eventHandlers.empty(), "Expected all events to be removed");
+            AZ_Assert(eventHandlers.empty(), "Expected all event handlers to be removed");
         }
 #endif
         m_eventHandlersByEventType.clear();
@@ -1644,13 +1552,13 @@ namespace EMotionFX
 
             // calculate the relative transforms
             outTransform->mPosition = curNodeTransform.mPosition - oldNodeTransform.mPosition;
-            outTransform->mRotation = curNodeTransform.mRotation * oldNodeTransform.mRotation.Conjugated();
+            outTransform->mRotation = curNodeTransform.mRotation * oldNodeTransform.mRotation.GetConjugate();
             outTransform->mRotation.Normalize();
         }
         else // doesn't support CalcNodeTranform
         {
             outTransform->mPosition.Set(0.0f, 0.0f, 0.0f);
-            outTransform->mRotation.Identity();
+            outTransform->mRotation = AZ::Quaternion::CreateIdentity();
         }
     }
 
@@ -1739,10 +1647,10 @@ namespace EMotionFX
         // Calculate the difference between the first frame of the motion and the bind pose transform.
         TransformData* transformData = mActorInstance->GetTransformData();
         const Pose* bindPose = transformData->GetBindPose();
-        MCore::Quaternion permBindPoseRotDiff = firstFrameTransform.mRotation * bindPose->GetLocalSpaceTransform(motionExtractionNodeIndex).mRotation.Conjugated();
+        AZ::Quaternion permBindPoseRotDiff = firstFrameTransform.mRotation * bindPose->GetLocalSpaceTransform(motionExtractionNodeIndex).mRotation.GetConjugate();
         AZ::Vector3 permBindPosePosDiff = bindPose->GetLocalSpaceTransform(motionExtractionNodeIndex).mPosition - firstFrameTransform.mPosition;
-        permBindPoseRotDiff.x = 0.0f;
-        permBindPoseRotDiff.y = 0.0f;
+        permBindPoseRotDiff.SetX(0.0f);
+        permBindPoseRotDiff.SetY(0.0f);
         permBindPoseRotDiff.Normalize();
 
         if (!(mMotion->GetMotionExtractionFlags() & MOTIONEXTRACT_CAPTURE_Z))
@@ -1751,7 +1659,7 @@ namespace EMotionFX
         }
 
         // If this is the first frame's motion extraction switch turn that flag off.
-        MCore::Quaternion bindPoseRotDiff(0.0f, 0.0f, 0.0f, 1.0f);
+        AZ::Quaternion bindPoseRotDiff(0.0f, 0.0f, 0.0f, 1.0f);
         AZ::Vector3 bindPosePosDiff(0.0f, 0.0f, 0.0f);
         if (mBoolFlags & MotionInstance::BOOL_ISFIRSTREPOSUPDATE)
         {
@@ -1762,14 +1670,14 @@ namespace EMotionFX
         // Capture rotation around the up axis only.
         trajectoryDelta.ApplyMotionExtractionFlags(mMotion->GetMotionExtractionFlags());
 
-        MCore::Quaternion removeRot = currentFrameTransform.mRotation * firstFrameTransform.mRotation.Conjugated();
-        removeRot.x = 0.0f;
-        removeRot.y = 0.0f;
+        AZ::Quaternion removeRot = currentFrameTransform.mRotation * firstFrameTransform.mRotation.GetConjugate();
+        removeRot.SetX(0.0f);
+        removeRot.SetY(0.0f);
         removeRot.Normalize();
 
-        MCore::Quaternion rotation = removeRot.Conjugated() * trajectoryDelta.mRotation * permBindPoseRotDiff.Conjugated();
-        rotation.x = 0.0f;
-        rotation.y = 0.0f;
+        AZ::Quaternion rotation = removeRot.GetConjugate() * trajectoryDelta.mRotation * permBindPoseRotDiff.GetConjugate();
+        rotation.SetX(0.0f);
+        rotation.SetY(0.0f);
         rotation.Normalize();
 
         AZ::Vector3 rotatedPos = rotation * (trajectoryDelta.mPosition - bindPosePosDiff);
@@ -1777,6 +1685,7 @@ namespace EMotionFX
         // Calculate the real trajectory delta, taking into account the actor instance rotation.
         outTrajectoryDelta.mPosition = mActorInstance->GetLocalSpaceTransform().mRotation * rotatedPos;
         outTrajectoryDelta.mRotation = trajectoryDelta.mRotation * bindPoseRotDiff;
+        outTrajectoryDelta.mRotation.NormalizeExact();
 
         if (mBoolFlags & MotionInstance::BOOL_ISFIRSTREPOSUPDATE)
         {

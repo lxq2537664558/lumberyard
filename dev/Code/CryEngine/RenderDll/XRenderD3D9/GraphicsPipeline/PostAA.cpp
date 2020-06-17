@@ -311,8 +311,23 @@ void PostAAPass::Execute()
 
     uint64 nSaveFlagsShader_RT = gRenDev->m_RP.m_FlagsShader_RT;
     gRenDev->m_RP.m_FlagsShader_RT &= ~(g_HWSR_MaskBit[HWSR_SAMPLE0] | g_HWSR_MaskBit[HWSR_SAMPLE1] | g_HWSR_MaskBit[HWSR_SAMPLE2] | g_HWSR_MaskBit[HWSR_SAMPLE3]);
-    
     CTexture* inOutBuffer = CTexture::s_ptexSceneSpecular;
+
+    // Slimming GBuffer process is done by encoding normals into format that can fit in only two channels 
+    // and then uses the third extra channel to encode specular's Y channel (in YPbPbr format). The CbCr channels can be  
+    // compressed down to two channels due to requiring only 4 bit prcision for them. This means we can't use the specular
+    // texture for temporary copies. Thus requiring the need to pick other unused textures to be the replacement.
+    if (CRenderer::CV_r_SlimGBuffer == 1)
+    {
+        if (CRenderer::CV_r_AntialiasingMode == eAT_FXAA || CRenderer::CV_r_AntialiasingMode == eAT_SMAA1TX)
+        {
+            inOutBuffer = CTexture::s_ptexSceneDiffuse;
+        }
+        else
+        {
+            inOutBuffer = CTexture::s_ptexSceneNormalsMap;
+        }
+    }
 
     static ICVar* DolbyCvar = gEnv->pConsole->GetCVar("r_HDRDolby");
     const int DolbyCvarValue = DolbyCvar ? DolbyCvar->GetIVal() : eDVM_Disabled;
@@ -354,7 +369,19 @@ void PostAAPass::Execute()
 void PostAAPass::RenderSMAA(CTexture* sourceTexture, CTexture** outputTexture, bool useCurrentRT)
 {
     CTexture* pEdgesTex = CTexture::s_ptexSceneNormalsMap; // Reusing esram resident target
-    CTexture* pBlendTex = CTexture::s_ptexSceneDiffuse;    // Reusing esram resident target (note that we access this FP16 RT using point filtering - full rate on GCN)
+    
+    // Need to use a different temporary texture for edge detection since it is using the normal map
+    // as inout for slimming GBuffer 
+    if(CRenderer::CV_r_SlimGBuffer == 1)
+    {
+        pEdgesTex = CTexture::s_ptexSceneNormalsBent;
+    }
+    
+    CTexture* pBlendTex = CTexture::s_ptexSceneDiffuse;     // Reusing esram resident target (note that we access this FP16 RT using point filtering - full rate on GCN)
+    if(CRenderer::CV_r_SlimGBuffer == 1)
+    {
+        pBlendTex = CTexture::s_ptexSceneSpecularAccMap;
+    }
 
     CShader* pShader = CShaderMan::s_shPostAA;
 
@@ -418,6 +445,13 @@ void PostAAPass::RenderSMAA(CTexture* sourceTexture, CTexture** outputTexture, b
         }
 
         CTexture* pDstRT = CTexture::s_ptexSceneNormalsMap;
+
+        // Need to use a different temporary texture for edge detection since it is using the normal map
+        // as inout for slimming GBuffer 
+        if (CRenderer::CV_r_SlimGBuffer == 1)
+        {
+            pDstRT = pEdgesTex;
+        }
 
         ////////////////////////////////////////////////////////////////////////////////////////////////
         // Final pass - blend neighborhood pixels
@@ -554,10 +588,17 @@ void PostAAPass::RenderComposites(CTexture* sourceTexture)
     CD3D9Renderer* rd = gcpRendD3D;
     
     rd->FX_SetStencilDontCareActions(0, true, true);
-    bool bEmpty = SRendItem::IsListEmpty(EFSLIST_AFTER_POSTPROCESS, rd->m_RP.m_nProcessThreadID, rd->m_RP.m_pRLD);
+    bool isAfterPostProcessBucketEmpty = SRendItem::IsListEmpty(EFSLIST_AFTER_POSTPROCESS, rd->m_RP.m_nProcessThreadID, rd->m_RP.m_pRLD);
+    
+    bool isAuxGeomEnabled = false;
+#if defined(ENABLE_RENDER_AUX_GEOM)
+    isAuxGeomEnabled = CRenderer::CV_r_enableauxgeom == 1;
+#endif
+    
     //We may need to preserve the depth buffer in case there is something to render in the EFSLIST_AFTER_POSTPROCESS bucket.
     //It could be UI in the 3d world. If the bucket is empty ignore the depth buffer as it is not needed.
-    if (bEmpty)
+    //Also check if Auxgeom rendering is enabled in which case we preserve depth buffer.
+    if (isAfterPostProcessBucketEmpty && !isAuxGeomEnabled)
     {
         rd->FX_SetDepthDontCareActions(0, true, true);
     }
@@ -719,9 +760,9 @@ void PostAAPass::RenderComposites(CTexture* sourceTexture)
     GetUtils().ShEndPass();
     
     //UI should be coming in next. Since its in a gem we cant set loadactions in lyshine.
-    //Hence we are setting it here. Stencil is setup as DoCare as it gets cleared at the start of UI rendering
+    //Hence we are setting it here. Stencil is setup as DoCare for load and store as it gets cleared at the start of UI rendering
     rd->FX_SetDepthDontCareActions(0, true, true); //We set this again here as all the actions get reset to conservative settings (do care) after the draw call
-    rd->FX_SetStencilDontCareActions(0, false, true);
+    rd->FX_SetStencilDontCareActions(0, false, false);
 }
 
 void PostAAPass::RenderFinalComposite(CTexture* sourceTexture)

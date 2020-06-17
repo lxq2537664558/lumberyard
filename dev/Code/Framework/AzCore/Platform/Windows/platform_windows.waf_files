@@ -72,8 +72,10 @@
         "Memory/Platform/Windows":
         [
             "../Common/WinAPI/AzCore/Memory/OSAllocator_WinAPI.h",
+            "../Common/WinAPI/AzCore/Memory/OverrunDetectionAllocator_WinAPI.h",
             "AzCore/Memory/HeapSchema_Windows.cpp",
-            "AzCore/Memory/OSAllocator_Platform.h"
+            "AzCore/Memory/OSAllocator_Platform.h",
+            "AzCore/Memory/OverrunDetectionAllocator_Platform.h"
         ],
 
         "Math/Platform/Windows":
@@ -81,6 +83,11 @@
             "AzCore/Math/Random_Platform.h",
             "AzCore/Math/Random_Windows.cpp",
             "AzCore/Math/Random_Windows.h"
+        ],
+
+        "Module/Internal/Platform/Mac":
+        [
+            "AzCore/Module/Internal/ModuleManagerSearchPathTool_Windows.cpp"
         ],
 
         "Math/Internal/Platform/Windows":

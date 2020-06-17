@@ -97,14 +97,20 @@ namespace Vegetation
         // AreaNotificationBus
         void OnCompositionChanged() override;
 
+
     protected:
+        //////////////////////////////////////////////////////////////////////////
+        // AreaComponentBase
+        void OnRegisterArea() override;
+        void OnUnregisterArea() override;
+
         //////////////////////////////////////////////////////////////////////////
         // SpawnerRequestBus
 
-        float GetAreaPriority() const override;
-        void SetAreaPriority(float priority) override;
-        AreaLayer GetAreaLayer() const override;
-        void SetAreaLayer(AreaLayer type) override;
+        AZ::u32 GetAreaPriority() const override;
+        void SetAreaPriority(AZ::u32 priority) override;
+        AZ::u32 GetAreaLayer() const override;
+        void SetAreaLayer(AZ::u32 type) override;
         AZ::u32 GetAreaProductCount() const override;
         bool GetInheritBehavior() const override;
         void SetInheritBehavior(bool value) override;
@@ -121,7 +127,7 @@ namespace Vegetation
         bool ProcessInstance(EntityIdStack& processedIds, const ClaimPoint& point, InstanceData& instanceData, DescriptorPtr descriptorPtr);
         bool ClaimPosition(EntityIdStack& processedIds, const ClaimPoint& point, InstanceData& instanceData);
         void DestroyAllInstances();
-        void CalcInstanceDebugColor(EntityIdStack& stackIds);
+        void CalcInstanceDebugColor(const EntityIdStack& processedIds);
 
         SpawnerConfig m_configuration;
 

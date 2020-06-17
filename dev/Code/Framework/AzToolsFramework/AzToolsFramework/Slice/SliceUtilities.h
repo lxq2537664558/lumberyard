@@ -10,6 +10,8 @@
 *
 */
 
+#pragma once
+
 #include <AzCore/base.h>
 #include <AzCore/Slice/SliceComponent.h>
 #include <AzCore/UserSettings/UserSettings.h>
@@ -17,13 +19,19 @@
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/UI/PropertyEditor/InstanceDataHierarchy.h>
 #include <AzToolsFramework/Slice/SliceTransaction.h>
+
+// Suppresses the following warnings
+// warning C4251: 'QBrush::d': class 'QScopedPointer<QBrushData,QBrushDataPointerDeleter>' needs to have dll-interface to be used by clients of class 'QBrush'
+// warning C4251: 'QGradient::m_stops': class 'QVector<QGradientStop>' needs to have dll-interface to be used by clients of class 'QGradient'
+// warning C4800: 'uint': forcing value to bool 'true' or 'false' (performance warning)
+AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QString>
 #include <QSize>
 #include <QWidget>
 #include <QLabel>
 #include <QDialog>
 #include <QWidgetAction>
-#pragma once
+AZ_POP_DISABLE_WARNING
 
 class QMenu;
 
@@ -36,6 +44,28 @@ namespace AzToolsFramework
         using EntityAncestorPair = AZStd::pair<AZ::EntityId, AZStd::shared_ptr<AZ::Entity>>;
         using IdToEntityMapping = AZStd::unordered_map<AZ::EntityId, AZ::Entity*>;
         using IdToInstanceAddressMapping = AZStd::unordered_map<AZ::EntityId, AZ::SliceComponent::SliceInstanceAddress>;
+        
+        using WillPushEntityCallback = AZStd::function<bool(const AZ::EntityId, const AZ::Data::Asset <AZ::SliceAsset>&)> ;
+
+        enum class QuickPushMenuOverrideDisplayCount
+        {
+            ShowOverrideCountWhenSingle,
+            ShowOverrideCountOnlyWhenMultiple
+        };
+
+        /// Options that can be passed to PupulateQuickPushMenu to affect appearance.
+        struct QuickPushMenuOptions
+        {
+            QuickPushMenuOptions() = default;
+            QuickPushMenuOptions(const AZStd::string& headerText, QuickPushMenuOverrideDisplayCount singleOverrideDisplayOption) :
+                m_headerText(headerText),
+                m_singleOverrideDisplayOption(singleOverrideDisplayOption)
+            {
+            }
+
+            AZStd::string m_headerText = "Save Slice Overrides";
+            QuickPushMenuOverrideDisplayCount m_singleOverrideDisplayOption = QuickPushMenuOverrideDisplayCount::ShowOverrideCountWhenSingle;
+        };
 
         /**
          * Displays slice push UI for the specified set of entities.
@@ -53,12 +83,20 @@ namespace AzToolsFramework
          * \param targetDirectory - the preferred directory path.
          * \param inheritSlices - if true, entities already part of slice instances will be added by cascading from their corresponding slices.
          * \param setAsDynamic - if true, the slice is setup as a dynamic slice on creation
+         * \param acceptDefaultPath - Whether to prompt the user for a path save location or to proceed with the generated one. Defaults to false
+         * \param defaultMoveExternalRefs - Whether to prompt the user on if external entity references found in added entities get added to the created slice or do this automatically. Defaults to false
+         * \param defaultGenerateSharedRoot - Whether to generate a shared root if one or more added entities do not share the same root. Defaults to false
+         * \param silenceWarningPopups - Disables QT warning popups from being generated, can still rely on the return value for error handling. Defaults to false
          * \return true if slice was created successfully.
          */
-        bool MakeNewSlice(const AzToolsFramework::EntityIdSet& entities, 
+        bool MakeNewSlice(const AzToolsFramework::EntityIdSet& entities,
                           const char* targetDirectory, 
                           bool inheritSlices,
                           bool setAsDynamic,
+                          bool acceptDefaultPath = false,
+                          bool defaultMoveExternalRefs = false,
+                          bool defaultGenerateSharedRoot = false,
+                          bool silenceWarningPopups = false,
                           AZ::SerializeContext* serializeContext = nullptr);
 
         /**
@@ -134,7 +172,8 @@ namespace AzToolsFramework
             const AZStd::unordered_set<AZ::EntityId>& entitiesToUpdate,
             const AZStd::unordered_set<AZ::EntityId>& entitiesToAdd,
             const AZStd::unordered_set<AZ::EntityId>& entitiesToRemove,
-            SliceTransaction::PreSaveCallback preSaveCallback);
+            SliceTransaction::PreSaveCallback preSaveCallback,
+            SliceTransaction::PostSaveCallback postSaveCallback);
 
         /**
          * Push an individual entity field back to a given slice asset.
@@ -166,10 +205,20 @@ namespace AzToolsFramework
          */
         SliceTransaction::Result SlicePreSaveCallbackForWorldEntities(SliceTransaction::TransactionPtr transaction, const char* fullPath, SliceTransaction::SliceAssetPtr& asset);
 
+        void SlicePostPushCallback(SliceTransaction::TransactionPtr transaction, const char* fullSourcePath, const SliceTransaction::SliceAssetPtr& asset);
+
+        void SlicePostSaveCallbackForNewSlice(SliceTransaction::TransactionPtr transaction, const char* fullPath, const SliceTransaction::SliceAssetPtr& transactionAsset);
+
         /**
          * Returns true if the entity has no transform parent.
          */
         bool IsRootEntity(const AZ::Entity& entity);
+
+        /**
+        * \brief Determines whether the provided entity id is the root of a slice or subslice
+        * \param id The entity id to check
+        */
+        bool IsSliceOrSubsliceRootEntity(const AZ::EntityId& id);
 
         /**
          * Retrieves the \ref AZ::Edit::Attributes::SliceFlags assigned to a given data node.
@@ -216,17 +265,18 @@ namespace AzToolsFramework
          * Populates a QMenu with sub-menus to expose slice override push operations for a provided set of entities.
          * \param outerMenu QMenu to which sub menus will be added.
          * \param inputEntities a set of entities for which quick push options will be determined. Typically callers will pass the selected entity set.
-         * \param headerText optional header text for push options.
+         * \param options optional settings to affect the appearance of the push menu, i.e. title and whether to display a change count if it's singular.
          */
-        void PopulateQuickPushMenu(QMenu& outerMenu, const AzToolsFramework::EntityIdList& inputEntities, const AZStd::string& headerText = "Save slice overrides");
+        void PopulateQuickPushMenu(QMenu& outerMenu, const AzToolsFramework::EntityIdList& inputEntities, const QuickPushMenuOptions& options = QuickPushMenuOptions());
 
         /**
          * Populates a QMenu with sub-menus to expose slice override push operations for a specific entity and data field.
          * \param outerMenu QMenu to which sub menus will be added.
          * \param entityId a specific live entity for which the specified field should be pushed.
          * \param fieldAddress address for the specific field to be pushed.
+         * \param options optional settings to affect the appearance of the push menu, i.e. title and whether to display a change count if it's singular.
          */
-        void PopulateQuickPushMenu(QMenu& outerMenu, AZ::EntityId entityId, const InstanceDataNode::Address& fieldAddress, const AZStd::string& headerText = "Save slice overrides");
+        void PopulateQuickPushMenu(QMenu& outerMenu, AZ::EntityId entityId, const InstanceDataNode::Address& fieldAddress, const QuickPushMenuOptions& options = QuickPushMenuOptions());
 
         /**
         * Get pushable new child entity Ids
@@ -310,14 +360,6 @@ namespace AzToolsFramework
         void PopulateDetachMenu(QMenu& outerMenu, const AzToolsFramework::EntityIdList& selectedEntities, const AzToolsFramework::EntityIdSet& selectedTransformHierarchyEntities, const AZStd::string& headerText = "Detach");
 
         /**
-        * Populates a (provided) QMenu with a list of slices that are antecedents of the current entity, allowing the user to select them.
-        * \param selectedEntity The Entity to use to populate the menu with. 
-        * \param selectMenu A pointer to the menu to populate
-        * \return true if any items have been added to the menu
-        */
-        bool PopulateSliceSelectSubMenu(const AZ::EntityId& selectedEntity, QMenu*& selectMenu);
-
-        /**
         * Save slice overrides using the hot key.
         * \param inputEntities list of entities whose overrides need to be pushed.
         * \param numEntitiesToAdd [out] number of new entities to add.
@@ -377,7 +419,15 @@ namespace AzToolsFramework
          * \param newParentId The target parent entity
          * \return The root ID of the new entity hierarchy after necessary cloning/reparenting
          */
+         // LUMBERYARD_DEPRECATED(LY-108703)
         AZ::EntityId ReparentNonTrivialEntityHierarchy(const AZ::EntityId& entityId, const AZ::EntityId& newParentId);
+
+        /**
+         * Performs the necessary detach operations on orphaned slice and subslice entities while reparenting existing loose entities and slices.
+         * \param entityId The target entity to reparent
+         * \param newParentId The target parent entity
+        */
+        void ReparentNonTrivialSliceInstanceHierarchy(const AZ::EntityId& entityId, const AZ::EntityId& newParentId);
 
         /**
         * Reflects slice tools related structures for serialization/editing.
@@ -545,6 +595,18 @@ namespace AzToolsFramework
         * \return The slice save format.
         */
         AZ::DataStream::StreamType GetSliceStreamFormat();
+
+        /**
+        * Prunes child order array entries that won't be in a pushed slice.
+        * \param originalOrderArray Child array with all entities in
+        * \param prunedOrderArray [out] Child array after removing unneeded entities.
+        * \param targetSlice Slice that the children are being pushed to.
+        * \param willPushEntityCallback Callback routine that is called per entity in the array and returns true if the entity will be pushed.
+        */
+        void RemoveInvalidChildOrderArrayEntries(const AZStd::vector<AZ::EntityId>& originalOrderArray,
+            AZStd::vector<AZ::EntityId>& prunedOrderArray,
+            const AZ::Data::Asset<AZ::SliceAsset>& targetSlice,
+            WillPushEntityCallback willPushEntityCallback);
 
         static const char* splitterColor = "black";
         static const char* detachMenuItemHoverColor = "#4285F4";

@@ -45,12 +45,14 @@ namespace PhysXCharacters
 
     class CharacterController
         : public Physics::Character
+        , public physx::PxControllerFilterCallback
+        , public physx::PxQueryFilterCallback
     {
         friend class CharacterControllerComponent;
 
     public:
         AZ_CLASS_ALLOCATOR(CharacterController, AZ::SystemAllocator, 0);
-        AZ_TYPE_INFO(CharacterController, "{A75A7D19-BC21-4F7E-A3D9-05031D2DFC94}", Physics::Character);
+        AZ_TYPE_INFO_LEGACY(CharacterController, "{A75A7D19-BC21-4F7E-A3D9-05031D2DFC94}", Physics::Character);
         static void Reflect(AZ::ReflectContext* context);
 
         CharacterController() = default;
@@ -62,6 +64,7 @@ namespace PhysXCharacters
         void SetActorName(const AZStd::string& name = "Character Controller");
         void SetMinimumMovementDistance(float distance);
         void CreateShadowBody(const Physics::CharacterConfiguration& configuration, Physics::World&);
+        void SetTag(const AZStd::string& tag);
 
         // Physics::Character
         AZ::Vector3 GetBasePosition() const override;
@@ -74,6 +77,11 @@ namespace PhysXCharacters
         float GetSlopeLimitDegrees() const override;
         void SetSlopeLimitDegrees(float slopeLimitDegrees) override;
         AZ::Vector3 GetVelocity() const override;
+        Physics::CollisionLayer GetCollisionLayer() const override;
+        Physics::CollisionGroup GetCollisionGroup() const override;
+        void SetCollisionLayer(const Physics::CollisionLayer& layer) override;
+        void SetCollisionGroup(const Physics::CollisionGroup& group) override;
+        AZ::Crc32 GetColliderTag() const override;
         AZ::Vector3 TryRelativeMove(const AZ::Vector3& deltaPosition, float deltaTime) override;
         void SetRotation(const AZ::Quaternion& rotation) override;
         void CheckSupport(const AZ::Vector3& direction, float distance, const Physics::CharacterSupportInfo& supportInfo) override;
@@ -92,6 +100,14 @@ namespace PhysXCharacters
         void* GetNativePointer() const override;
         void AddToWorld(Physics::World&) override;
         void RemoveFromWorld(Physics::World&) override;
+
+        // physx::PxControllerFilterCallback
+        bool filter(const physx::PxController& controllerA, const physx::PxController& controllerB) override;
+
+        // physx::PxQueryFilterCallback
+        physx::PxQueryHitType::Enum preFilter(const physx::PxFilterData& filterData, const physx::PxShape* shape,
+            const physx::PxRigidActor* actor, physx::PxHitFlags& queryFlags) override;
+        physx::PxQueryHitType::Enum postFilter(const physx::PxFilterData& filterData, const physx::PxQueryHit& hit) override;
 
         // CharacterController specific
         void Resize(float height);
@@ -120,5 +136,6 @@ namespace PhysXCharacters
         AZStd::shared_ptr<Physics::Shape> m_shape; ///< The generic physics API shape associated with the controller.
         AZStd::unique_ptr<Physics::RigidBody> m_shadowBody; ///< A kinematic-synchronised rigid body used to store additional colliders.
         AZStd::string m_name = "Character Controller"; ///< Name to set on the PhysX actor associated with the controller.
+        AZ::Crc32 m_colliderTag; ///< Tag used to identify the collider associated with the controller.
     };
 } // namespace PhysXCharacters

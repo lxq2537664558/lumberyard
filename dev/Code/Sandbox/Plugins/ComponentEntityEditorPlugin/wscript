@@ -25,9 +25,9 @@ def build(bld):
         configurations  = ['all'],
         exclude_monolithic = True,
         client_only     = True,
-        pch             = "stdafx.cpp",
+        pch             = "ComponentEntityEditorPlugin_precompiled.cpp",
         features        = ['qt5'],
-        use             = ['EditorLib', 'AzQtComponents'],
+        use             = ['EditorLib', 'AzQtComponents', 'EditorCommon'],
         uselib          = ['QT5CORE',
                            'QT5QUICK',
                            'QT5QML',
@@ -36,11 +36,17 @@ def build(bld):
                            'QT5NETWORK', # this lib depends on EditorLib, which depends on NewsShared, which depends on Qt5Network
                            'AWS_CPP_SDK_IDENTITY_METRICS',
                            ],
-        includes        = [ bld.Path('Code/Sandbox'),
+        test_all_uselib = ['QT5TEST'],
+        includes        = [ bld.Path('Code/Sandbox/Editor'),
+                            bld.Path('Code/Sandbox/Editor/Include'),
+                            bld.Path('Code/CryEngine/CryCommon'),
+                            bld.Path('Code/Sandbox'),
                             bld.Path('Code/CryEngine') ],
         export_includes = ['.'],
         use_required_gems  = True,
         darwin_enable_rtti = True,
+
+        darwin_cxxflags = ['-Wno-deprecated-register'],
 
         # Testing
         test_all_file_list = ['componententityeditorplugin_test.waf_files'],

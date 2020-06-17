@@ -19,6 +19,7 @@
 
 // The maximum number of unique surface types that can be used per node
 #define MMRM_MAX_SURFACE_TYPES 16
+#define COMPILED_OCTREE_FILE_NAME "terrain/terrain.dat"
 
 // !!! Do not add any headers here !!!
 #include "CryEngineDecalInfo.h" 
@@ -47,7 +48,6 @@ struct IMaterial;
 struct SpawnParams;
 struct ForceObject;
 struct IRenderNode;
-struct CRNTmpData;
 struct IObjManager;
 struct IParticleManager;
 struct IDeferredPhysicsEventManager;
@@ -57,6 +57,16 @@ struct ITimeOfDay;
 struct ITerrain;
 struct STerrainInfo;
 struct MacroTextureConfiguration;
+
+namespace LegacyProceduralVegetation
+{
+    class IVegetationPoolManager;
+}
+
+namespace LegacyTerrain
+{
+    struct MacroTextureConfiguration;
+}
 
 namespace ChunkFile
 {
@@ -341,6 +351,17 @@ struct IStatInstGroup
         nTexturesAreStreamedIn = 0;
         nPlayerHideable = ePlayerHideable_None;
         nID = -1;
+    }
+
+    IStatObj* GetStatObj()
+    {
+        IStatObj* p = pStatObj;
+        return (IStatObj*)p;
+    }
+    const IStatObj* GetStatObj() const
+    {
+        const IStatObj* p = pStatObj;
+        return (const IStatObj*)p;
     }
 
     _smart_ptr<IStatObj> pStatObj;
@@ -702,6 +723,126 @@ struct SHotUpdateInfo
   AUTO_STRUCT_INFO
 };
 
+struct STerrainInfo
+{
+    //! Helper method.
+    //! Returns terrain size in meters.
+    int TerrainSize() const
+    {
+        return nHeightMapSize_InUnits * nUnitSize_InMeters;
+    }
+
+    //! Helper method.
+    void LoadTerrainSettings(int& unitSize, // in meters
+                             float& invUnitSize, // in 1/meters
+                             int& terrainSize, // in meters
+                             int& meterToUnitBitShift,
+                             int& terrainSizeDiv,
+                             int& sectorSize, // in meters
+                             int& sectorsTableSize, // sector width/height of the finest LOD level (sector count is the square of this value)
+                             int& unitToSectorBitShift) const
+    {
+        unitSize = nUnitSize_InMeters;
+        invUnitSize = 1.f / unitSize;
+        terrainSize = TerrainSize();
+        meterToUnitBitShift = 0;
+        {
+            int shift = 0;
+            while ((1 << shift) < unitSize)
+            {
+                shift++;
+            }
+            meterToUnitBitShift = shift;
+        }
+        terrainSizeDiv = (terrainSize >> meterToUnitBitShift) - 1;
+        sectorSize = nSectorSize_InMeters;
+        sectorsTableSize = nSectorsTableSize_InSectors;
+
+        unitToSectorBitShift = 0;
+        while (sectorSize >> unitToSectorBitShift > unitSize)
+        {
+            unitToSectorBitShift++;
+        }
+    }
+
+    int nHeightMapSize_InUnits;
+    int nUnitSize_InMeters;
+    int nSectorSize_InMeters;
+
+    int nSectorsTableSize_InSectors;
+    float fHeightmapZRatio;
+    float fOceanWaterLevel; //For file format compatibility purposes this is left here even though Terrain doesn't own Ocean/Water issues anymore.
+
+    AUTO_STRUCT_INFO
+};
+
+#define OCTREE_CHUNK_VERSION 29
+#define TERRAIN_NODE_CHUNK_VERSION 8
+
+struct STerrainChunkHeader
+{
+    int8 nVersion;
+    int8 nDummy;
+    int8 nFlags;
+    int8 nFlags2;
+    int32 nChunkSize;
+    STerrainInfo TerrainInfo;
+
+    AUTO_STRUCT_INFO
+};
+
+//==============================================================================================
+
+#define FILEVERSION_TERRAIN_TEXTURE_FILE 10
+
+// Summary:
+//   Common header for binary files used by 3dengine
+struct SCommonFileHeader
+{
+    char    signature[4];   // File signature, should be "CRY "
+    uint8   file_type;      // File type
+    uint8   flags;          // File common flags
+    uint16  version;        // File version
+
+    AUTO_STRUCT_INFO
+};
+
+// Summary:
+// Sub header for terrain texture file
+struct STerrainTextureFileHeader
+{
+    uint16  LayerCount;
+    uint16  Flags;
+    float   ColorMultiplier_deprecated;
+
+    AUTO_STRUCT_INFO
+};
+
+// Summary:
+//   Layer header for terrain texture file (for each layer)
+struct STerrainTextureLayerFileHeader
+{
+    uint16      SectorSizeInPixels; //
+    uint16      nReserved;          // ensure padding and for later usage
+    ETEX_Format eTexFormat;         // typically eTF_BC3
+    uint32      SectorSizeInBytes;  // redundant information for more convenient loading code
+
+    AUTO_STRUCT_INFO
+};
+
+struct STerrainNodeChunk
+{
+    int16   nChunkVersion;
+    int16 bHasHoles;
+    AABB    boxHeightmap;
+    float fOffset;
+    float fRange;
+    int     nSize;
+    int     nSurfaceTypesNum;
+
+    AUTO_STRUCT_INFO
+};
+
 struct IVisAreaCallback
 {
     // <interfuscator:shuffle>
@@ -756,10 +897,12 @@ struct IVisAreaManager
     //   Removes all vis areas in a region of the level.
     virtual void ClearRegion(const AABB& region) = 0;
 
-    virtual void GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType objType, const AABB* pBBox) = 0;
+    virtual void GetObjectsByType(PodArray<IRenderNode*>& lstObjects, EERType objType, const AABB* pBBox, ObjectTreeQueryFilterCallback filterCallback = nullptr) = 0;
     virtual void GetObjectsByFlags(uint dwFlags, PodArray<IRenderNode*>& lstObjects) = 0;
 
     virtual void GetObjects(PodArray<IRenderNode*>& lstObjects, const AABB* pBBox) = 0;
+
+    virtual bool IsOutdoorAreasVisible() = 0;
 };
 
 
@@ -1179,6 +1322,74 @@ struct SLightVolume
 
 #pragma pack(pop)
 
+struct CRNTmpData
+{
+    struct SRNUserData
+    {
+        int m_narrDrawFrames[MAX_RECURSION_LEVELS];
+        SLodDistDissolveTransitionState lodDistDissolveTransitionState;
+        Matrix34 objMat;
+        OcclusionTestClient m_OcclState;
+        struct IFoliage* m_pFoliage;
+        struct IClipVolume* m_pClipVolume;
+        SBending m_Bending;
+        SBending m_BendingPrev;
+        Vec3 vCurrentWind;
+        uint32 nBendingLastFrame : 29;
+        uint32 bWindCurrent : 1;
+        uint32 bBendingSet : 1;
+        uint16 nCubeMapId;
+        uint16 nCubeMapIdCacheClearCounter;
+        uint8 nWantedLod;
+        CRenderObject* m_pRenderObject[MAX_STATOBJ_LODS_NUM];
+        CRenderObject* m_arrPermanentRenderObjects[MAX_STATOBJ_LODS_NUM];
+    } userData;
+
+    CRNTmpData() { memset(this, 0, sizeof(*this)); assert((void*)this == (void*)&this->userData); nPhysAreaChangedProxyId = ~0; }
+    CRNTmpData* pNext, * pPrev;
+    CRNTmpData** pOwnerRef;
+    uint32 nFrameInfoId;
+    uint32 nPhysAreaChangedProxyId;
+
+    void Unlink()
+    {
+        if (!pNext || !pPrev)
+        {
+            return;
+        }
+        pNext->pPrev = pPrev;
+        pPrev->pNext = pNext;
+        pNext = pPrev = NULL;
+    }
+
+    void Link(CRNTmpData* Before)
+    {
+        if (pNext || pPrev)
+        {
+            return;
+        }
+        pNext = Before->pNext;
+        Before->pNext->pPrev = this;
+        Before->pNext = this;
+        pPrev = Before;
+    }
+
+    int Count()
+    {
+        int nCounter = 0;
+        for (CRNTmpData* pElem = pNext; pElem != this; pElem = pElem->pNext)
+        {
+            nCounter++;
+        }
+        return nCounter;
+    }
+
+    void OffsetPosition(const Vec3& delta)
+    {
+        userData.objMat.SetTranslation(userData.objMat.GetTranslation() + delta);
+    }
+};
+
 
 // Summary:
 //     Interface to the 3d Engine.
@@ -1421,7 +1632,17 @@ struct I3DEngine
     // Return Value:
     //     A pointer to an object derived from IStatObj.
     virtual IStatObj* FindStatObjectByFilename(const char* filename) = 0;
-    
+
+    // Summary:
+    //     Returns pointer to the IVegetationPoolManager singleton.
+    // See Also:
+    //     IVegetationPool
+    // Arguments:
+    //     void
+    // Return Value:
+    //     A pointer to the IVegetationPoolManager singleton.
+    virtual LegacyProceduralVegetation::IVegetationPoolManager& GetIVegetationPoolManager() = 0;
+
     //Summary:
     //      Creates a deformable render node
     //See Also:
@@ -1453,6 +1674,8 @@ struct I3DEngine
     // Return Value:
     //     An integer representing the gsm range step
     virtual const float GetGSMRangeStep() = 0;
+
+    virtual float GetTerrainDetailMaterialsViewDistRatio() const = 0;
 
     // Summary:
     //     Gets the amount of loaded objects.
@@ -1495,6 +1718,36 @@ struct I3DEngine
     virtual bool IsSunShadows(){ return false; };
     // End Confetti//////////////////////////////
     //////////////////////////////////////////////
+
+    // Summary:
+    //     Offers same functionality as Cry3DEngineBase::MakeSystemMaterialFromShader
+    virtual _smart_ptr<IMaterial> MakeSystemMaterialFromShaderHelper(const char* sShaderName, SInputShaderResources* Res = NULL) = 0;
+
+    virtual bool CheckMinSpecHelper(uint32 nMinSpec) = 0;
+
+    virtual void OnCasterDeleted(IShadowCaster* pCaster) = 0;
+
+    // Summary:
+    //     Loads and instantiate the Octree from the data available in pData stream.
+    // Return Value:
+    //     true if the octree and its data were created successfully.
+    virtual bool SetOctreeCompiledData(byte* pData, int nDataSize, std::vector<IStatObj*>** ppStatObjTable, std::vector<_smart_ptr<IMaterial>>** ppMatTable, bool bHotUpdate = false, SHotUpdateInfo* pExportInfo = nullptr, bool loadTerrainMacroTexture = false) = 0;
+
+    // Summary:
+    //     Writes the octree data into the pData stream.
+    // Return Value:
+    //     true if the octree data was copied into pData.
+    virtual bool GetOctreeCompiledData(byte* pData, int nDataSize, std::vector<IStatObj*>** ppStatObjTable, std::vector<_smart_ptr<IMaterial>>** ppMatTable, std::vector<struct IStatInstGroup*>** ppStatInstGroupTable, EEndian eEndian, SHotUpdateInfo* pExportInfo = nullptr) = 0;
+
+    // Summary:
+    //     Traverses the Octree and calculates the size in bytes of the smallest buffer that can fit the serializable octree data.
+    // Return Value:
+    //     number of bytes.
+    virtual int GetOctreeCompiledDataSize(SHotUpdateInfo* pExportInfo = nullptr) = 0;
+
+    virtual void GetStatObjAndMatTables(DynArray<IStatObj*>* pStatObjTable, DynArray<_smart_ptr<IMaterial>>* pMatTable, DynArray<IStatInstGroup*>* pStatInstGroupTable, uint32 nObjTypeMask) = 0;
+
+    virtual IRenderNode* AddVegetationInstance(int nStaticGroupID, const Vec3& vPos, const float fScale, uint8 ucBright, uint8 angle, uint8 angleX = 0, uint8 angleY = 0) = 0;
 
 
 #ifndef _RELEASE
@@ -1631,7 +1884,6 @@ struct I3DEngine
     //     Sets the current sun base color.
     virtual void SetSunColor(Vec3 vColor) = 0;
 
-    // BEGIN JAVELIN FORK: https://jira.agscollab.com/browse/JAV-12177
     // Summary:
     //     Gets the current sun animated color.
     virtual Vec3 GetSunAnimColor() = 0;
@@ -1740,10 +1992,31 @@ struct I3DEngine
     virtual void GetPrecacheRoundIds(int pRoundIds[MAX_STREAM_PREDICTION_ZONES]) = 0;
 
     virtual void TraceFogVolumes(const Vec3& vPos, const AABB& objBBox, SFogVolumeData& fogVolData, const SRenderingPassInfo& passInfo, bool fogVolumeShadingQuality) = 0;
-    
-    // Attempts to import a macro texture file at filepath, and fills out the provided configuration with data from the file. Returns true if successful.
-    virtual bool ReadMacroTextureFile(const char* filepath, MacroTextureConfiguration& configuration) const = 0;
 
+    // Summary:
+    //     Fills up the minimum required data to be able to load the legacy terrain.
+    // Notes:
+    // Arguments:
+    //     fileHandle: [out] It is the responsibility of the caller to close this file handle
+    //                 via GetPak()->FClose(fileHandle);
+    //     terrainInfo: [out]
+    //     surfaceTypesXmlNode: [out]
+    // Return Value:
+    //     Returns the number of bytes available to read from the current position of @fileHandle.
+    virtual int GetLegacyTerrainLevelData(AZ::IO::HandleType& fileHandle, STerrainInfo& terrainInfo
+                                          , bool& bSectorPalettes, EEndian& eEndian
+                                          , XmlNodeRef& surfaceTypesXmlNode) = 0;
+
+    // Summary:
+    //     Same as above but fetches and seeks data using a pointer to octree data.
+    virtual int GetLegacyTerrainLevelData(uint8*& octreeData, STerrainInfo& terrainInfo
+                                          , bool& bSectorPalettes, EEndian& eEndian) = 0;
+
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequestBus::ReadMacroTextureFile instead
+    // Attempts to import a macro texture file at filepath, and fills out the provided configuration with data from the file. Returns true if successful.
+    virtual bool ReadMacroTextureFile(const char* filepath, LegacyTerrain::MacroTextureConfiguration& configuration) const = 0;
+
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus::GetHeight*(Sampler::BILINEAR) instead.
     // Summary:
     //     Gets the interpolated terrain elevation for a specified location.
     // Notes:
@@ -1755,6 +2028,7 @@ struct I3DEngine
     //     A float which indicate the elevation level.
     virtual float GetTerrainElevation(float x, float y, int nSID = DEFAULT_SID) = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus::GetHeight(Sampler::CLAMP) instead.
     // Summary:
     //     Gets the terrain elevation for a specified location.
     // Notes:
@@ -1766,7 +2040,21 @@ struct I3DEngine
     //     A float which indicate the elevation level.
     virtual float GetTerrainZ(int x, int y) = 0;
 
-  // Summary:
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus instead.
+    // Summary:
+    //     Gets the terrain slope for a specified location.
+    // Notes:
+    //     Only values between 0 and WORLD_SIZE.
+    //     Otherwise returns 0.
+    // Arguments:
+    //     x - X coordinate of the location
+    //     y - Y coordinate of the location
+    // Return Value:
+    //     A float which indicate the slope (a value between 0f and 255.0f).
+    virtual float GetTerrainSlope(int x, int y) = 0;
+
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequests::GetTerrainSurfaceId() instead.
+    // Summary:
     //     Gets the terrain surfaceid.
     // Notes:
     //     Only values between 0 and WORLD_SIZE.
@@ -1777,32 +2065,30 @@ struct I3DEngine
     //     An int which indicates the surface id
     virtual int GetTerrainSurfaceId(int x, int y) = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus::GetIsHoleFromFloats instead.
     // Summary:
-  //     Gets the terrain hole flag for a specified location.
-  // Notes:
-  //     Only values between 0 and WORLD_SIZE.
-  // Arguments:
-  //     x - X coordinate of the location
-  //     y - Y coordinate of the location
-  // Return Value:
-  //     A bool which indicate is there hole or not.
-  virtual bool GetTerrainHole(int x, int y) = 0;
+    //     Gets the terrain hole flag for a specified location.
+    // Notes:
+    //     Only values between 0 and WORLD_SIZE.
+    // Arguments:
+    //     x - X coordinate of the location
+    //     y - Y coordinate of the location
+    // Return Value:
+    //     A bool which indicate is there's hole or not.
+    virtual bool GetTerrainHole(int x, int y) = 0;
 
-  // Summary:
-  //     Gets the terrain surface normal for a specified location.
-  // Arguments:
-  //     vPos.x - X coordinate of the location
-  //     vPos.y - Y coordinate of the location
-  //     vPos.z - ignored
-  // Return Value:
-  //     A terrain surface normal.
-  virtual Vec3 GetTerrainSurfaceNormal(Vec3 vPos) = 0;
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus::GetNormalFromFloats instead.
+    // Summary:
+    //     Gets the terrain surface normal for a specified location.
+    // Arguments:
+    //     vPos.x - X coordinate of the location
+    //     vPos.y - Y coordinate of the location
+    //     vPos.z - ignored
+    // Return Value:
+    //     A terrain surface normal.
+    virtual Vec3 GetTerrainSurfaceNormal(Vec3 vPos) = 0;
 
-
-  // returns the AZ::Aabb enclosing the terrain
-  virtual const AZ::Aabb& GetTerrainAabb() const = 0;
-
-
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus::GetTerrainGridResolution instead.
     // Summary:
     //     Gets the unit size of the terrain
     // Notes:
@@ -1811,6 +2097,7 @@ struct I3DEngine
     //     A int value representing the terrain unit size in meters.
     virtual int   GetHeightMapUnitSize() = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus::GetTerrainAabb instead.
     // Summary:
     //     Gets the size of the terrain
     // Notes:
@@ -1819,6 +2106,7 @@ struct I3DEngine
     //     An int representing the terrain size in meters.
     virtual int   GetTerrainSize() = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequestBus::GetTerrainSectorSize instead.
     // Summary:
     //     Gets the size of the terrain sectors
     // Notes:
@@ -1835,17 +2123,21 @@ struct I3DEngine
     //        Removes all static objects on the map (for editor)
     virtual void RemoveAllStaticObjects(int nSID = DEFAULT_SID) = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequestBus::SetTerrainSectorTexture instead.
     // Summary:
     //        Sets terrain sector texture id, and disable streaming on this sector
     virtual void SetTerrainSectorTexture(const int nTexSectorX, const int nTexSectorY, unsigned int textureId, unsigned int textureSizeX, unsigned int textureSizeY) = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequests::GetTerrainSectorSize
     // Summary:
     //        Returns size of smallest terrain texture node (last leaf) in meters
     virtual int GetTerrainTextureNodeSizeMeters() = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus instead.
     //Summary:
     //      Returns boolean indicating if the terrain surface is being shown.
-    virtual bool GetShowTerrainSurface() = 0; 
+    virtual bool IsTerrainActive() = 0;
+
     // Summary:
     //        Sets group parameters
     virtual bool SetStatInstGroup(int nGroupId, const IStatInstGroup& siGroup, int nSID = 0) = 0;
@@ -1854,11 +2146,12 @@ struct I3DEngine
     //        Gets group parameters
     virtual bool GetStatInstGroup(int nGroupId, IStatInstGroup& siGroup, int nSID = 0) = 0;
 
-
+    //! LUMBERYARD_DEPRECATED(LY-107351) Will be deleted in an upcoming release.
     // Summary:
     //        Sets burbed out flag
     virtual void SetTerrainBurnedOut(int x, int y, bool bBurnedOut) = 0;
-    
+
+    //! LUMBERYARD_DEPRECATED(LY-107351) Will be deleted in an upcoming release.
     // Summary:
     //        Gets burbed out flag
     virtual bool IsTerrainBurnedOut(int x, int y) = 0;
@@ -1900,9 +2193,17 @@ struct I3DEngine
 
     virtual void LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID = DEFAULT_SID) = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequestBus::LoadTerrainSurfacesFromXML instead.
     // Summary:
     //     Loads detail texture and detail object settings from XML doc (load from current LevelData.xml if pDoc is 0)
     virtual void    LoadTerrainSurfacesFromXML(XmlNodeRef pDoc, bool bUpdateTerrain, int nSID = DEFAULT_SID) = 0;
+
+    // Summary:
+    //      This one is called by the editor when the terrain editing tools are not being built.
+    //      This is the case when the game developers are using external tools to author terrain.
+    //      The Octree data and the terrain heightmap data are stored in the same file.
+    //      This method makes sure only the non-terrain data of the Octree is loaded.
+    virtual bool LoadCompiledOctreeForEditor() = 0;
 
     //DOC-IGNORE-END
 
@@ -1978,6 +2279,9 @@ struct I3DEngine
     //   Draws text right aligned at the y pixel precision.
     virtual void DrawTextRightAligned(const float x, const float y, const char* format, ...) PRINTF_PARAMS(4, 5) = 0;
     virtual void DrawTextRightAligned(const float x, const float y, const float scale, const ColorF& color, const char* format, ...) PRINTF_PARAMS(6, 7) = 0;
+
+    virtual void DrawBBoxHelper(const Vec3& vMin, const Vec3& vMax, ColorB col = Col_White) = 0;
+    virtual void DrawBBoxHelper(const AABB& box, ColorB col = Col_White) = 0;
 
     // Summary:
     //   Enables or disables portal at a specified position.
@@ -2202,6 +2506,7 @@ struct I3DEngine
     //     In debug mode check memory heap and makes assert, do nothing in release
     virtual void CheckMemoryHeap() = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequestBus::CloseTerrainTextureFile instead.
     // Summary:
     //     Closes terrain texture file handle and allows to replace/update it.
     virtual void CloseTerrainTextureFile(int nSID = DEFAULT_SID) = 0;
@@ -2211,7 +2516,6 @@ struct I3DEngine
     virtual void DeleteEntityDecals(IRenderNode* pEntity) = 0;
 
     // Summary:
-    virtual void CompleteObjectsGeometry() = 0;
     //     Disables CGFs unloading.
     virtual void LockCGFResources() = 0;
 
@@ -2296,18 +2600,28 @@ struct I3DEngine
     virtual ChunkFile::IChunkFileWriter* CreateChunkFileWriter(EChunkFileFormat eFormat, ICryPak* pPak, const char* filename) const = 0;
     virtual void ReleaseChunkFileWriter(ChunkFile::IChunkFileWriter* p) const = 0;
 
-    
+    // Description:
+    //      Returns true if the ocean was created successfully.
+    virtual bool CreateOcean(_smart_ptr<IMaterial> pTerrainWaterMat, float waterLevel) = 0;
+
+    // Description:
+    //      Deletes the ocean if it exists, otherwise does nothing.
+    virtual void DeleteOcean() = 0;
+
+    // Description:
+    //      Changes ocean material if the ocean exists.
+    virtual void ChangeOceanMaterial(_smart_ptr<IMaterial> pMat) = 0;
+
+    // Description:
+    //      Changes ocean water level if the ocean exists.
+    virtual void ChangeOceanWaterLevel(float fWaterLevel) = 0;
+
+    virtual void InitMaterialDefautMappingAxis(_smart_ptr<IMaterial> pMat) = 0;
+
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use AzFramework::Terrain::TerrainDataRequestBus or LegacyTerrain::LegacyTerrainDataRequestBus
     // Description:
     //      Returns interface to terrain engine
     virtual ITerrain* GetITerrain() = 0;
-
-    // Description:
-    //      Creates terrain engine
-    virtual ITerrain* CreateTerrain(const STerrainInfo& TerrainInfo) = 0;
-
-    // Description:
-    //      Deletes terrain
-    virtual void DeleteTerrain() = 0;
 
     // Description:
     //      Returns interface to visarea manager.
@@ -2394,10 +2708,19 @@ struct I3DEngine
     //    Used by editor during object alignment
     virtual bool RenderMeshRayIntersection(IRenderMesh* pRenderMesh, SRayHitInfo& hitInfo, _smart_ptr<IMaterial> pCustomMtl = 0) = 0;
 
+    virtual void CheckCreateRNTmpData(CRNTmpData** ppInfo, IRenderNode* pRNode, const SRenderingPassInfo& passInfo) = 0;
 
     // Description:
     //     Frees lod transition state
     virtual void FreeRNTmpData(CRNTmpData** ppInfo) = 0;
+
+    virtual bool IsTerrainSyncLoad() = 0;
+
+    // Description:
+    //     Returns true if the Octree is ready.
+    virtual bool IsObjectTreeReady() = 0;
+
+    virtual IOctreeNode* GetIObjectTree() = 0;
 
     // Description:
     //     Call function 2 times (first to get the size then to fill in the data)
@@ -2406,12 +2729,12 @@ struct I3DEngine
     // Return Value:
     //   Count returned
     virtual uint32 GetObjectsByType(EERType objType, IRenderNode** pObjects = 0) = 0;
-    virtual uint32 GetObjectsByTypeInBox(EERType objType, const AABB& bbox, IRenderNode** pObjects = 0) = 0;
+    virtual uint32 GetObjectsByTypeInBox(EERType objType, const AABB& bbox, IRenderNode** pObjects = 0, ObjectTreeQueryFilterCallback filterCallback = nullptr) = 0;
     virtual uint32 GetObjectsInBox(const AABB& bbox, IRenderNode** pObjects = 0) = 0;
     virtual uint32 GetObjectsByFlags(uint dwFlag, IRenderNode** pObjects = 0) = 0;
 
     // variant which takes a POD array which is resized in the function itself
-    virtual void GetObjectsByTypeInBox(EERType objType, const AABB& bbox, PodArray<IRenderNode*>* pLstObjects) = 0;
+    virtual void GetObjectsByTypeInBox(EERType objType, const AABB& bbox, PodArray<IRenderNode*>* pLstObjects, ObjectTreeQueryFilterCallback filterCallback = nullptr) = 0;
 
     // Called from editor whenever an object is modified by the user
     virtual void OnObjectModified(IRenderNode* pRenderNode, uint dwFlags) = 0;
@@ -2450,8 +2773,10 @@ struct I3DEngine
 
     virtual IDeferredPhysicsEventManager* GetDeferredPhysicsEventManager() = 0;
 
+    //! LUMBERYARD_DEPRECATED(LY-107351) Use LegacyTerrain::LegacyTerrainDataRequestBus::IsTerrainTextureStreamingInProgress
     // Return true if terrain texture streaming takes place
     virtual bool IsTerrainTextureStreamingInProgress() const = 0;
+
     virtual void SetStreamableListener(IStreamedObjectListener* pListener) = 0;
 
     // following functions are used by SRenderingPassInfo
@@ -2532,7 +2857,23 @@ struct I3DEngine
     //     szBinaryStream - decoded stream + size
     virtual IStatObj* LoadDesignerObject(int nVersion, const char* szBinaryStream, int size) = 0;
 
+    // Summary:
+    //     Makes sure all queued culling jobs are completely finished.
+    // This is useful when adding or removing Components that trigger AZ::Job creation
+    // like the terrain system. It is important to complete those jobs before removing
+    // such type of components.
+    virtual void WaitForCullingJobsCompletion() = 0;
 
+    // Summary:
+    //     Clips a triangle across four planes. More triangles may be created if clipping is actually
+    //     needed.
+    // Arguments:
+    //     lstInds - Original index list for the first three vertices in @posBuffer (The triangle that will be clipped).
+    //     pPlanes - The four planes that will be used to clip the triangle.
+    //     posBuffer - [InOut] the vertex position of the input triangle and the new vertices are appended at the end when
+    //                 clipping occurs.
+    //     lstClippedInds - [Out] the new list if indices is appended to this array.
+    virtual void ClipTriangleHelper(const PodArray<vtx_idx>& lstInds, const Plane pPlanes[4], PodArray<Vec3>& posBuffer, PodArray<vtx_idx>& lstClippedInds) const = 0;
 
     // </interfuscator:shuffle>
 };
@@ -3232,7 +3573,6 @@ inline SRendItemSorter SRendItemSorter::CreateDefaultRendItemSorter()
     rendItemSorter.nValue = 0;
     return rendItemSorter;
 }
-
 
 //Legacy Bus for communicating with SVOGI from the legacy engine code.
 class SVOGILegacyRequests

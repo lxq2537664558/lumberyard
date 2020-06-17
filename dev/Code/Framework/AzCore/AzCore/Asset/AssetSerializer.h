@@ -62,7 +62,7 @@ namespace AZ {
     private:
 
         /// Called after we are done writing to the instance pointed by classPtr.
-        void PostSerializeAssetReference(AZ::Data::Asset<AZ::Data::AssetData>& asset, const Data::AssetFilterCB& assetFilterCallback);
+        bool PostSerializeAssetReference(AZ::Data::Asset<AZ::Data::AssetData>& asset, const Data::AssetFilterCB& assetFilterCallback);
 
         // Upgrade legacy Ids.
         void RemapLegacyIds(AZ::Data::Asset<AZ::Data::AssetData>& asset);
@@ -97,8 +97,8 @@ namespace AZ {
         {
         public:
             GenericClassGenericAsset()
+                : m_classData{ SerializeContext::ClassData::Create<ThisType>("Asset", GetAssetClassId(), &m_factory, &AssetSerializer::s_serializer) }
             {
-                m_classData = SerializeContext::ClassData::Create<ThisType>("Asset", GetAssetClassId(), &m_factory, &AssetSerializer::s_serializer);
                 m_classData.m_version = 1;
             }
 
@@ -128,11 +128,12 @@ namespace AZ {
                 return GetAssetClassId();
             }
 
-            void Reflect(SerializeContext* serializeContext)
+            void Reflect(SerializeContext* serializeContext) override
             {
                 if (serializeContext)
                 {
-                    serializeContext->RegisterGenericClassInfo(GetSpecializedTypeId(), this, &AZ::AnyTypeInfoConcept<ThisType>::CreateAny);
+                    serializeContext->RegisterGenericClassInfo(GetSpecializedTypeId(), this, &AZ::AnyTypeInfoConcept<Data::Asset<Data::AssetData>>::CreateAny);
+                    serializeContext->RegisterGenericClassInfo(azrtti_typeid<ThisType>(), this, &AZ::AnyTypeInfoConcept<ThisType>::CreateAny);
                 }
             }
 

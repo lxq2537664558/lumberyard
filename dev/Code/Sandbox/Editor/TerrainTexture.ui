@@ -131,6 +131,13 @@
              </property>
             </widget>
            </item>
+            <item>
+              <widget class="ClickableLabel" name="exportSplatMapClickable">
+                <property name="text">
+                  <string>Export Splat Map</string>
+                </property>
+              </widget>
+            </item>
           </layout>
          </widget>
         </item>
@@ -199,7 +206,12 @@
          </widget>
         </item>
         <item>
-         <layout class="QVBoxLayout" name="materialSelection"/>
+         <layout class="QVBoxLayout" name="materialSelection">
+           <item>
+             <widget class="QLabel" name="terrainNotFoundMessage">
+             </widget>
+           </item>
+         </layout>
         </item>
         <item>
          <widget class="QCollapsibleGroupBox" name="optionsGroupBox">

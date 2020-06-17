@@ -26,7 +26,9 @@ struct sockaddr_in;
 struct sockaddr;
 struct addrinfo;
 
+AZ_PUSH_DISABLE_WARNING(4800, "-Wunknown-warning-option")
 #include <VersionHelpers.h>
+AZ_POP_DISABLE_WARNING
 #define SO_NBIO          FIONBIO
 #define AZ_EWOULDBLOCK   WSAEWOULDBLOCK
 #define AZ_EINPROGRESS   WSAEINPROGRESS
@@ -36,7 +38,10 @@ struct addrinfo;
 #define AZ_ENETUNREACH   WSAENETUNREACH
 #define AZ_ETIMEDOUT     WSAETIMEDOUT
 
-namespace Platform
+namespace GridMate
 {
-    using SocketType_Platform = AZStd::size_t;
+    namespace Platform
+    {
+        using SocketType_Platform = AZStd::size_t;
+    }
 }

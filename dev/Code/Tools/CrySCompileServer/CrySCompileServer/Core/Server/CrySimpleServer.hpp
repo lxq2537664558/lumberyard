@@ -18,6 +18,7 @@
 #include <AzCore/std/string/string.h>
 #include <AzCore/std/containers/unordered_set.h>
 #include <AzCore/std/containers/unordered_map.h>
+#include <AzCore/std/parallel/atomic.h>
 #include <string>
 #include <vector>
 
@@ -67,15 +68,23 @@ public:
     std::vector<AZStd::string> m_WhitelistAddresses;
     
     // Shader Compilers ID
-    static const char* m_Orbis_DXC; // ACCEPTED_USE
-    static const char* m_Durango_FXC; // ACCEPTED_USE
+    static const char* m_Orbis_DXC;
+    static const char* m_Durango_FXC;
     static const char* m_D3D11_FXC;
     static const char* m_GLSL_HLSLcc;
     static const char* m_METAL_HLSLcc;
     static const char* m_GLSL_LLVM_DXC;
     static const char* m_METAL_LLVM_DXC;
 
-    int m_ProvoHardwareTarget = -1;
+#if defined(TOOLS_SUPPORT_PROVO)
+#include "Provo/CrySimpleServer_hpp_provo.inl"
+#endif
+#if defined(TOOLS_SUPPORT_XENIA)
+#include "Xenia/CrySimpleServer_hpp_xenia.inl"
+#endif
+#if defined(TOOLS_SUPPORT_SALEM)
+#include "Salem/CrySimpleServer_hpp_salem.inl"
+#endif
 
     static void Create();
     static void Destroy();
@@ -107,7 +116,7 @@ private:
 
 class CCrySimpleServer
 {
-    static volatile AtomicCountType             ms_ExceptionCount;
+    static AZStd::atomic_long             ms_ExceptionCount;
     CCrySimpleSock*                     m_pServerSocket;
     void            Init();
 public:
@@ -115,7 +124,7 @@ public:
     CCrySimpleServer();
 
 
-    static AtomicCountType          GetExceptionCount() { return ms_ExceptionCount; }
+    static long          GetExceptionCount() { return ms_ExceptionCount; }
     static void                             IncrementExceptionCount();
 };
 

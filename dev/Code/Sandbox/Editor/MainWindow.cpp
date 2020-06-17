@@ -27,7 +27,6 @@
 #include "EditorCoreAPI.h"
 #include "CryEditDoc.h"
 #include "ToolBox.h"
-#include "Util/BoostPythonHelpers.h"
 #include "LevelIndependentFileMan.h"
 #include "GameEngine.h"
 #include <QMenuBar>
@@ -66,8 +65,14 @@
 
 #include "EditorPreferencesPageGeneral.h"
 #include "SettingsManagerDialog.h"
+
+#ifdef LY_TERRAIN_EDITOR
 #include "TerrainTexture.h"
+#endif //#ifdef LY_TERRAIN_EDITOR
+
+// This is the "Sun Trajectory Tool", so it's not directly related to the rest of the Terrain Editor code above.
 #include "TerrainLighting.h"
+
 #include "TimeOfDayDialog.h"
 #include "TrackView/TrackViewDialog.h"
 #include "DataBaseDialog.h"
@@ -75,7 +80,6 @@
 #include "Material/MaterialDialog.h"
 #include "Vehicles/VehicleEditorDialog.h"
 #include "SmartObjects/SmartObjectsEditorDialog.h"
-#include "HyperGraph/HyperGraphDialog.h"
 #include "LensFlareEditor/LensFlareEditor.h"
 #include "DialogEditor/DialogEditorDialog.h"
 #include "TimeOfDayDialog.h"
@@ -84,8 +88,12 @@
 #include "AI/AIDebugger.h"
 #include "VisualLogViewer/VisualLogWnd.h"
 #include "SelectObjectDlg.h"
+
+#ifdef LY_TERRAIN_EDITOR
 #include "TerrainDialog.h"
+#endif //#ifdef LY_TERRAIN_EDITOR
 #include "TerrainPanel.h"
+
 #include "Dialogs/PythonScriptsDialog.h"
 #include "AssetResolver/AssetResolverDialog.h"
 #include "ObjectCreateTool.h"
@@ -101,7 +109,9 @@
 #include <EngineSettingsManager.h>
 
 #include <algorithm>
+AZ_PUSH_DISABLE_WARNING(4251 4355 4996, "-Wunknown-warning-option")
 #include <aws/core/auth/AWSCredentialsProvider.h>
+AZ_POP_DISABLE_WARNING
 
 #include <QDesktopServices>
 #include <QDockWidget>
@@ -123,6 +133,7 @@
 #include <AzFramework/Asset/AssetSystemBus.h>
 #include <AzFramework/Network/SocketConnection.h>
 #include <AzFramework/Network/AssetProcessorConnection.h>
+#include <AzFramework/Input/Devices/Mouse/InputDeviceMouse.h>
 #include <AzToolsFramework/Application/Ticker.h>
 #include <algorithm>
 #include <LyMetricsProducer/LyMetricsAPI.h>
@@ -138,6 +149,8 @@
 #include <Editor/AzAssetBrowser/AzAssetBrowserWindow.h>
 #include <Editor/AssetEditor/AssetEditorWindow.h>
 #include <Editor/GridSettingsDialog.h>
+
+#include <AzCore/RTTI/BehaviorContext.h>
 
 // uncomment this to show thumbnail demo widget
 // #define ThumbnailDemo
@@ -301,29 +314,40 @@ namespace
         QtViewPaneManager::instance()->ClosePane(viewClassName);
     }
 
-    std::vector<std::string> PyGetViewPaneClassNames()
+    bool PyIsViewPaneVisible(const char* viewClassName)
     {
-        IEditorClassFactory* pClassFactory = GetIEditor()->GetClassFactory();
-        std::vector<IClassDesc*> classDescs;
-        pClassFactory->GetClassesBySystemID(ESYSTEM_CLASS_VIEWPANE, classDescs);
+        return QtViewPaneManager::instance()->IsVisible(viewClassName);
+    }
 
-        std::vector<std::string> classNames;
-        for (auto iter = classDescs.begin(); iter != classDescs.end(); ++iter)
+    AZStd::string PyGetStatusText()
+    {
+        if (GetIEditor()->GetEditTool())
         {
-            classNames.push_back((*iter)->ClassName().toUtf8().data());
+            return AZStd::string(GetIEditor()->GetEditTool()->GetStatusText().toUtf8().data());
         }
+        return AZStd::string("");
+    }
 
-        return classNames;
+    AZStd::vector<AZStd::string> PyGetViewPaneNames()
+    {
+        const QtViewPanes panes = QtViewPaneManager::instance()->GetRegisteredPanes();
+
+        AZStd::vector<AZStd::string> names;
+        names.reserve(panes.size());
+
+        AZStd::transform(panes.begin(), panes.end(), AZStd::back_inserter(names), [](const QtViewPane& pane)
+        {
+            return pane.m_name.toUtf8().data();
+        });
+
+        return names;
     }
 
     void PyExit()
     {
         // Adding a single-shot QTimer to PyExit delays the QApplication::closeAllWindows call until
-        // all the events in the event queue have been processed. This resolves a deadlock in
-        // PyScript::AcquirePythonLock as PyScript::ShutdownPython was trying to aquire the lock
-        // already obtained by CScriptTermDialog::ExecuteAndPrint.
-        // Calling QApplication::closeAllWindows instead of MainWindow::close ensures the Metal
-        // render window is cleaned up on macOS.
+        // all the events in the event queue have been processed. Calling QApplication::closeAllWindows instead
+        // of MainWindow::close ensures the Metal render window is cleaned up on macOS.
         QTimer::singleShot(0, qApp, &QApplication::closeAllWindows);
     }
 
@@ -419,6 +443,7 @@ public:
         layout->addWidget(m_spinBox);
 
         m_spinBox->setEnabled(defaultAction->isChecked());
+        m_spinBox->setMinimum(1e-2f);
 
         OnGridValuesUpdated();
 
@@ -696,8 +721,6 @@ void MainWindow::Initialize()
         });
     }
 
-    PyScript::InitializePython(CCryEditApp::instance()->GetRootEnginePath());
-
     AzFramework::ApplicationRequests::Bus::BroadcastResult(
         m_projectExternal, &AzFramework::ApplicationRequests::IsEngineExternal);
 
@@ -730,14 +753,39 @@ MainWindow* MainWindow::instance()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (m_dayCountManager->ShouldShowNetPromoterScoreDialog())
+    auto cryEdit = CCryEditApp::instance();
+    // Don't show the net promoter when running in batch mode.
+    if (!cryEdit || !cryEdit->IsInConsoleMode() || !cryEdit->IsInTestMode() || !cryEdit->IsInAutotestMode())
     {
-        m_NetPromoterScoreDialog->SetRatingInterval(m_dayCountManager->GetRatingInterval());
-        m_NetPromoterScoreDialog->exec();
+        if (m_dayCountManager->ShouldShowNetPromoterScoreDialog())
+        {
+            m_NetPromoterScoreDialog->SetRatingInterval(m_dayCountManager->GetRatingInterval());
+            m_NetPromoterScoreDialog->exec();
+        }
     }
 
+    AzFramework::SystemCursorState currentCursorState;
+    bool isInGameMode = false;
+    if (GetIEditor()->IsInGameMode())
+    {
+        isInGameMode = true;
+        // Storecurrent state in case we need to restore Game Mode.
+        AzFramework::InputSystemCursorRequestBus::EventResult(currentCursorState, AzFramework::InputDeviceMouse::Id,
+            &AzFramework::InputSystemCursorRequests::GetSystemCursorState);
+        // make sure the mouse is turned on before popping up any dialog boxes.
+        AzFramework::InputSystemCursorRequestBus::Event(AzFramework::InputDeviceMouse::Id,
+            &AzFramework::InputSystemCursorRequests::SetSystemCursorState,
+            AzFramework::SystemCursorState::UnconstrainedAndVisible);
+    }
     if (GetIEditor()->GetDocument() && !GetIEditor()->GetDocument()->CanCloseFrame())
     {
+        if (isInGameMode)
+        {
+            // make sure the mouse is turned back off if returning to the game.
+            AzFramework::InputSystemCursorRequestBus::Event(AzFramework::InputDeviceMouse::Id,
+                &AzFramework::InputSystemCursorRequests::SetSystemCursorState,
+                currentCursorState);
+        }
         event->ignore();
         return;
     }
@@ -750,6 +798,14 @@ void MainWindow::closeEvent(QCloseEvent* event)
         !GetIEditor() ||
         !GetIEditor()->GetLevelIndependentFileMan()->PromptChangedFiles())
     {
+        if (isInGameMode)
+        {
+            // make sure the mouse is turned back off if returning to the game.
+            AzFramework::InputSystemCursorRequestBus::Event(AzFramework::InputDeviceMouse::Id,
+                &AzFramework::InputSystemCursorRequests::SetSystemCursorState,
+                currentCursorState);
+
+        }
         event->ignore();
         return;
     }
@@ -768,7 +824,6 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
     // force clean up of all deferred deletes, so that we don't have any issues with windows from plugins not being deleted yet
     qApp->sendPostedEvents(0, QEvent::DeferredDelete);
-    PyScript::ShutdownPython();
 
     QMainWindow::closeEvent(event);
 }
@@ -860,7 +915,8 @@ void MainWindow::InitActions()
         {
             cryEdit->OnCreateLevel();
         })
-        .SetMetricsIdentifier("MainEditor", "NewLevel");
+        .SetMetricsIdentifier("MainEditor", "NewLevel")
+        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateNewLevel);
     am->AddAction(ID_FILE_OPEN_LEVEL, tr("Open Level..."))
         .SetShortcut(tr("Ctrl+O"))
         .SetMetricsIdentifier("MainEditor", "OpenLevel")
@@ -992,6 +1048,9 @@ void MainWindow::InitActions()
 #if defined(TOOLS_SUPPORT_PROVO)
     #include "Provo/MainWindow_cpp_provo.inl"
 #endif
+#if defined(TOOLS_SUPPORT_SALEM)
+    #include "Salem/MainWindow_cpp_salem.inl"
+#endif
 #endif
     am->AddAction(ID_GAME_APPLETV_ENABLESPEC, tr("Apple TV")).SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "SetSpecAppleTV")
@@ -1045,7 +1104,7 @@ void MainWindow::InitActions()
         .SetMetricsIdentifier("MainEditor", "Redo")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateRedo);
     // Not quite ready to implement these globally. Need to properly respond to selection changes and clipboard changes first.
-    // And figure out if these will cause problems with Cut/Copy/Paste shortcuts in the sub-editors (Particle Editor / UI Editor / Flowgraph / etc).
+    // And figure out if these will cause problems with Cut/Copy/Paste shortcuts in the sub-editors (Particle Editor / UI Editor / etc).
     // am->AddAction(ID_EDIT_CUT, tr("Cut"))
     //     .SetShortcut(QKeySequence::Cut)
     //     .SetStatusTip(tr("Cut the current selection to the clipboard"))
@@ -1489,8 +1548,12 @@ void MainWindow::InitActions()
     am->AddAction(ID_TAG_LOC12, tr("Location 12"))
         .SetShortcut(tr("Ctrl+F12"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation12");
-    am->AddAction(ID_VIEW_CONFIGURELAYOUT, tr("Configure Layout..."))
-        .SetMetricsIdentifier("MainEditor", "ConfigureLayoutDialog");
+
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        am->AddAction(ID_VIEW_CONFIGURELAYOUT, tr("Configure Layout..."))
+            .SetMetricsIdentifier("MainEditor", "ConfigureLayoutDialog");
+    }
 #ifdef FEATURE_ORTHOGRAPHIC_VIEW
     am->AddAction(ID_VIEW_CYCLE2DVIEWPORT, tr("Cycle Viewports"))
         .SetShortcut(tr("Ctrl+Tab"))
@@ -1580,17 +1643,20 @@ void MainWindow::InitActions()
         .SetIcon(EditorProxyStyle::icon("Play"))
         .SetApplyHoverEffect()
         .SetMetricsIdentifier("MainEditor", "ToggleGameMode")
-        .SetCheckable(true);
+        .SetCheckable(true)
+        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdatePlayGame);
     am->AddAction(ID_SWITCH_PHYSICS, tr("Enable Physics/AI"))
         .SetShortcut(tr("Ctrl+P"))
         .SetCheckable(true)
         .SetStatusTip(tr("Enable processing of Physics and AI."))
         .SetMetricsIdentifier("MainEditor", "TogglePhysicsAndAI")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnSwitchPhysicsUpdate);
+#ifdef LY_TERRAIN_EDITOR
     am->AddAction(ID_TERRAIN_COLLISION, tr("Terrain Collision")).SetCheckable(true)
         .SetStatusTip(tr("Enable collision of camera with terrain."))
         .SetMetricsIdentifier("MainEditor", "ToggleTerrainCameraCollision")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnTerrainCollisionUpdate);
+#endif //#ifdef LY_TERRAIN_EDITOR
     am->AddAction(ID_GAME_SYNCPLAYER, tr("Synchronize Player with Camera")).SetCheckable(true)
         .SetStatusTip(tr("Synchronize Player with Camera\nSynchronize Player with Camera"))
         .SetMetricsIdentifier("MainEditor", "SynchronizePlayerWithCamear")
@@ -1738,9 +1804,19 @@ void MainWindow::InitActions()
         .SetStatusTip(tr("Validate Level"));
     am->AddAction(ID_TOOLS_VALIDATEOBJECTPOSITIONS, tr("Check Object Positions"))
         .SetMetricsIdentifier("MainEditor", "CheckObjectPositions");
-    am->AddAction(ID_TOOLS_LOGMEMORYUSAGE, tr("Save Level Statistics"))
-        .SetMetricsIdentifier("MainEditor", "SaveLevelStatistics")
-        .SetStatusTip(tr("Logs Editor memory usage."));
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        am->AddAction(ID_TOOLS_LOGMEMORYUSAGE, tr("Save Level Statistics"))
+            .SetMetricsIdentifier("MainEditor", "SaveLevelStatistics")
+            .SetStatusTip(tr("Logs Editor memory usage."));
+    }
+    else
+    {
+        am->AddAction(ID_TOOLS_LOGMEMORYUSAGE, tr("Save Level Statistics (Disabled when Other is active)"))
+            .SetMetricsIdentifier("MainEditor", "SaveLevelStatistics")
+            .SetStatusTip(tr("Logs Editor memory usage."))
+            ->setEnabled(false);
+    }
     am->AddAction(ID_SCRIPT_COMPILESCRIPT, tr("Compile Cry Lua &Script (LEGACY)"))
         .SetMetricsIdentifier("MainEditor", "CompileScript");
     am->AddAction(ID_RESOURCES_REDUCEWORKINGSET, tr("Reduce Working Set"))
@@ -1772,20 +1848,25 @@ void MainWindow::InitActions()
     am->AddAction(ID_OPEN_QUICK_ACCESS_BAR, tr("Show &Quick Access Bar"))
         .SetShortcut(tr("Ctrl+Alt+Space"))
         .SetMetricsIdentifier("MainEditor", "ToggleQuickAccessBar");
-    am->AddAction(ID_VIEW_LAYOUTS, tr("Layouts"))
-        .SetMetricsIdentifier("MainEditor", "Layouts");
+
+    // Disable layouts menu if other is enabled
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        am->AddAction(ID_VIEW_LAYOUTS, tr("Layouts"))
+            .SetMetricsIdentifier("MainEditor", "Layouts");
+
+        am->AddAction(ID_VIEW_SAVELAYOUT, tr("Save Layout..."))
+            .SetMetricsIdentifier("MainEditor", "SaveLayout")
+            .Connect(&QAction::triggered, this, &MainWindow::SaveLayout);
+        am->AddAction(ID_VIEW_LAYOUT_LOAD_DEFAULT, tr("Restore Default Layout"))
+            .SetMetricsIdentifier("MainEditor", "RestoreDefaultLayout")
+            .Connect(&QAction::triggered, [this]() { m_viewPaneManager->RestoreDefaultLayout(true); });
+    }
 
     am->AddAction(ID_SKINS_REFRESH, tr("Refresh Style"))
         .SetMetricsIdentifier("MainEditor", "RefreshStyle")
         .SetToolTip(tr("Refreshes the editor stylesheet"))
         .Connect(&QAction::triggered, this, &MainWindow::RefreshStyle);
-
-    am->AddAction(ID_VIEW_SAVELAYOUT, tr("Save Layout..."))
-        .SetMetricsIdentifier("MainEditor", "SaveLayout")
-        .Connect(&QAction::triggered, this, &MainWindow::SaveLayout);
-    am->AddAction(ID_VIEW_LAYOUT_LOAD_DEFAULT, tr("Restore Default Layout"))
-        .SetMetricsIdentifier("MainEditor", "RestoreDefaultLayout")
-        .Connect(&QAction::triggered, [this]() { m_viewPaneManager->RestoreDefaultLayout(true); });
 
     // AWS actions
     am->AddAction(ID_AWS_LAUNCH, tr("Main AWS Console")).RegisterUpdateCallback(cryEdit, &CCryEditApp::OnAWSLaunchUpdate)
@@ -1881,10 +1962,14 @@ void MainWindow::InitActions()
         .SetApplyHoverEffect();
     }
 
-    am->AddAction(ID_OPEN_MATERIAL_EDITOR, tr(LyViewPane::MaterialEditor))
-        .SetToolTip(tr("Open Material Editor"))
-        .SetIcon(EditorProxyStyle::icon("Material"))
-        .SetApplyHoverEffect();
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        am->AddAction(ID_OPEN_MATERIAL_EDITOR, tr(LyViewPane::MaterialEditor))
+            .SetToolTip(tr("Open Material Editor"))
+            .SetIcon(EditorProxyStyle::icon("Material"))
+            .SetApplyHoverEffect();
+    }
+
 #ifdef ENABLE_LEGACY_ANIMATION
     am->AddAction(ID_OPEN_CHARACTER_TOOL, tr(LyViewPane::LegacyGeppetto))
         .SetToolTip(tr("Open Geppetto"))
@@ -1902,7 +1987,7 @@ void MainWindow::InitActions()
     {
         QAction* action = am->AddAction(ID_OPEN_EMOTIONFX_EDITOR, tr("Animation Editor"))
             .SetToolTip(tr("Open Animation Editor (PREVIEW)"))
-            .SetIcon(QIcon("Gems/EMotionFX/Assets/Editor/Images/Icons/EMFX_icon_32x32.png"))
+            .SetIcon(QIcon(":/EMotionFX/EMFX_icon_32x32.png"))
             .SetApplyHoverEffect();
         QObject::connect(action, &QAction::triggered, this, []() {
             QtViewPaneManager::instance()->OpenPane(LyViewPane::AnimationEditor);
@@ -1911,10 +1996,6 @@ void MainWindow::InitActions()
 
     if (m_enableLegacyCryEntities)
     {
-        am->AddAction(ID_OPEN_FLOWGRAPH, tr(LyViewPane::LegacyFlowGraph))
-            .SetToolTip(tr("Open Flow Graph (LEGACY)"))
-        .SetIcon(EditorProxyStyle::icon("Flowgraph"))
-        .SetApplyHoverEffect();
         am->AddAction(ID_OPEN_AIDEBUGGER, tr(LyViewPane::AIDebugger))
             .SetToolTip(tr("Open AI Debugger"))
         .SetIcon(QIcon(":/MainWindow/toolbars/standard_views_toolbar-08.png"))
@@ -1934,7 +2015,8 @@ void MainWindow::InitActions()
         .SetIcon(EditorProxyStyle::icon("Audio"))
         .SetApplyHoverEffect();
 
-    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+#ifdef LY_TERRAIN_EDITOR
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled() && gEnv->pRenderer->GetRenderType() != eRT_Other)
     {
         am->AddAction(ID_OPEN_TERRAIN_EDITOR, tr(LyViewPane::TerrainEditor))
             .SetToolTip(tr("Open Terrain Editor"))
@@ -1945,15 +2027,24 @@ void MainWindow::InitActions()
             .SetIcon(EditorProxyStyle::icon("Terrain_Texture"))
             .SetApplyHoverEffect();
     }
+#endif // #ifdef LY_TERRAIN_EDITOR
 
-    am->AddAction(ID_PARTICLE_EDITOR, tr("Particle Editor"))
-        .SetToolTip(tr("Open Particle Editor"))
-        .SetIcon(EditorProxyStyle::icon("particle"))
-        .SetApplyHoverEffect();
-    am->AddAction(ID_TERRAIN_TIMEOFDAYBUTTON, tr("Time of Day Editor"))
-        .SetToolTip(tr("Open Time of Day"))
-        .SetIcon(EditorProxyStyle::icon("Time_of_Day"))
-        .SetApplyHoverEffect();
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        am->AddAction(ID_PARTICLE_EDITOR, tr("Particle Editor"))
+            .SetToolTip(tr("Open Particle Editor"))
+            .SetIcon(EditorProxyStyle::icon("particle"))
+            .SetApplyHoverEffect();
+    }
+
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        am->AddAction(ID_TERRAIN_TIMEOFDAYBUTTON, tr("Time of Day Editor"))
+            .SetToolTip(tr("Open Time of Day"))
+            .SetIcon(EditorProxyStyle::icon("Time_of_Day"))
+            .SetApplyHoverEffect();
+    }
+
     if (m_enableLegacyCryEntities)
     {
         am->AddAction(ID_OPEN_DATABASE, tr(LyViewPane::DatabaseView))
@@ -2024,9 +2115,6 @@ void MainWindow::InitActions()
     }
 
     // Misc Toolbar Actions
-    am->AddAction(ID_GAMEP1_AUTOGEN, tr(""))
-        .SetMetricsIdentifier("MainEditor", "GameP1AutoGen");
-
     am->AddAction(ID_OPEN_SUBSTANCE_EDITOR, tr("Open Substance Editor"))
         .SetMetricsIdentifier("MainEditor", "OpenSubstanceEditor")
         .SetIcon(EditorProxyStyle::icon("Substance"))
@@ -2066,7 +2154,7 @@ void MainWindow::CGPMenuClicked()
     if (GetIEditor()->GetAWSResourceManager()->IsProjectInitialized()) {
         GetIEditor()->GetAWSResourceManager()->OpenCGP();
     }
-    else 
+    else
     {
         QMessageBox::critical(GetIEditor()->GetEditorMainWindow(), "Cloud Gem Portal", "Cloud Canvas is not yet initialized.   Please ensure the Cloud Gem Framework is enabled in your Project Configurator and has initialized.");
     }
@@ -2338,35 +2426,35 @@ QRollupCtrl* MainWindow::GetRollUpControl(int rollupBarId)
     // If we are in legacy UI mode, just grab the rollup bar directly
     QtViewPane* pane = nullptr;
     if (m_enableLegacyCryEntities)
-{
+    {
         pane = m_viewPaneManager->GetPane(LyViewPane::LegacyRollupBar);
-}
+    }
     // Otherwise, we only have the terrain tool
     else if (rollupBarId == ROLLUP_TERRAIN)
-{
+    {
         pane = m_viewPaneManager->GetPane(LyViewPane::TerrainTool);
-}
+    }
 
     if (!pane)
-{
+    {
         // TODO: This needs to be replaced with an equivalent workflow when the
         // rollupbar functionality has been replaced
         return nullptr;
-}
+    }
 
     // In legacy UI mode, we need to find the proper control from the rollupbar
     QRollupCtrl* ctrl = nullptr;
     if (m_enableLegacyCryEntities)
-{
-    CRollupBar* rollup = qobject_cast<CRollupBar*>(pane->Widget());
-    if (rollup)
     {
+        CRollupBar* rollup = qobject_cast<CRollupBar*>(pane->Widget());
+        if (rollup)
+        {
             ctrl = rollup->GetRollUpControl(rollupBarId);
+        }
     }
-}
     // Otherwise, our terrain tool is the actual rollup control
     else
-{
+    {
         ctrl = qobject_cast<CTerrainTool*>(pane->Widget());
     }
 
@@ -2408,7 +2496,7 @@ void MainWindow::OpenViewPane(QtViewPane* pane)
 {
     if (pane && pane->IsValid())
     {
-        GetIEditor()->ExecuteCommand(QStringLiteral("general.open_pane '%1'").arg(pane->m_name));
+        QtViewPaneManager::instance()->OpenPane(pane->m_name);
     }
     else
     {
@@ -2464,6 +2552,7 @@ void MainWindow::OnGameModeChanged(bool inGameMode)
     };
 
     menuBar()->setDisabled(inGameMode);
+    m_toolbarManager->SetEnabled(!inGameMode);
     setRollUpBarDisabled(inGameMode);
     QAction* action = m_actionManager->GetAction(ID_VIEW_SWITCHTOGAME);
     action->blockSignals(true); // avoid a loop
@@ -2505,6 +2594,27 @@ void MainWindow::OnEditorNotifyEvent(EEditorNotifyEvent ev)
         break;
     case eNotify_OnEndGameMode:
         OnGameModeChanged(false);
+        break;
+    // Remove track view option to avoid starting in bad state
+    case eNotify_OnBeginSimulationMode:
+        if (m_actionManager->HasAction(ID_OPEN_TRACKVIEW))
+        {
+            QAction* tvAction = m_actionManager->GetAction(ID_OPEN_TRACKVIEW);
+            if (tvAction)
+            {
+                tvAction->setVisible(false);
+            }
+        }
+        break;
+    case eNotify_OnEndSimulationMode:
+        if (m_actionManager->HasAction(ID_OPEN_TRACKVIEW))
+        {
+            QAction* tvAction = m_actionManager->GetAction(ID_OPEN_TRACKVIEW);
+            if (tvAction)
+            {
+                tvAction->setVisible(true);
+            }
+        }
         break;
     }
 
@@ -2576,14 +2686,10 @@ void MainWindow::RegisterStdViewClasses()
     CRollupBar::RegisterViewClass();
     CTrackViewDialog::RegisterViewClass();
     CDataBaseDialog::RegisterViewClass();
-    CMaterialDialog::RegisterViewClass();
-    CHyperGraphDialog::RegisterViewClass();
-    CLensFlareEditor::RegisterViewClass();
     CVehicleEditorDialog::RegisterViewClass();
     CSmartObjectsEditorDialog::RegisterViewClass();
     CAIDebugger::RegisterViewClass();
     CSelectObjectDlg::RegisterViewClass();
-    CTimeOfDayDialog::RegisterViewClass();
     CDialogEditorDialog::RegisterViewClass();
     CVisualLogWnd::RegisterViewClass();
     CAssetBrowserDialog::RegisterViewClass();
@@ -2591,10 +2697,7 @@ void MainWindow::RegisterStdViewClasses()
     CPanelDisplayLayer::RegisterViewClass();
     CPythonScriptsDialog::RegisterViewClass();
     CMissingAssetDialog::RegisterViewClass();
-    CTerrainDialog::RegisterViewClass();
-    CTerrainTool::RegisterViewClass();
-    CTerrainTextureDialog::RegisterViewClass();
-    CTerrainLighting::RegisterViewClass();
+
     CScriptTermDialog::RegisterViewClass();
     CMeasurementSystemDialog::RegisterViewClass();
     CConsoleSCB::RegisterViewClass();
@@ -2603,6 +2706,19 @@ void MainWindow::RegisterStdViewClasses()
     AzAssetBrowserWindow::RegisterViewClass();
     AssetEditorWindow::RegisterViewClass();
     CVegetationDataBasePage::RegisterViewClass();
+
+    if (gEnv->pRenderer->GetRenderType() != eRT_Other)
+    {
+        CMaterialDialog::RegisterViewClass();
+        CLensFlareEditor::RegisterViewClass();
+        CTimeOfDayDialog::RegisterViewClass();
+        CTerrainTool::RegisterViewClass();
+#ifdef LY_TERRAIN_EDITOR
+        CTerrainDialog::RegisterViewClass();
+        CTerrainTextureDialog::RegisterViewClass();
+#endif //#ifdef LY_TERRAIN_EDITOR
+        CTerrainLighting::RegisterViewClass();
+    }
 
 #ifdef ThumbnailDemo
     ThumbnailsSampleWidget::RegisterViewClass();
@@ -3028,11 +3144,6 @@ void MainWindow::MatEditSend(int param)
     }
 }
 
-void MainWindow::SetSelectedEntity(AZ::EntityId& id)
-{
-    m_levelEditorMenuHandler->SetupSliceSelectMenu(id);
-}
-
 #ifdef Q_OS_WIN
 bool MainWindow::nativeEventFilter(const QByteArray &eventType, void *message, long *)
 {
@@ -3276,20 +3387,28 @@ bool MainWindow::focusNextPrevChild(bool next)
     return QMainWindow::focusNextPrevChild(next);
 }
 
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyOpenViewPane, general, open_pane,
-    "Opens a view pane specified by the pane class name.",
-    "general.open_pane(str paneClassName)");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyCloseViewPane, general, close_pane,
-    "Closes a view pane specified by the pane class name.",
-    "general.close_pane(str paneClassName)");
-REGISTER_ONLY_PYTHON_COMMAND_WITH_EXAMPLE(PyGetViewPaneClassNames, general, get_pane_class_names,
-    "Get all available class names for use with open_pane & close_pane.",
-    "[str] general.get_pane_class_names()");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyExit, general, exit,
-    "Exits the editor.",
-    "general.exit()");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyExitNoPrompt, general, exit_no_prompt,
-    "Exits the editor without prompting to save first.",
-    "general.exit_no_prompt()");
+namespace AzToolsFramework
+{
+    void MainWindowEditorFuncsHandler::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+        {
+            // this will put these methods into the 'azlmbr.legacy.general' module
+            auto addLegacyGeneral = [](AZ::BehaviorContext::GlobalMethodBuilder methodBuilder)
+            {
+                methodBuilder->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                    ->Attribute(AZ::Script::Attributes::Category, "Legacy/Editor")
+                    ->Attribute(AZ::Script::Attributes::Module, "legacy.general");
+            };
+            addLegacyGeneral(behaviorContext->Method("open_pane", PyOpenViewPane, nullptr, "Opens a view pane specified by the pane class name."));
+            addLegacyGeneral(behaviorContext->Method("close_pane", PyCloseViewPane, nullptr, "Closes a view pane specified by the pane class name."));
+            addLegacyGeneral(behaviorContext->Method("is_pane_visible", PyIsViewPaneVisible, nullptr, "Returns true if pane specified by the pane class name is visible."));
+            addLegacyGeneral(behaviorContext->Method("get_pane_class_names", PyGetViewPaneNames, nullptr, "Get all available class names for use with open_pane & close_pane."));
+            addLegacyGeneral(behaviorContext->Method("exit", PyExit, nullptr, "Exits the editor."));
+            addLegacyGeneral(behaviorContext->Method("exit_no_prompt", PyExitNoPrompt, nullptr, "Exits the editor without prompting to save first."));
+            addLegacyGeneral(behaviorContext->Method("get_status_text", PyGetStatusText, nullptr, "Gets the status text from the Editor's current edit tool"));
+        }
+    }
+}
 
 #include <MainWindow.moc>

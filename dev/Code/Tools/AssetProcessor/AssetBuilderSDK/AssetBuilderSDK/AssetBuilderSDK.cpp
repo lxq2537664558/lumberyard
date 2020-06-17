@@ -23,6 +23,7 @@
 #include <AzCore/Component/Entity.h> // so we can have the entity UUID type.
 #include <AzFramework/IO/LocalFileIO.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
+#include <AzCore/Slice/SliceAsset.h> // For slice asset sub ids
 //////////////////////////////////////////////////////////////////////////
 
 namespace AssetBuilderSDK
@@ -89,14 +90,23 @@ namespace AssetBuilderSDK
         {
             return AssetBuilderSDK::Platform_OSX;
         }
-        if (azstricmp(newPlatformName, "xboxone") == 0)
+        if (azstricmp(newPlatformName, "xenia") == 0)
         {
-            return AssetBuilderSDK::Platform_XBOXONE;  // ACCEPTED_USE
+            return AssetBuilderSDK::Platform_XENIA;
         }
-        if (azstricmp(newPlatformName, "ps4") == 0)
+        if (azstricmp(newPlatformName, "provo") == 0)
         {
-            return AssetBuilderSDK::Platform_PS4;  // ACCEPTED_USE
+            return AssetBuilderSDK::Platform_PROVO;
         }
+#if defined(AZ_PLATFORM_XENIA) || defined(TOOLS_SUPPORT_XENIA)
+#include "Xenia/AssetBuilderSDK_cpp_xenia.inl"
+#endif
+#if defined(AZ_PLATFORM_PROVO) || defined(TOOLS_SUPPORT_PROVO)
+#include "Provo/AssetBuilderSDK_cpp_provo.inl"
+#endif
+#if defined(AZ_PLATFORM_SALEM) || defined(TOOLS_SUPPORT_SALEM)
+#include "Salem/AssetBuilderSDK_cpp_salem.inl"
+#endif
 
         return AssetBuilderSDK::Platform_NONE;
     }
@@ -115,10 +125,12 @@ namespace AssetBuilderSDK
             return "ios";
         case AssetBuilderSDK::Platform_OSX:
             return "osx_gl";
-        case AssetBuilderSDK::Platform_XBOXONE:     // ACCEPTED_USE
-            return "xboxone";
-        case AssetBuilderSDK::Platform_PS4:     // ACCEPTED_USE
-            return "ps4";
+        case AssetBuilderSDK::Platform_XENIA:
+            return "xenia";
+        case AssetBuilderSDK::Platform_PROVO:
+            return "provo";
+        case AssetBuilderSDK::Platform_SALEM:
+            return "salem";
         }
         return "unknown platform";
     }
@@ -161,7 +173,7 @@ namespace AssetBuilderSDK
         if (pattern.m_type == AssetBuilderSDK::AssetBuilderPattern::Regex)
         {
             m_isRegex = true;
-            m_isValid = FilePatternMatcher::ValidatePatternRegex(pattern.m_pattern, m_errorString);
+            m_isValid = FilePatternMatcher::ValidatePatternRegex(pattern.m_pattern);
             if (m_isValid)
             {
                 this->m_regex = RegexType(pattern.m_pattern.c_str(), RegexType::flag_type::icase | RegexType::flag_type::ECMAScript);
@@ -227,7 +239,7 @@ namespace AssetBuilderSDK
         return this->m_pattern;
     }
 
-    bool FilePatternMatcher::ValidatePatternRegex(const AZStd::string& pattern, AZStd::string& errorString)
+    bool FilePatternMatcher::ValidatePatternRegex(const AZStd::string& pattern)
     {
         AssertAbsorber absorber;
         AZStd::regex validate_regex(pattern.c_str(),
@@ -537,8 +549,8 @@ namespace AssetBuilderSDK
         , m_productSubID(productSubID)
     {
         //////////////////////////////////////////////////////////////////////////
-        //REMOVE THIS
-        //when builders output asset type, guess by file extension
+        // Builders should output product asset types directly.  
+        // This should only be used for exceptions, mostly legacy and generic data.
         if (m_productAssetType.IsNull())
         {
             m_productAssetType = InferAssetTypeByProductFileName(m_productFileName.c_str());
@@ -556,8 +568,8 @@ namespace AssetBuilderSDK
         , m_productSubID(productSubID)
     {
         //////////////////////////////////////////////////////////////////////////
-        //REMOVE THIS
-        //when builders output asset type, guess by file extension
+        // Builders should output product asset types directly.  
+        // This should only be used for exceptions, mostly legacy.
         if (m_productAssetType.IsNull())
         {
             m_productAssetType = InferAssetTypeByProductFileName(m_productFileName.c_str());
@@ -579,8 +591,12 @@ namespace AssetBuilderSDK
     static const char* staticMeshExtensions = ".cgf";
     static const char* skinnedMeshExtensions = ".skin";
     static const char* materialExtensions = ".mtl";
+
+    // MIPS
+    static const int c_MaxMipsCount = 11; // 11 is for 8k textures non-compressed. When not compressed it is using one file per mip.
     // splitted lods have the following extensions:
-    static const char* mipsAndLodsExtensions = ".1 .2 .3 .4 .5 .6 .7 .8 .9 .a .1a .2a .3a .4a .5a .6a .7a .8a .9a";
+    static const char* mipsAndLodsExtensions = ".1 .2 .3 .4 .5 .6 .7 .8 .9 .10 .11 .a .1a .2a .3a .4a .5a .6a .7a .8a .9a .10a .11a";
+
     // XML files may contain generic data (avoid this in new builders - use a custom extension!)
     static const char* xmlExtensions = ".xml";
     static const char* geomCacheExtensions = ".cax";
@@ -596,6 +612,7 @@ namespace AssetBuilderSDK
     static AZ::Data::AssetType staticMeshLodsAssetType("{9AAE4926-CB6A-4C60-9948-A1A22F51DB23}");
     static AZ::Data::AssetType geomCacheAssetType("{EBC96071-E960-41B6-B3E3-328F515AE5DA}");
     static AZ::Data::AssetType skeletonAssetType("{60161B46-21F0-4396-A4F0-F2CCF0664CDE}");
+    static AZ::Data::AssetType entityIconAssetType("{3436C30E-E2C5-4C3B-A7B9-66C94A28701B}");
 
     // now the ones that are actual asset types that already have an AssetData-derived class in the engine
     // note that ideally, all NEW asset types beyond this point are instead built by an actual specific builder-SDK derived builder
@@ -869,19 +886,19 @@ namespace AssetBuilderSDK
     {
         // The engine only uses dynamic slice files, but for right now slices are also copy products...
         // So slice will have two products, so they must have a different sub id's.
-        // In the interest of future compatibility we will want dynamic slices to have a 0 sub id, so set the slice copy product
-        // sub id's to 1. The only reason they are currently copy products is for the builder to
+        // In the interest of future compatibility we will want dynamic slices to have a unique subId, seperate from a
+        // slice copy job product subId. The only reason they are currently copy products is for the builder to
         // make dynamic slice products. This will change in the future and the .slice files will no longer copy themselves
-        // as products, so this is a temporary rule and eventually there will only be 0's
+        // as products, so this is a temporary rule and eventually there will only be one subId
         if (assetType == sliceAssetType)
         {
-            return 1;
+            return AZ::SliceAsset::GetAssetSubId();
         }
 
-        // Dynamic slices should use subId = 0 to avoid ambiguity with legacy editor slice guids.
+        // Dynamic slices use a unique subId to avoid ambiguity with legacy editor slice guids.
         if (assetType == dynamicSliceAssetType)
         {
-            return 2;
+            return AZ::DynamicSliceAsset::GetAssetSubId();
         }
 
         //get the extension
@@ -906,6 +923,12 @@ namespace AssetBuilderSDK
         //////////////////////////////////////////////////////////////////////////
         //calculated sub ids
         AZ::u32 subID = 0;
+
+        // PNG files can be processed as both texture and EntityIcon assets. Make sure they have different subids.
+        if (assetType == entityIconAssetType)
+        {
+            return subID + 1;
+        }
 
         // if its texture or texture mip there is a special case for diff-textures
         // it is special because a single FILENAME_CM.TIF can become -many- outputs:
@@ -946,7 +969,7 @@ namespace AssetBuilderSDK
                 extension.resize(extension.size() - 1);
             }
 
-            for (int idx = 1; idx <= 9; ++idx)
+            for (int idx = 1; idx <= c_MaxMipsCount; ++idx)
             {
                 AZStd::string check = AZStd::string::format(".%i", idx);
                 if (check == extension)
@@ -1009,7 +1032,8 @@ namespace AssetBuilderSDK
                 Version(2)->
                 Field("Output Products", &ProcessJobResponse::m_outputProducts)->
                 Field("Result Code", &ProcessJobResponse::m_resultCode)->
-                Field("Requires SubId Generation", &ProcessJobResponse::m_requiresSubIdGeneration);
+                Field("Requires SubId Generation", &ProcessJobResponse::m_requiresSubIdGeneration)->
+                Field("Source To Reprocess", &ProcessJobResponse::m_sourcesToReprocess);
         }
     }
 
@@ -1306,4 +1330,60 @@ namespace AssetBuilderSDK
     }
 
     AZ_THREAD_LOCAL bool AssertAbsorber::s_onAbsorbThread = false;
+
+
+    AssertAndErrorAbsorber::AssertAndErrorAbsorber(bool errorsWillFailJob)
+        : m_errorsWillFailJob(errorsWillFailJob)
+        , m_jobThreadId(AZStd::this_thread::get_id())
+    {
+        BusConnect();
+    }
+
+    AssertAndErrorAbsorber::~AssertAndErrorAbsorber()
+    {
+        BusDisconnect();
+    }
+
+    bool AssertAndErrorAbsorber::OnError(const char*, const char* message)
+    {
+        if (AZStd::this_thread::get_id() != m_jobThreadId)
+        {
+            return false;
+        }
+
+        if (m_errorsWillFailJob)
+        {
+            ++m_errorsOccurred;
+            return false;
+        }
+        else
+        {
+            AZ_Warning("AssetBuilder", false, "Error: %s", message);
+            return true;
+        }
+    }
+
+    bool AssertAndErrorAbsorber::OnAssert(const char* message)
+    {
+        if (AZStd::this_thread::get_id() != m_jobThreadId)
+        {
+            return false;
+        }
+
+        if (m_errorsWillFailJob)
+        {
+            ++m_errorsOccurred;
+            return false;
+        }
+        else
+        {
+            AZ_Warning("", false, "Assert failed: %s", message);
+            return true;
+        }
+    }
+
+    size_t AssertAndErrorAbsorber::GetErrorCount() const
+    {
+        return m_errorsOccurred;
+    }
 }

@@ -40,9 +40,9 @@
  #endif /* AZ_REGEX_MAX_STACK_COUNT */
 
 /**
- * Cx11 Regular expressions based on STL from (MS,Sony,etc.). All allocations are piped trough the system allocator by default.
+ * Cx11 Regular expressions based on STL from manufacturers. All allocations are piped through the system allocator by default.
  * we don't use std::locale/std::facet/std::collate/etc. as the facets do allocate global memory which is freed atexit(). This of course
- * is not complaint with our allocation schema.
+ * is not compliant with our allocation schema.
  */
 namespace AZStd
 {
@@ -2869,7 +2869,7 @@ namespace AZStd
         int m_max = BITMAP_max;             // to quiet diagnostics
         NodeClass<Element, RegExTraits>* node = (NodeClass<Element, RegExTraits>*)m_current;
         AddElts(node, _Cl, m_traits);
-        if (static_cast<Element>(m_max) < std::numeric_limits<Element>::max())
+        if (static_cast<Element>(m_max) < (std::numeric_limits<Element>::max)())
         {
             node->_Classes = (RegexTraitsBase::char_class_type)(node->_Classes | _Cl);
         }
@@ -2910,7 +2910,7 @@ namespace AZStd
                 node->m_small->Mark(ch);
             }
         }
-        if (static_cast<Element>(m_max) < std::numeric_limits<Element>::max())
+        if (static_cast<Element>(m_max) < (std::numeric_limits<Element>::max)())
         {   // map range
             RegExSequence<Element>** current = &node->m_equiv;
             CharToElts(first, last, diff, current);
@@ -4493,7 +4493,7 @@ namespace AZStd
             return _IdentityEscape();
         }
 
-        if (m_value < (int)std::numeric_limits<Element>::min() || (int)std::numeric_limits<Element>::max() < m_value)
+        if (m_value < (int)(std::numeric_limits<Element>::min)() || (int)(std::numeric_limits<Element>::max)() < m_value)
         {
             Error(regex_constants::error_escape);
         }

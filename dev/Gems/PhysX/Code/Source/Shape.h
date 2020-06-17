@@ -32,10 +32,11 @@ namespace PhysX
     {
     public:
         AZ_CLASS_ALLOCATOR(Shape, AZ::SystemAllocator, 0);
-        AZ_RTTI(Shape, "{0A47DDD6-2BD7-43B3-BF0D-2E12CC395C13}", Physics::Shape);
+        AZ_RTTI(Shape, "{A84BCCA2-7F29-4E17-830F-911E7BB3E80C}", Physics::Shape);
 
         Shape(const Physics::ColliderConfiguration& colliderConfiguration, const Physics::ShapeConfiguration& configuration);
         Shape(physx::PxShape* nativeShape);
+        virtual ~Shape();
 
         Shape(Shape&& shape);
         Shape& operator=(Shape&& shape);
@@ -66,9 +67,14 @@ namespace PhysX
 
         bool IsTrigger() const;
 
+        void AttachedToActor(void* actor) override;
+        void DetachedFromActor() override;
+
     private:
         void BindMaterialsWithPxShape();
         void ExtractMaterialsFromPxShape();
+        physx::PxScene* GetScene() const;
+        void ReleasePxShape(physx::PxShape* shape);
 
         using PxShapeUniquePtr = AZStd::unique_ptr<physx::PxShape, AZStd::function<void(physx::PxShape*)>>;
         Shape() = default;
@@ -78,5 +84,6 @@ namespace PhysX
         Physics::CollisionLayer m_collisionLayer;
         Physics::CollisionGroup m_collisionGroup;
         AZ::Crc32 m_tag;
+        physx::PxActor* m_attachedActor = nullptr;
     };
 }

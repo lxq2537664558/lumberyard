@@ -129,7 +129,6 @@ namespace AZ
              * Used only when the AddressPolicy is AZ::EBusAddressPolicy::ByIdAndOrdered.
              * If an event is dispatched without an ID, this function determines
              * the order in which each address receives the event.
-             * The function must satisfy `AZStd::binary_function<BusIdType, BusIdType, bool>`.
              *
              * The following example shows a sorting function that meets these requirements.
              * @code{.cpp}
@@ -708,7 +707,7 @@ namespace AZ
         template <class Function, class ... InputArgs>
         inline void EBusBroadcastQueue<Bus, Traits>::QueueFunction(Function&& func, InputArgs&& ... args)
         {
-            AZ_STATIC_ASSERT((AZStd::is_same<typename Bus::QueuePolicy::BusMessageCall, typename AZ::Internal::NullBusMessageCall>::value == false),
+            static_assert((AZStd::is_same<typename Bus::QueuePolicy::BusMessageCall, typename AZ::Internal::NullBusMessageCall>::value == false),
                 "This EBus doesn't support queued events! Check 'EnableEventQueue'");
 
             auto& context = Bus::GetOrCreateContext(false);

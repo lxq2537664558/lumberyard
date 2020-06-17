@@ -47,6 +47,8 @@ namespace AzFramework
         if (AZ::BehaviorContext* behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
         {
             behaviorContext->EBus<GameEntityContextRequestBus>("GameEntityContextRequestBus")
+                ->Attribute(AZ::Script::Attributes::Module, "entity")
+                ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                 ->Event("CreateGameEntity", &GameEntityContextRequestBus::Events::CreateGameEntityForBehaviorContext)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                 ->Event("DestroyGameEntity", &GameEntityContextRequestBus::Events::DestroyGameEntity)
@@ -58,9 +60,13 @@ namespace AzFramework
 
                 // Deprecated-renamed APIs. These will warn if used.
                 ->Event("ActivateGameEntityById", &GameEntityContextRequestBus::Events::ActivateGameEntityById)
+                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
                 ->Event("DeactivateGameEntityById", &GameEntityContextRequestBus::Events::DeactivateGameEntityById)
+                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
                 ->Event("DestroySliceByEntityId", &GameEntityContextRequestBus::Events::DestroySliceByEntityId)
+                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
                 ->Event("DestroySliceByEntity", &GameEntityContextRequestBus::Events::DestroySliceByEntity)
+                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
                 ;
         }
     }
@@ -189,6 +195,23 @@ namespace AzFramework
     void GameEntityContextComponent::OnContextReset()
     {
         EBUS_EVENT(GameEntityContextEventBus, OnGameEntitiesReset);
+    }
+
+    //=========================================================================
+    // GameEntityContextComponent::ValidateEntitiesAreValidForContext
+    //=========================================================================
+    bool GameEntityContextComponent::ValidateEntitiesAreValidForContext(const EntityList& entities)
+    {
+        // All entities in a slice being instantiated in the level editor should
+        // have the TransformComponent on them. Since it is not possible to create
+        // a slice with entities from different contexts, it is OK to check
+        // the first entity only
+        if (entities.size() > 0)
+        {
+            return entities[0]->FindComponent<AzFramework::TransformComponent>() != nullptr;
+        }
+
+        return true;
     }
 
     //=========================================================================

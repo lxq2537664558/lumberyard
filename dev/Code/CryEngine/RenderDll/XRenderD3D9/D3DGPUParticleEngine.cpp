@@ -92,6 +92,8 @@ static const float nearPlane = 0.2f;
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 static const Vec3 s_GPUParticles_RotationOffset = Vec3(90, 0, 0);
@@ -112,6 +114,8 @@ struct GPUEmitterResources
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 
@@ -134,6 +138,8 @@ struct GPUEmitterResources
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 
@@ -354,7 +360,7 @@ struct SGPUWindArea
 {
     enum AreaShape
     {
-        SHAPE_BOX = 0, SHAPE_SPHERE
+        WIND_SHAPE_BOX = 0, WIND_SHAPE_SPHERE = 1
     };
 
     Vec3 wind_direction;
@@ -1262,7 +1268,7 @@ static int SendWindDataToGPU(GPUEmitterResources& resources, const SPhysEnviron*
             gpuData[j].falloffScale = windAreas[i].m_fFalloffScale;
             gpuData[j].aabb_min = windAreas[i].m_bbArea.min;
             gpuData[j].aabb_max = windAreas[i].m_bbArea.max;
-            gpuData[j].shape = windAreas[i].m_nGeomShape == GEOM_BOX ? SGPUWindArea::SHAPE_BOX : SGPUWindArea::SHAPE_SPHERE;
+            gpuData[j].shape = windAreas[i].m_nGeomShape == GEOM_BOX ? SGPUWindArea::WIND_SHAPE_BOX : SGPUWindArea::WIND_SHAPE_SPHERE;
             gpuData[j].matToLocal = Matrix34(windAreas[i].m_matToLocal);
 
             j++;
@@ -1380,6 +1386,8 @@ void CImpl_GPUParticles::InitializeBuffers(GPUEmitterResources& resources, int n
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 
@@ -2550,6 +2558,8 @@ void CImpl_GPUParticles::GatherSortScore(GPUEmitterResources& emitter)
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -2606,6 +2616,8 @@ void CImpl_GPUParticles::SortParticlesBitonicLocal(GPUEmitterResources& emitter,
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -2683,6 +2695,8 @@ void CImpl_GPUParticles::SortParticlesBitonic(GPUEmitterResources& emitter, GPUE
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -3004,6 +3018,8 @@ CD3DGPUParticleEngine::CD3DGPUParticleEngine()
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 }
@@ -3249,6 +3265,8 @@ void CD3DGPUParticleEngine::UpdateFrame()
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
 
@@ -3303,6 +3321,8 @@ void CD3DGPUParticleEngine::UpdateFrame()
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
                 m_impl->GatherSortScore(emitter->resources);
@@ -3331,6 +3351,8 @@ void CD3DGPUParticleEngine::UpdateFrame()
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
         }
@@ -3350,6 +3372,8 @@ void CD3DGPUParticleEngine::UpdateFrame()
         #include "Xenia/D3DGPUParticleEngine_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DGPUParticleEngine_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DGPUParticleEngine_cpp_salem.inl"
     #endif
 #endif
     }

@@ -36,6 +36,12 @@
 #include <ThermalInfo.h>
 
 #include <AzCore/Module/DynamicModuleHandle.h>
+#include <AzFramework/Terrain/TerrainDataRequestBus.h>
+
+namespace AzFramework
+{
+    class MissingAssetLogger;
+}
 
 struct IConsoleCmdArgs;
 class CServerThrottle;
@@ -77,6 +83,8 @@ namespace minigui
         #include "Xenia/System_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_h_salem.inl"
     #endif
 #else
 #if defined(WIN32) || defined(LINUX) || defined(APPLE)
@@ -183,10 +191,6 @@ namespace minigui
 #endif
 //////////////////////////////////////////////////////////////////////////
 
-#if !defined(LINUX)
-#define AZ_LEGACY_CRYSYSTEM_TRAIT_SIMULATE_TASK 1
-#endif
-
 #if defined(APPLE) || defined(LINUX)
 #define AZ_LEGACY_CRYSYSTEM_TRAIT_FACTORY_REGISTRY_USE_PRINTF_FOR_FATAL 1
 #endif
@@ -272,6 +276,7 @@ struct SSystemCVars
 
     int sys_float_exceptions;
     int sys_no_crash_dialog;
+    int sys_no_error_report_window;
     int sys_dump_aux_threads;
     int sys_WER;
     int sys_dump_type;
@@ -289,6 +294,7 @@ struct SSystemCVars
     int sys_MaxFPS;
     float sys_maxTimeStepForMovieSystem;
     int sys_force_installtohdd_mode;
+    int sys_report_files_not_found_in_paks = 0;
 
 #ifdef USE_HTTP_WEBSOCKETS
     int sys_simple_http_base_port;
@@ -297,6 +303,7 @@ struct SSystemCVars
     int sys_asserts;
     int sys_error_debugbreak;
 
+    int sys_FilesystemCaseSensitivity;
     int sys_rendersplashscreen;
     const char* sys_splashscreen;
 
@@ -325,6 +332,8 @@ struct SSystemCVars
         #include "Xenia/System_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_h_salem.inl"
     #endif
 #endif
 };
@@ -395,6 +404,7 @@ class CSystem
     , public IWindowMessageHandler
     , public AZ::RenderNotificationsBus::Handler
     , public CrySystemRequestBus::Handler
+    , private AzFramework::Terrain::TerrainDataNotificationBus::Handler
 {
 public:
 
@@ -414,6 +424,11 @@ public:
     static void OnLanguageCVarChanged(ICVar* language);
     static void OnLanguageAudioCVarChanged(ICVar* language);
     static void OnLocalizationFolderCVarChanged(ICVar* const pLocalizationFolder);
+    // adding CVAR to toggle assert verbosity level
+    static void OnAssertLevelCvarChanged(ICVar* pArgs);
+    static void SetAssertLevel(int _assertlevel);
+    static void OnLogLevelCvarChanged(ICVar* pArgs);
+    static void SetLogLevel(int _logLevel);
 
     // interface ILoadConfigurationEntrySink ----------------------------------
 
@@ -529,10 +544,8 @@ public:
     IViewSystem* GetIViewSystem();
     ILevelSystem* GetILevelSystem();
     IBudgetingSystem* GetIBudgetingSystem()  { return(m_pIBudgetingSystem); }
-    IFlowSystem* GetIFlowSystem() { return m_env.pFlowSystem; }
     IDialogSystem* GetIDialogSystem() { return m_env.pDialogSystem; }
     DRS::IDynamicResponseSystem* GetIDynamicResponseSystem() { return m_env.pDynamicResponseSystem; }
-    IHardwareMouse* GetIHardwareMouse() { return m_env.pHardwareMouse; }
     ISystemEventDispatcher* GetISystemEventDispatcher() { return m_pSystemEventDispatcher; }
     ITestSystem* GetITestSystem() { return m_pTestSystem; }
     IThreadTaskManager* GetIThreadTaskManager();
@@ -567,7 +580,6 @@ public:
     };
 
     void        SetIGame(IGame* pGame) {m_env.pGame = pGame; }
-    void    SetIFlowSystem(IFlowSystem* pFlowSystem) { m_env.pFlowSystem = pFlowSystem; }
     void    SetIDialogSystem(IDialogSystem* pDialogSystem) { m_env.pDialogSystem = pDialogSystem; }
     void SetIDynamicResponseSystem(DRS::IDynamicResponseSystem* pDynamicResponseSystem) { m_env.pDynamicResponseSystem = pDynamicResponseSystem; }
     void    SetIMaterialEffects(IMaterialEffects* pMaterialEffects) { m_env.pMaterialEffects = pMaterialEffects; }
@@ -829,6 +841,8 @@ private:
         #include "Xenia/System_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_h_salem.inl"
     #endif
 #elif defined(WIN32)
     bool GetWinGameFolder(char* szMyDocumentsPath, int maxPathSize);
@@ -907,7 +921,6 @@ private: // ------------------------------------------------------
 
     CTimer                              m_Time;                             //!<
     CCamera                             m_ViewCamera;                   //!<
-    volatile bool                   m_bQuit;                            //!< if is true the system is quitting. Volatile as it may be polled from multiple threads.
     bool                                    m_bInitializedSuccessfully;     //!< true if the system completed all initialization steps
     bool                  m_bShaderCacheGenMode;//!< true if the application runs in shader cache generation mode
     bool                                    m_bRelaunch;                    //!< relaunching the app or not (true beforerelaunch)
@@ -916,6 +929,7 @@ private: // ------------------------------------------------------
     bool                                    m_bMinimal;                     //!< If running in 'minimal mode'.
     bool                                    m_bEditor;                      //!< If running in Editor.
     bool                                    m_bNoCrashDialog;
+    bool                                    m_bNoErrorReportWindow;
     bool                  m_bPreviewMode;       //!< If running in Preview mode.
     bool                                    m_bDedicatedServer;     //!< If running as Dedicated server.
     bool                                    m_bIgnoreUpdates;           //!< When set to true will ignore Update and Render calls,
@@ -1029,6 +1043,8 @@ private: // ------------------------------------------------------
     ICVar* m_level_load_screen_sequence_fixed_fps;
     ICVar* m_game_load_screen_max_fps;
     ICVar* m_level_load_screen_max_fps;
+    ICVar* m_game_load_screen_minimum_time{};
+    ICVar* m_level_load_screen_minimum_time{};
 #endif // if AZ_LOADSCREENCOMPONENT_ENABLED
 
     ICVar* m_sys_initpreloadpacks;
@@ -1091,12 +1107,12 @@ private: // ------------------------------------------------------
         #include "Xenia/System_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_h_salem.inl"
     #endif
 #endif
 
     ICVar* m_sys_audio_disable;
-
-    ICVar* m_sys_SimulateTask;
 
     ICVar* m_sys_min_step;
     ICVar* m_sys_max_step;
@@ -1174,6 +1190,8 @@ private: // ------------------------------------------------------
     int sys_ProfileLevelLoading, sys_ProfileLevelLoadingDump;
 
     bool m_executedCommandLine = false;
+
+    AZStd::unique_ptr<AzFramework::MissingAssetLogger> m_missingAssetLogger;
 
 public:
     //! Pointer to the download manager
@@ -1256,6 +1274,13 @@ private:
     std::vector<IErrorObserver*> m_errorObservers;
     ESystemGlobalState m_systemGlobalState;
     static const char* GetSystemGlobalStateName(const ESystemGlobalState systemGlobalState);
+
+    ///////////////////////////////////////////////////////////////////////////
+    // AzFramework::Terrain::TerrainDataNotificationBus START
+    void OnTerrainDataCreateBegin() override;
+    void OnTerrainDataDestroyBegin() override;
+    // AzFramework::Terrain::TerrainDataNotificationBus END
+    ///////////////////////////////////////////////////////////////////////////
 
 public:
     void InitLocalization();

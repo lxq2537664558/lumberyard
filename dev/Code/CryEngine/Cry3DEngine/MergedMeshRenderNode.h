@@ -107,7 +107,7 @@
 
 // Disable the use of vectorized on PC because a plethora of them are actually
 // not ported yet
-#if defined(APPLE) || defined(LINUX)
+#if AZ_LEGACY_3DENGINE_TRAIT_DISABLE_MMRM_SSE_INSTRUCTIONS
 # undef MMRM_USE_VECTORIZED_SSE_INSTRUCTIONS
 # define MMRM_USE_VECTORIZED_SSE_INSTRUCTIONS 0
 #endif
@@ -448,6 +448,8 @@ public:
 
     bool IsDynamic() const { return m_RenderMode == DYNAMIC; }
 
+    bool HasDynamicInstances() const { return m_hasDynamicInstances; }
+
     // True if any of the groups inside this merged mesh uses terrain color.
     bool UsesTerrainColor() const;
 
@@ -528,8 +530,11 @@ public:
 
     bool PostRender(const SRenderingPassInfo& passInfo);
 
-    // util job entry function used by AsyncStreaming Callback
-    void InitializeSamples(float fExtents, const uint8* pBuffer);
+    // Used by AsyncStreaming callback to synchronously initialize the samples from the read-in buffer
+    void InitializeSamplesFromBuffer(const uint8* pBuffer);
+    // Used by AsyncStreaming callback to asynchronously perform notifications / calculations based on the
+    // samples that were initialized.
+    void FinishInitializingSamples();
     // util job entry function used by Activate Spines
     void InitializeSpines();
 
@@ -737,7 +742,7 @@ public:
     //! Returns true if the preparation step succeeds or if there are no meshes to prepare, false otherwise
     bool SyncPreparationStep();
 
-    IRenderNode* AddInstance(const SProcVegSample&, CMergedMeshRenderNode** ppNode = nullptr, bool bRegister = true);
+    IRenderNode* AddInstance(const SProcVegSample&, CMergedMeshRenderNode** ppNode = nullptr, bool bRegister = true, bool dynamicInstance = false);
     IRenderNode* AddDynamicInstance(const IMergedMeshesManager::SInstanceSample&, IRenderNode** ppNode, bool bRegister) override;
 
     CMergedMeshRenderNode* GetNode(const Vec3& vPos);

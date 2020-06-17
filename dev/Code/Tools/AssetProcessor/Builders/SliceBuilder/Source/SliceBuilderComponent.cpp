@@ -18,12 +18,10 @@
 #include <AzFramework/IO/LocalFileIO.h>
 #include <AzToolsFramework/ToolsComponents/EditorComponentBase.h>
 #include <AzToolsFramework/ToolsComponents/GenericComponentWrapper.h>
-#include <LyShine/UiComponentTypes.h>
-#include <LyShine/UiAssetTypes.h>
 #include <AssetBuilderSDK/AssetBuilderBusses.h>
 #include <AzToolsFramework/ToolsComponents/ToolsAssetCatalogBus.h>
 
-#include <SliceBuilder/Source/TypeFingerprinter.h>
+#include <AzToolsFramework/Fingerprinting/TypeFingerprinter.h>
 
 namespace SliceBuilder
 {
@@ -35,7 +33,7 @@ namespace SliceBuilder
         AZ::ComponentApplicationBus::BroadcastResult(serializeContext, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
         AZ_Assert(serializeContext, "SerializeContext not found");
 
-        TypeCollection types;
+        AzToolsFramework::Fingerprinting::TypeCollection types;
 
         serializeContext->EnumerateDerived(
             [&types]
@@ -49,13 +47,19 @@ namespace SliceBuilder
                 },
             azrtti_typeid<AZ::Component>(), azrtti_typeid<AZ::Component>());
 
-        TypeFingerprinter fingerprinter(*serializeContext);
-        TypeFingerprint allComponents = fingerprinter.GenerateFingerprintForAllTypes(types);
+        AzToolsFramework::Fingerprinting::TypeFingerprinter fingerprinter(*serializeContext);
+        AzToolsFramework::Fingerprinting::TypeFingerprint allComponents = fingerprinter.GenerateFingerprintForAllTypes(types);
         AZStd::string builderAnalysisFingerprint = AZStd::string::format("%llu", allComponents);
+
+        // Include slice builder settings in the fingerprint so changes trigger job reruns
+        if (!m_sliceBuilder->SliceUpgradesAllowed())
+        {
+            builderAnalysisFingerprint.append("|UpgradeDisabled");
+        }
 
         AssetBuilderSDK::AssetBuilderDesc builderDescriptor;
         builderDescriptor.m_name = "Slice Builder";
-        builderDescriptor.m_version = 1;
+        builderDescriptor.m_version = 5;
         builderDescriptor.m_analysisFingerprint = builderAnalysisFingerprint;
         builderDescriptor.m_patterns.push_back(AssetBuilderSDK::AssetBuilderPattern(AZ::SliceAsset::GetFileFilter(), AssetBuilderSDK::AssetBuilderPattern::PatternType::Wildcard));
         builderDescriptor.m_busId = SliceBuilderWorker::GetUUID();
@@ -64,21 +68,7 @@ namespace SliceBuilder
 
         AssetBuilderSDK::AssetBuilderBus::Broadcast(&AssetBuilderSDK::AssetBuilderBus::Handler::RegisterBuilderInformation, builderDescriptor);
 
-        // Register UI Slice Builder
-        AssetBuilderSDK::AssetBuilderDesc uiBuilderDescriptor;
-        uiBuilderDescriptor.m_name = "UI Slice Builder";
-        uiBuilderDescriptor.m_version = 1;
-        uiBuilderDescriptor.m_analysisFingerprint = builderAnalysisFingerprint;
-        uiBuilderDescriptor.m_patterns.push_back(AssetBuilderSDK::AssetBuilderPattern("*.uicanvas", AssetBuilderSDK::AssetBuilderPattern::PatternType::Wildcard));
-        uiBuilderDescriptor.m_busId = UiSliceBuilderWorker::GetUUID();
-        uiBuilderDescriptor.m_createJobFunction = AZStd::bind(&UiSliceBuilderWorker::CreateJobs, &m_uiSliceBuilder, AZStd::placeholders::_1, AZStd::placeholders::_2);
-        uiBuilderDescriptor.m_processJobFunction = AZStd::bind(&UiSliceBuilderWorker::ProcessJob, &m_uiSliceBuilder, AZStd::placeholders::_1, AZStd::placeholders::_2);
-        m_uiSliceBuilder.BusConnect(uiBuilderDescriptor.m_busId);
-
-        AssetBuilderSDK::AssetBuilderBus::Broadcast(&AssetBuilderSDK::AssetBuilderBus::Handler::RegisterBuilderInformation, uiBuilderDescriptor);
-
         AzToolsFramework::ToolsAssetSystemBus::Broadcast(&AzToolsFramework::ToolsAssetSystemRequests::RegisterSourceAssetType, azrtti_typeid<AZ::SliceAsset>(), AZ::SliceAsset::GetFileFilter());
-        AzToolsFramework::ToolsAssetSystemBus::Broadcast(&AzToolsFramework::ToolsAssetSystemRequests::RegisterSourceAssetType, azrtti_typeid<LyShine::CanvasAsset>(), LyShine::CanvasAsset::GetFileFilter());
     }
 
     void BuilderPluginComponent::Deactivate()
@@ -87,14 +77,14 @@ namespace SliceBuilder
         AZ::Data::AssetBus::ExecuteQueuedEvents();
 
         AzToolsFramework::ToolsAssetSystemBus::Broadcast(&AzToolsFramework::ToolsAssetSystemRequests::UnregisterSourceAssetType, azrtti_typeid<AZ::SliceAsset>());
-        AzToolsFramework::ToolsAssetSystemBus::Broadcast(&AzToolsFramework::ToolsAssetSystemRequests::UnregisterSourceAssetType, azrtti_typeid<LyShine::CanvasAsset>());
 
-        m_uiSliceBuilder.BusDisconnect();
         m_sliceBuilder.reset();
     }
 
     void BuilderPluginComponent::Reflect(AZ::ReflectContext* context)
     {
+        SliceBuilderSettings::Reflect(context);
+
         if (AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
         {
             serializeContext->Class<BuilderPluginComponent, AZ::Component>()

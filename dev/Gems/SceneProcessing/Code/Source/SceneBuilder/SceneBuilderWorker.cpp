@@ -14,6 +14,7 @@
 #include <AzCore/IO/SystemFile.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/std/containers/set.h>
+#include <AzFramework/Application/Application.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <AzToolsFramework/Debug/TraceContext.h>
 #include <SceneAPI/SceneCore/Components/ExportingComponent.h>
@@ -26,6 +27,7 @@
 #include <SceneAPI/SceneCore/Events/ExportEventContext.h>
 #include <SceneAPI/SceneCore/Events/SceneSerializationBus.h>
 #include <SceneAPI/SceneCore/Utilities/Reporting.h>
+#include <SceneAPI/SceneCore/SceneBuilderDependencyBus.h>
 
 #include <AssetBuilderSDK/AssetBuilderSDK.h>
 #include <SceneBuilder/SceneBuilderWorker.h>
@@ -87,6 +89,10 @@ namespace SceneBuilder
             descriptor.m_failOnError = true;
             descriptor.m_priority = 11; // more important than static mesh files, since these may control logic (actors and motions specifically)
             descriptor.m_additionalFingerprintInfo = GetFingerprint();
+
+            AZ::SceneAPI::SceneBuilderDependencyBus::Broadcast(&AZ::SceneAPI::SceneBuilderDependencyRequests::ReportJobDependencies,
+                descriptor.m_jobDependencyList, enabledPlatform.m_identifier.c_str());
+
             response.m_createJobOutputs.push_back(descriptor);
         }
 
@@ -140,6 +146,39 @@ namespace SceneBuilder
     AZ::Uuid SceneBuilderWorker::GetUUID()
     {
         return AZ::Uuid::CreateString("{BD8BF658-9485-4FE3-830E-8EC3A23C35F3}");
+    }
+
+    void SceneBuilderWorker::PopulateProductDependencies(const AZ::SceneAPI::Events::ExportProduct& exportProduct, const char* watchFolder, AssetBuilderSDK::JobProduct& jobProduct) const
+    {
+        // Register the product dependencies and path dependencies from the export product to the job product.
+        for (const AZ::SceneAPI::Events::ExportProduct& dependency : exportProduct.m_productDependencies)
+        {
+            jobProduct.m_dependencies.emplace_back(dependency.m_id, 0);
+        }
+        for (const AZStd::string& pathDependency : exportProduct.m_legacyPathDependencies)
+        {
+            // SceneCore doesn't have access to AssetBuilderSDK, so it doesn't have access to the 
+            //  ProductPathDependency type or the ProductPathDependencyType enum. Exporters registered with the
+            //  Scene Builder should report path dependencies on source files as absolute paths, while dependencies 
+            //  on product files should be reported as relative paths.
+            if (AzFramework::StringFunc::Path::IsRelative(pathDependency.c_str()))
+            {
+                // Make sure the path is relative to the watch folder. Paths passed in might be using asset database separators.
+                //  Convert to system separators for path manipulation.
+                AZStd::string normalizedPathDependency = pathDependency;
+                AZStd::string normalizedWatchFolder(watchFolder);
+                AZStd::string assetRootRelativePath;
+                AzFramework::StringFunc::Path::Normalize(normalizedWatchFolder);
+                AzFramework::StringFunc::Path::Normalize(normalizedPathDependency);
+                AzFramework::StringFunc::Path::Join(normalizedWatchFolder.c_str(), normalizedPathDependency .c_str(), assetRootRelativePath, true);
+                AzFramework::ApplicationRequests::Bus::Broadcast(&AzFramework::ApplicationRequests::Bus::Events::MakePathRelative, assetRootRelativePath, watchFolder);
+                jobProduct.m_pathDependencies.emplace(assetRootRelativePath, AssetBuilderSDK::ProductPathDependencyType::ProductFile);
+            }
+            else
+            {
+                jobProduct.m_pathDependencies.emplace(pathDependency, AssetBuilderSDK::ProductPathDependencyType::SourceFile);
+            }
+        }
     }
 
     bool SceneBuilderWorker::LoadScene(AZStd::shared_ptr<AZ::SceneAPI::Containers::Scene>& result,
@@ -199,10 +238,15 @@ namespace SceneBuilder
         AZ_TracePrintf(Utilities::LogWindow, "Collecting and registering products.\n");
         for (const ExportProduct& product : productList.GetProducts())
         {
-            AZ::u32 subId = BuildSubId(product);
+            const AZ::u32 subId = product.m_subId.has_value() ? product.m_subId.value() : BuildSubId(product);
+
             AZ_TracePrintf(Utilities::LogWindow, "Listed product: %s+0x%08x - %s (type %s)\n", product.m_id.ToString<AZStd::string>().c_str(),
                 subId, product.m_filename.c_str(), product.m_assetType.ToString<AZStd::string>().c_str());
-            response.m_outputProducts.emplace_back(AZStd::move(product.m_filename), product.m_assetType, subId);
+
+            AssetBuilderSDK::JobProduct jobProduct(AZStd::move(product.m_filename), product.m_assetType, subId);
+            PopulateProductDependencies(product, request.m_watchFolder.c_str(), jobProduct);
+
+            response.m_outputProducts.emplace_back(jobProduct);
             // Unlike the version in ResourceCompilerScene/SceneCompiler.cpp, this version doesn't need to deal with sub ids that were
             // created before explicit sub ids were added to the SceneAPI.
         }
@@ -238,9 +282,9 @@ namespace SceneBuilder
         // uber-fbx files that contain hundreds of meshes that need to be split into individual mesh objects as an example.
         AZ::u32 id = static_cast<AZ::u32>(product.m_id.GetHash());
 
-        if (product.m_lod != AZ::SceneAPI::Events::ExportProduct::s_LodNotUsed)
+        if (product.m_lod.has_value())
         {
-            AZ::u8 lod = static_cast<AZ::u8>(product.m_lod);
+            AZ::u8 lod = product.m_lod.value();
             if (lod > 0xF)
             {
                 AZ_TracePrintf(AZ::SceneAPI::Utilities::WarningWindow, "%i is too large to fit in the allotted bits for LOD.\n", static_cast<AZ::u32>(lod));

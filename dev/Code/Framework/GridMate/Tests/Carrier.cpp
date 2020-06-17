@@ -94,6 +94,11 @@ public:
     {
     }
 
+    ~CarrierCallbacksHandler()
+    {
+        CarrierEventBus::Handler::BusDisconnect();
+    }
+
     void Activate(Carrier* carrier)
     {
         m_carrier = carrier;
@@ -1694,7 +1699,7 @@ TEST_F(GridMateCarrierTestFixture, Test_GetSocketErrorString)
     SockerErrorBuffer buffer;
     GridMate::Platform::GetSocketErrorString(AZ_EWOULDBLOCK, buffer);
     char stringValue[32];
-    sprintf_s(stringValue, AZ_ARRAY_SIZE(stringValue), "%d", AZ_EWOULDBLOCK);
+    azsnprintf(stringValue, AZ_ARRAY_SIZE(stringValue), "%d", AZ_EWOULDBLOCK);
     EXPECT_STREQ(stringValue, buffer.data());
 }
 

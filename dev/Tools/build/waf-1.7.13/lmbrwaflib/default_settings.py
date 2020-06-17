@@ -10,26 +10,24 @@
 #
 # Original file Copyright Crytek GMBH or its affiliates, used under license.
 #
-from waflib.Configure import conf, deprecated
+
+# System Imports
+import os
+from collections import Counter
+
+# waflib imports
 from waflib import Context
 from waflib import Logs
-from waflib import Scripting
-from waflib import Options
 from waflib import Utils
+from waflib.Configure import conf, deprecated
 
-from collections import Counter
-from incredibuild import internal_validate_incredibuild_registry_settings,\
-                         internal_use_incredibuild,\
-                         internal_verify_incredibuild_license
-from mscv_helper import find_valid_wsdk_version
-from settings_manager import LUMBERYARD_SETTINGS
+# lmbrwaflib imports
+from lmbrwaflib.incredibuild import internal_validate_incredibuild_registry_settings,\
+                                    internal_use_incredibuild,\
+                                    internal_verify_incredibuild_license
+from lmbrwaflib.msvc_helper import find_valid_wsdk_version
+from lmbrwaflib.settings_manager import LUMBERYARD_SETTINGS
 
-
-import sys
-import os
-import re
-import multiprocessing
-import hashlib
 
 ATTRIBUTE_CALLBACKS = {}
 """ Global Registry of callbacks for options which requires special processing """
@@ -93,7 +91,7 @@ def _get_string_value(ctx, msg, value):
         msg += ' '
     msg += '['+value+']: '
     
-    user_input = raw_input(msg)
+    user_input = input(msg)
     if user_input == '':    # No input -> return default
         return value
     return user_input
@@ -107,7 +105,7 @@ def _get_boolean_value(ctx, msg, value):
     msg += '['+value+']: '
     
     while True:
-        user_input = raw_input(msg)
+        user_input = input(msg)
         
         # No input -> return default
         if user_input == '':    
@@ -237,13 +235,6 @@ def win_vs2017_vcvarsall_args(ctx, section_name, option_name, value):
 
 ###############################################################################
 @register_attribute_callback
-def win_vs2015_winkit(ctx, section_name, option_name, value):
-    """ Configure vs2015 windows kit. """
-    return _auto_populate_windows_kit(ctx, option_name, "Visual Studio 2015")
-
-
-###############################################################################
-@register_attribute_callback
 def out_folder_win32(ctx, section_name, option_name, value):
     """ Configure output folder for win x86 """
     if not _is_user_input_allowed(ctx, option_name, value):
@@ -272,11 +263,10 @@ def out_folder_win64_vs2017(ctx, section_name, option_name, value):
     _output_folder_disclaimer(ctx)
     return _get_string_value(ctx, 'Win x64 Visual Studio 2017 Output Folder', value)
 
-
 ###############################################################################
 @register_attribute_callback
-def out_folder_win64_vs2015(ctx, section_name, option_name, value):
-    """ Configure output folder for win x64 (vs2015) """
+def out_folder_provo(ctx, section_name, option_name, value):
+    """ Configure output folder for provo """
     if not _is_user_input_allowed(ctx, option_name, value):
         return value
         
@@ -285,13 +275,13 @@ def out_folder_win64_vs2015(ctx, section_name, option_name, value):
         return ctx.gui_get_attribute(section_name, option_name, value)
         
     _output_folder_disclaimer(ctx)
-    return _get_string_value(ctx, 'Win x64 Visual Studio 2015 Output Folder', value)
+    return _get_string_value(ctx, 'Provo Output Folder', value) 
 
 
 ###############################################################################
 @register_attribute_callback
-def out_folder_win64_vs2017(ctx, section_name, option_name, value):
-    """ Configure output folder for win x64 (vs2017) """
+def out_folder_xenia(ctx, section_name, option_name, value):
+    """ Configure output folder for xenia """
     if not _is_user_input_allowed(ctx, option_name, value):
         return value
         
@@ -299,44 +289,8 @@ def out_folder_win64_vs2017(ctx, section_name, option_name, value):
     if not ctx.is_option_true('console_mode'):
         return ctx.gui_get_attribute(section_name, option_name, value)
         
-    _output_folder_disclaimer(ctx)
-    return _get_string_value(ctx, 'Win x64 Visual Studio 2017 Output Folder', value)
-
-
-###############################################################################
-@register_attribute_callback
-def out_folder_win64_vs2015(ctx, section_name, option_name, value):
-    """ Configure output folder for win x64 (vs2015) """
-    if not _is_user_input_allowed(ctx, option_name, value):
-        return value
-
-    # GUI
-    if not ctx.is_option_true('console_mode'):
-        return ctx.gui_get_attribute(section_name, option_name, value)
-
-    _output_folder_disclaimer(ctx)
-    return _get_string_value(ctx, 'Win x64 Visual Studio 2015 Server Output Folder', value)
-
-
-###############################################################################
-@register_attribute_callback
-def out_folder_win64_vs2013(ctx, section_name, option_name, value):
-    """ Configure output folder for win x64 (vs2013) """
-    if not _is_user_input_allowed(ctx, option_name, value):
-        return value
-
-    # GUI
-    if not ctx.is_option_true('console_mode'):
-        return ctx.gui_get_attribute(section_name, option_name, value)
-
-    _output_folder_disclaimer(ctx)
-    return _get_string_value(ctx, 'Win x64 Visual Studio 2013 Output Folder', value)
-
-
-###############################################################################
-
-
-###############################################################################
+    _output_folder_disclaimer(ctx)  
+    return _get_string_value(ctx, 'Xenia Output Folder', value)
 
 
 ###############################################################################

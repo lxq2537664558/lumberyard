@@ -9,12 +9,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
 
-from waflib import Errors
-import lumberyard_modules
+# System Imports
 import unittest
 import pytest
 
-import utils
+# waflib imports
+from waflib import Errors
+
+# lmbrwaflib imports
+from lmbrwaflib import lumberyard_modules
+from lmbrwaflib import utils
 
 
 class FakeContext(object):
@@ -541,4 +545,56 @@ class ProjectSettingsTest(unittest.TestCase):
         self.assertIn('{}/{}/test,dedicated'.format(test_platform_name, test_configuration_name), sections_merged)
 
         self.assertEqual(len(sections_merged), 11)
+
+
+@pytest.mark.parametrize(
+    "input_merged_dict, expected_static_dict, expected_test_shared_dict", [
+        pytest.param({'target': 'Foo'},
+                     {'target': 'Foo'},
+                     None,
+                     id='TargetOnlyDefinitionNoTest'),
+        pytest.param(
+            {'target': 'Foo',
+             'file_list': ['foo.waf_files'],
+             'test_file_list': ['foo_tests.waf_files']},
+            
+            {'target': 'Foo',
+             'file_list': ['foo.waf_files']},
+            
+            {'target': 'FooTests',
+             'file_list': ['foo_tests.waf_files'],
+             'test_only': True,
+             'use': ['Foo', 'AzTest'],
+             'unit_test_target': 'Foo'},
+            id='BasicStaticForTestScenario'),
+        pytest.param(
+            {'target': 'Foo',
+             'file_list': ['foo.waf_files'],
+             'test_file_list': ['foo_tests.waf_files'],
+             'test_includes': ['../Tests'],
+             'use': ['Bar'],
+             'test_uselib': ['Crow']},
+            
+            {'target': 'Foo',
+             'file_list': ['foo.waf_files'],
+             'use': ['Bar']},
+            
+            {'target': 'FooTests',
+             'file_list': ['foo_tests.waf_files'],
+             'test_includes': ['../Tests'],
+             'test_only': True,
+             'use': ['Foo', 'AzTest'],
+             'test_uselib': ['Crow'],
+             'unit_test_target': 'Foo'},
+            
+            id='MixedStaticForTestScenario'),
+    ])
+def test_SplitKeywordsFromStaticLibForTest_ValidStaticWithTest_Success(input_merged_dict, expected_static_dict,
+                                                                       expected_test_shared_dict):
+    fake_context = FakeContext()
+    
+    result_static_dict, result_test_shared_dict = lumberyard_modules.split_keywords_from_static_lib_definition_for_test(
+        fake_context, input_merged_dict)
+    assert expected_static_dict == result_static_dict
+    assert expected_test_shared_dict == result_test_shared_dict
 

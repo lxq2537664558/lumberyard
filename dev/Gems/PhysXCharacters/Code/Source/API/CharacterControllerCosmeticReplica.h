@@ -30,7 +30,7 @@ namespace PhysXCharacters
 
     public:
         AZ_CLASS_ALLOCATOR(CharacterControllerCosmeticReplica, AZ::SystemAllocator, 0);
-        AZ_TYPE_INFO(CharacterControllerCosmeticReplica, "{B32BB80F-26AD-4F72-A84A-9FA2F6989D67}", Physics::Character);
+        AZ_TYPE_INFO_LEGACY(CharacterControllerCosmeticReplica, "{B32BB80F-26AD-4F72-A84A-9FA2F6989D67}", Physics::Character);
         static void Reflect(AZ::ReflectContext* context);
 
         CharacterControllerCosmeticReplica() = default;
@@ -54,7 +54,12 @@ namespace PhysXCharacters
         void SetUpDirection(const AZ::Vector3& upDirection) override;
         float GetSlopeLimitDegrees() const override;
         void SetSlopeLimitDegrees(float slopeLimitDegrees) override;
-        AZ::Vector3 GetVelocity() const override;
+        AZ::Vector3 GetVelocity() const override;        
+        Physics::CollisionLayer GetCollisionLayer() const override;
+        Physics::CollisionGroup GetCollisionGroup() const override;
+        void SetCollisionLayer(const Physics::CollisionLayer& layer) override;
+        void SetCollisionGroup(const Physics::CollisionGroup& group) override;
+        AZ::Crc32 GetColliderTag() const override;
         AZ::Vector3 TryRelativeMove(const AZ::Vector3& deltaPosition, float deltaTime) override;
         void CheckSupport(const AZ::Vector3& direction, float distance, const Physics::CharacterSupportInfo& supportInfo) override;
         void AttachShape(AZStd::shared_ptr<Physics::Shape> shape) override;

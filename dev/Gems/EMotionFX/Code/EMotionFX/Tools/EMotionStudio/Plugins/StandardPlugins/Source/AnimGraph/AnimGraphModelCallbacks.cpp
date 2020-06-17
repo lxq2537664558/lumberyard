@@ -10,7 +10,6 @@
 *
 */
 
-
 #include <EMotionFX/CommandSystem/Source/AnimGraphCommands.h>
 #include <EMotionFX/CommandSystem/Source/AnimGraphConditionCommands.h>
 #include <EMotionFX/CommandSystem/Source/AnimGraphConnectionCommands.h>
@@ -193,36 +192,21 @@ namespace EMStudio
         if (actorInstance)
         {
             EMotionFX::AnimGraphInstance* currentAnimGraphInstance = actorInstance->GetAnimGraphInstance();
-            EMotionFX::AnimGraphInstance* oldAnimGraphInstance = commandActivateAnimGraph->m_oldAnimGraphInstance;
+            EMotionFX::AnimGraph* currentAnimGraph = currentAnimGraphInstance->GetAnimGraph();
             EMotionFX::AnimGraph* oldAnimGraph = nullptr;
-            if (oldAnimGraphInstance)
-            {
-                // Grab the anim graph from the manager to check if the graph is still valid.
-                oldAnimGraph = EMotionFX::GetAnimGraphManager().FindAnimGraphByID(commandActivateAnimGraph->mOldAnimGraphUsed);
-                if (oldAnimGraph)
-                {
-                    m_animGraphModel.SetAnimGraphInstance(oldAnimGraph, oldAnimGraphInstance, nullptr);
-                }
-                if (currentAnimGraphInstance)
-                {
-                    m_animGraphModel.SetAnimGraphInstance(oldAnimGraphInstance->GetAnimGraph(), nullptr, currentAnimGraphInstance);
-                }
-            }
-            else
-            {
-                if (currentAnimGraphInstance)
-                {
-                    m_animGraphModel.SetAnimGraphInstance(currentAnimGraphInstance->GetAnimGraph(), nullptr, currentAnimGraphInstance);
-                }
-            }
+            oldAnimGraph = EMotionFX::GetAnimGraphManager().FindAnimGraphByID(commandActivateAnimGraph->mOldAnimGraphUsed);
 
-            // Focus on the new anim graph after activation if the old anim graph is different than the new one.
-            if (currentAnimGraphInstance && currentAnimGraphInstance->GetAnimGraph() && oldAnimGraph != currentAnimGraphInstance->GetAnimGraph())
+            if (currentAnimGraphInstance)
             {
-                EMotionFX::AnimGraphStateMachine* rootStateMachine = currentAnimGraphInstance->GetAnimGraph()->GetRootStateMachine();
-                m_animGraphModel.Focus(m_animGraphModel.FindFirstModelIndex(rootStateMachine));
+                m_animGraphModel.SetAnimGraphInstance(currentAnimGraph, nullptr, currentAnimGraphInstance);
+
+                // Focus on the new anim graph after activation if the old anim graph is different than the new one.
+                if (oldAnimGraph != currentAnimGraph)
+                {
+                    EMotionFX::AnimGraphStateMachine* rootStateMachine = currentAnimGraph->GetRootStateMachine();
+                    m_animGraphModel.Focus(m_animGraphModel.FindFirstModelIndex(rootStateMachine));
+                }
             }
-            
         }
         
         return true;
@@ -534,14 +518,7 @@ namespace EMStudio
     {
         AZStd::string outResult;
         CommandSystem::CommandAnimGraphAdjustTransition* adjustTransitionCommand = static_cast<CommandSystem::CommandAnimGraphAdjustTransition*>(command);
-
-        EMotionFX::AnimGraph* animGraph = adjustTransitionCommand->GetAnimGraph(command, outResult);
-        if (!animGraph)
-        {
-            return false;
-        }
-
-        EMotionFX::AnimGraphStateTransition* transition = adjustTransitionCommand->GetTransition(animGraph, command, outResult);
+        EMotionFX::AnimGraphStateTransition* transition = adjustTransitionCommand->GetTransition(outResult);
         if (!transition)
         {
             return false;
@@ -578,64 +555,49 @@ namespace EMStudio
         return true;
     }
 
-    bool AnimGraphModel::CommandDidAddConditionCallback::Execute(MCore::Command* command, const MCore::CommandLine& commandLine)
+    bool AnimGraphModel::CommandDidConditionChangeCallbackHelper(AnimGraphModel& animGraphModel, MCore::Command* command)
     {
-        AZStd::string outResult;
-        EMotionFX::AnimGraph* animGraph = CommandSystem::CommandsGetAnimGraph(commandLine, command, outResult);
-        if (!animGraph)
+        if (EMotionFX::ParameterMixinTransitionId* transitionIdMixin = azdynamic_cast<EMotionFX::ParameterMixinTransitionId*>(command))
         {
-            return true;
-        }
-
-        EMotionFX::AnimGraphConnectionId transitionId;
-        EMotionFX::AnimGraphStateTransition* transition;
-        if (CommandSystem::GetTransitionFromParameter(commandLine, command, animGraph, transitionId, transition, outResult))
-        {
-            static const QVector<int> transitionConditionRole = { AnimGraphModel::ROLE_TRANSITION_CONDITIONS };
-            m_animGraphModel.Edited(transition, transitionConditionRole);
+            AZStd::string resultString;
+            EMotionFX::AnimGraphStateTransition* transition = transitionIdMixin->GetTransition(resultString);
+            if (transition)
+            {
+                static const QVector<int> transitionConditionRole = { AnimGraphModel::ROLE_TRANSITION_CONDITIONS };
+                animGraphModel.Edited(transition, transitionConditionRole);
+            }
         }
 
         return true;
     }
 
-    bool AnimGraphModel::CommandDidAddConditionCallback::Undo(MCore::Command* command, const MCore::CommandLine& commandLine)
+    bool AnimGraphModel::CommandDidAddRemoveConditionCallback::Execute(MCore::Command* command, const MCore::CommandLine& commandLine)
+    {
+        AZ_UNUSED(commandLine);
+        return AnimGraphModel::CommandDidConditionChangeCallbackHelper(m_animGraphModel, command);
+    }
+
+    bool AnimGraphModel::CommandDidAddRemoveConditionCallback::Undo(MCore::Command* command, const MCore::CommandLine& commandLine)
     {
         AZ_UNUSED(command);
         AZ_UNUSED(commandLine);
 
         // We are doing nothing in this case because the AnimGraphAddCondition command uses an AnimGraphRemoveCondition
-        // while undoing, that will be processed by the callbacks below
+        // while undoing, that will be processed by the callbacks below.
+        // The same will be applied for AnimGraphRemoveCondition.
         return true;
     }
 
-    bool AnimGraphModel::CommandDidRemoveConditionCallback::Execute(MCore::Command* command, const MCore::CommandLine& commandLine)
+    bool AnimGraphModel::CommandDidAdjustConditionCallback::Execute(MCore::Command* command, const MCore::CommandLine& commandLine)
     {
-        AZStd::string outResult;
-        EMotionFX::AnimGraph* animGraph = CommandSystem::CommandsGetAnimGraph(commandLine, command, outResult);
-        if (!animGraph)
-        {
-            return true;
-        }
-
-        EMotionFX::AnimGraphConnectionId transitionId;
-        EMotionFX::AnimGraphStateTransition* transition;
-        if (CommandSystem::GetTransitionFromParameter(commandLine, command, animGraph, transitionId, transition, outResult))
-        {
-            static const QVector<int> transitionConditionRole = { AnimGraphModel::ROLE_TRANSITION_CONDITIONS };
-            m_animGraphModel.Edited(transition, transitionConditionRole);
-        }
-
-        return true;
-    }
-
-    bool AnimGraphModel::CommandDidRemoveConditionCallback::Undo(MCore::Command* command, const MCore::CommandLine& commandLine)
-    {
-        AZ_UNUSED(command);
         AZ_UNUSED(commandLine);
+        return AnimGraphModel::CommandDidConditionChangeCallbackHelper(m_animGraphModel, command);
+    }
 
-        // We are doing nothing in this case because the AnimGraphRemoveCondition command uses an AnimGraphAddCondition
-        // while undoing, that will be processed by the callbacks above
-        return true;
+    bool AnimGraphModel::CommandDidAdjustConditionCallback::Undo(MCore::Command* command, const MCore::CommandLine& commandLine)
+    {
+        AZ_UNUSED(commandLine);
+        return AnimGraphModel::CommandDidConditionChangeCallbackHelper(m_animGraphModel, command);
     }
 
     bool AnimGraphModel::CommandDidEditActionCallback::Execute(MCore::Command* command, const MCore::CommandLine& commandLine)
@@ -646,12 +608,12 @@ namespace EMStudio
         if (animGraphIdMixin)
         {
             AZStd::string outResult;
-            const EMotionFX::AnimGraph* animGraph = animGraphIdMixin->GetAnimGraph(command, outResult);
+            const EMotionFX::AnimGraph* animGraph = animGraphIdMixin->GetAnimGraph(outResult);
             if (animGraph)
             {
                 if (EMotionFX::ParameterMixinTransitionId* transitionIdMixin = azdynamic_cast<EMotionFX::ParameterMixinTransitionId*>(command))
                 {
-                    EMotionFX::AnimGraphStateTransition* transition = transitionIdMixin->GetTransition(animGraph, command, outResult);
+                    EMotionFX::AnimGraphStateTransition* transition = transitionIdMixin->GetTransition(animGraph, outResult);
                     if (transition)
                     {
                         m_animGraphModel.Edited(transition, transitionActionRole);

@@ -9,14 +9,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
 
-from waflib import Errors
-
-import unit_test
-import lumberyard
-
-import pytest
+# System Imports
 import json
 import os
+import pytest
+
+# waflib imports
+from waflib import Errors
+
+# lmbrwaflib imports
+from lmbrwaflib import unit_test
+from lmbrwaflib import lumberyard
+
 
 
 BASIC_ENGINE_JSON = {
@@ -102,3 +106,55 @@ def test_get_engine_node_external(tmpdir, external_engine_json, ext_engine_subpa
         lumberyard.get_engine_node(fake_context)
     except expected_error:
         pass
+
+
+def test_get_all_eligible_use_keywords():
+    
+    class MockPlatformSettings(object):
+        def __init__(self):
+            self.aliases = ['alias_foo']
+    
+    class MockContext(object):
+        
+        def get_all_platform_names(self):
+            return ['platform_foo']
+        
+        def get_platform_settings(self,platform_name):
+            assert platform_name == 'platform_foo'
+            return MockPlatformSettings()
+        
+    mockCtx = MockContext()
+    
+    related_keywords = lumberyard.get_all_eligible_use_keywords(mockCtx)
+    
+    expected_use_keywords = ['use', 'test_use', 'test_all_use', 'platform_foo_use', 'alias_foo_use']
+    assert len(related_keywords) == len(expected_use_keywords)
+    for expected_use in expected_use_keywords:
+        assert expected_use in related_keywords
+
+
+@pytest.mark.parametrize(
+    "engine_root_version, experimental_string, expected", [
+        pytest.param('0.0.0.0', 'False', True),
+        pytest.param('0.0.0.0', 'True', True),
+        pytest.param('0.0.0.1', 'False', False),
+        pytest.param('0.0.0.1', 'True', True)
+    ]
+)
+def test_should_build_experimental_targets(engine_root_version, experimental_string, expected):
+    
+    class FakeOptions(object):
+        def __init__(self, experimental_string):
+            self.enable_experimental_features = experimental_string
+    
+    class FakeExperimentContext(object):
+        def __init__(self, engine_root_version, experimental_string):
+            
+            self.engine_root_version = engine_root_version
+            self.options = FakeOptions(experimental_string)
+            
+    fake_context = FakeExperimentContext(engine_root_version, experimental_string)
+    
+    result = lumberyard.should_build_experimental_targets(fake_context)
+    
+    assert result == expected

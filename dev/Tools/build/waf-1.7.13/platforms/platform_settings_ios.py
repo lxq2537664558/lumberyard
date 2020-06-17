@@ -8,14 +8,29 @@
 # remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
-from waflib import Errors
-from waflib.Configure import conf
-from lumberyard import deprecated
+
+# System Imports
+import os
 import subprocess
+import sys
+
+# waflib imports
+from waflib.Configure import conf
 
 
 PLATFORM = 'ios'
-
+def apple_clang_supports_option(option):
+    '''
+    Test that a compiler switch/option is supported by the apple clang that is in the PATH
+    '''
+    with open(os.devnull, "w") as DEV_NULL:
+        clang_subprocess = subprocess.Popen(['clang', option, '-o-', '-x', 'c++', '-'], 
+            stdin=subprocess.PIPE, stdout=DEV_NULL, stderr=subprocess.STDOUT)
+        clang_subprocess.stdin.write(b'int main(){}\n')
+        clang_subprocess.communicate()
+        clang_subprocess.stdin.close()
+        return clang_subprocess.returncode == 0
+    return false
 
 # Required load_<PLATFORM>_common_settings(ctx)
 @conf
@@ -24,15 +39,10 @@ def load_ios_common_settings(ctx):
     env = ctx.env
 
     # Set Minimum ios version and the path to the current sdk
-    settings_file = ctx.path.make_node(['_WAF_', 'apple', 'ios_settings.json'])
-    try:
-        settings = ctx.parse_json_file(settings_file)
-    except Exception as e:
-        ctx.cry_file_error(str(e), settings_file.abspath())
-
+    settings = ctx.get_ios_xcode_settings()
     min_iphoneos_version = '-miphoneos-version-min={}'.format(settings['IPHONEOS_DEPLOYMENT_TARGET'])
 
-    sdk_path = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path']).strip()
+    sdk_path = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path']).decode(sys.stdout.encoding or 'iso8859-1', 'replace').strip()
     sysroot = '-isysroot{}'.format(sdk_path)
 
     common_flags = [
@@ -77,6 +87,10 @@ def load_ios_common_settings(ctx):
     env['CXX'] = 'clang++'
     env['LINK'] = env['LINK_CC'] = env['LINK_CXX'] = 'clang++'
 
+    # Add the C++ -fno-aligned-allocation switch for "real" clang versions 7.0.0(AppleClang version 10.0.1) and above for Mac
+    # iOS only supports C++17 aligned new/delete when targeting iOS 11 and above
+    if apple_clang_supports_option('-fno-aligned-allocation'):
+        env['CXXFLAGS'] += ['-fno-aligned-allocation']
     ctx.load_cryengine_common_settings()
     
     ctx.load_clang_common_settings()
@@ -94,3 +108,48 @@ def load_ios_configuration_settings(ctx, platform_configuration):
 def is_ios_available(ctx):
     return True
 
+
+@conf
+def load_apple_arm_settings(ctx, settings_name):
+    """ Helper function for loading the global apple settings """
+
+    if hasattr(ctx, settings_name):
+        return
+
+    settings_file_names = [
+        'common_arm_settings.json',
+        '{}.json'.format(settings_name)
+    ]
+
+    settings_files = list()
+    for root_node in ctx._get_settings_search_roots():
+        for file_name in settings_file_names:
+            settings_node = root_node.make_node(['_WAF_', 'apple', file_name])
+            if os.path.exists(settings_node.abspath()):
+                settings_files.append(settings_node)
+
+    settings = dict()
+    for settings_file in settings_files:
+        try:
+            settings.update(ctx.parse_json_file(settings_file))
+        except Exception as e:
+            ctx.cry_file_error(str(e), settings_file.abspath())
+
+    # For symroot need to have the full path so change the value from
+    # relative path to a full path
+    if 'SYMROOT' in settings:
+        settings['SYMROOT'] = os.path.join(Context.launch_dir, settings['SYMROOT'])
+
+    setattr(ctx, settings_name, settings)
+
+
+@conf
+def get_ios_xcode_settings(self):
+    """" Helper function for getting ios settings """
+    self.load_apple_arm_settings('ios_settings')
+    return self.ios_settings
+
+
+@conf
+def get_ios_project_name(self):
+    return '{}/{}'.format(self.options.ios_project_folder, self.options.ios_project_name)

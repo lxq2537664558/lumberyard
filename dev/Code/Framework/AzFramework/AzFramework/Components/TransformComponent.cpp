@@ -1013,12 +1013,12 @@ namespace AzFramework
 
     void TransformComponent::OnTick(float /*deltaTime*/, AZ::ScriptTimePoint /*currentTime*/)
     {
-        if (GetEntity() && GetEntity()->GetState() == AZ::Entity::State::ES_ACTIVE && !NetQuery::IsEntityAuthoritative(GetEntityId()))
+        if (GetEntity() && GetEntity()->GetState() == AZ::Entity::State::ES_ACTIVE)
         {
-            if (m_replicaChunk)
+            if (m_replicaChunk && m_replicaChunk->IsProxy())
             {
-                unsigned int localTime = m_replicaChunk->GetReplicaManager()->GetTime().m_localTime;
-                AZ::Transform newXform = GetInterpolatedTransform(localTime);
+                const unsigned int localTime = m_replicaChunk->GetReplicaManager()->GetTime().m_localTime;
+                const AZ::Transform newXform = GetInterpolatedTransform(localTime);
                 SetLocalTMImpl(newXform);
             }
         }
@@ -1290,6 +1290,8 @@ namespace AzFramework
             behaviorContext->Class<TransformComponent>()->RequestBus("TransformBus");
 
             behaviorContext->EBus<AZ::TransformBus>("TransformBus")
+                ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
+                ->Attribute(AZ::Script::Attributes::Module, "components")
                 ->Event("GetLocalTM", &AZ::TransformBus::Events::GetLocalTM)
                 ->Event("GetWorldTM", &AZ::TransformBus::Events::GetWorldTM)
                 ->Event("GetParentId", &AZ::TransformBus::Events::GetParentId)

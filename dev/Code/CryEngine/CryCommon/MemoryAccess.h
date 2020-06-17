@@ -32,6 +32,8 @@
         #include "Xenia/MemoryAccess_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/MemoryAccess_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/MemoryAccess_h_salem.inl"
     #endif
 #else
 #define MEMORYACCESS_H_TRAIT_USE_LEGACY_PREFETCHLINE 1
@@ -63,6 +65,7 @@ extern int g_CpuFlags;
 #define CPUF_MMX   0x08
 #define CPUF_SSE3  0x10
 #define CPUF_F16C  0x20
+#define CPUF_SSE41 0x40
 
 #ifdef _CPU_SSE
 
@@ -569,6 +572,8 @@ ILINE void cryMemcpy(void* Dst, const void* Src, int n, int nFlags)
         #include "Xenia/MemoryAccess_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/MemoryAccess_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/MemoryAccess_h_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)

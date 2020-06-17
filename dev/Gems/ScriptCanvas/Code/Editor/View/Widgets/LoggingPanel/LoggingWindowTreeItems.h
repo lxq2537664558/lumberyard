@@ -10,10 +10,13 @@
 *
 */
 #pragma once
-
+#include <AzCore/PlatformDef.h>
+// qdatetime.h(331): warning C4251: 'QDateTime::d': class 'QSharedDataPointer<QDateTimePrivate>' needs to have dll-interface to be used by clients of class 'QDateTime'
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option")
 #include <QIcon>
 #include <QTime>
 #include <QTimer>
+AZ_POP_DISABLE_WARNING
 
 #include <AzCore/Component/NamedEntityId.h>
 #include <AzCore/Memory/SystemAllocator.h>
@@ -264,7 +267,10 @@ namespace ScriptCanvasEditor
         AZ_CLASS_ALLOCATOR(NodeAnnotationTreeItem, AZ::SystemAllocator, 0);
         AZ_RTTI(NodeAnnotationTreeItem, "{4A052945-F8D1-4A96-8D52-D8C20504E30F}", DebugLogTreeItem);
 
-        NodeAnnotationTreeItem(ScriptCanvas::AnnotateNodeSignal::AnnotationLevel annotationLevel, AZStd::string_view annotation);
+        NodeAnnotationTreeItem();
+        NodeAnnotationTreeItem(ScriptCanvas::AnnotateNodeSignal::AnnotationLevel annotationLevel, const AZStd::string& annotation);
+
+        ~NodeAnnotationTreeItem() override = default;
 
         QVariant Data(const QModelIndex& index, int role) const override final;
 

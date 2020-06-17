@@ -13,8 +13,10 @@
 
 #include <PhysX_precompiled.h>
 #include <Source/SphereColliderComponent.h>
+#include <AzCore/Component/Entity.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/std/smart_ptr/make_shared.h>
+#include <Source/Utils.h>
 
 namespace PhysX
 {
@@ -24,21 +26,20 @@ namespace PhysX
         {
             serializeContext->Class<SphereColliderComponent, BaseColliderComponent>()
                 ->Version(1)
-                ->Field("Configuration", &SphereColliderComponent::m_shapeConfiguration)
                 ;
         }
     }
 
-    SphereColliderComponent::SphereColliderComponent(const Physics::ColliderConfiguration& colliderConfiguration, const Physics::SphereShapeConfiguration& configuration)
-        : BaseColliderComponent(colliderConfiguration)
-        , m_shapeConfiguration(configuration)
+    // BaseColliderComponent
+    void SphereColliderComponent::UpdateScaleForShapeConfigs()
     {
-    }
+        if (m_shapeConfigList.size() != 1)
+        {
+            AZ_Error("PhysX Capsule Collider Component", false,
+                "Expected exactly one collider/shape configuration for entity \"%s\".", GetEntity()->GetName().c_str());
+            return;
+        }
 
-    AZStd::shared_ptr<Physics::ShapeConfiguration> SphereColliderComponent::CreateScaledShapeConfig()
-    {
-        auto scaledSphere = AZStd::make_shared<Physics::SphereShapeConfiguration>(m_shapeConfiguration);
-        scaledSphere->m_scale = GetNonUniformScale();
-        return scaledSphere;
+        m_shapeConfigList[0].second->m_scale = Utils::GetNonUniformScale(GetEntityId());
     }
 }

@@ -20,6 +20,7 @@
 
 static FOURCC FOURCC_SHADERBIN = MAKEFOURCC('F', 'X', 'B', '0');
 
+
 SShaderBin SShaderBin::s_Root;
 uint32 SShaderBin::s_nCache = 0;
 uint32 SShaderBin::s_nMaxFXBinCache = MAX_FXBIN_CACHE;
@@ -2957,7 +2958,7 @@ void CShaderManBin::AddAffectedParameter(CParserBin& Parser, std::vector<SFXPara
     int nFlags = pParam->GetFlags();
     bool bCheckAffect = CParserBin::m_bParseFX ? true : false;
 
-    if (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_GL4 || CParserBin::m_nPlatform == SF_GLES3 || CParserBin::m_nPlatform == SF_METAL) // ACCEPTED_USE
+    if (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_GL4 || CParserBin::m_nPlatform == SF_GLES3 || CParserBin::m_nPlatform == SF_METAL)
     {
         CRY_ASSERT(eSHClass < eHWSC_Num);
         if (((nFlags & PF_TWEAKABLE_MASK) || pParam->m_Values.c_str()[0] == '(') && pParam->m_Register[eSHClass] >= 0 && pParam->m_Register[eSHClass] < 1000)
@@ -3429,25 +3430,6 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_PackParameters (CParserBin& Parser
 
 //===================================================================================================
 
-inline bool CompareVars(const SFXParam* a, const SFXParam* b)
-{
-    uint16 nCB0 = eConstantBufferShaderSlot_Count;
-    uint16 nCB1 = eConstantBufferShaderSlot_Count;
-    int16 nReg0 = 10000;
-    int16 nReg1 = 10000;
-    nCB0 = a->m_BindingSlot;
-    nReg0 = a->m_Register[gRenDev->m_RP.m_FlagsShader_LT];
-
-    nCB1 = b->m_BindingSlot;
-    nReg1 = b->m_Register[gRenDev->m_RP.m_FlagsShader_LT];
-
-    if (nCB0 != nCB1)
-    {
-        return (nCB0 < nCB1);
-    }
-    return (nReg0 < nReg1);
-}
-
 void CShaderManBin::AddParameterToScript(CParserBin& Parser, SFXParam* pr, PodArray<uint32>& SHData, EHWShaderClass eSHClass, int nCB)
 {
     char str[256];
@@ -3861,21 +3843,23 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_GenerateShaderData(CParserBin& Par
                     ParamsData.push_back(&pr);
                 }
             }
-            if (eSHClass == eHWSC_Vertex)
-            {
-                gRenDev->m_RP.m_FlagsShader_LT = 0;
-            }
-            else
-            if (eSHClass == eHWSC_Pixel)
-            {
-                gRenDev->m_RP.m_FlagsShader_LT = 1;
-            }
-            else
-            {
-                gRenDev->m_RP.m_FlagsShader_LT = 2;
-            }
 
-            std::sort(ParamsData.begin(), ParamsData.end(), CompareVars);
+            const int shaderClassIndex = (eSHClass == eHWSC_Vertex) ? 0 : (eSHClass == eHWSC_Pixel) ? 1 : 2;
+
+            std::sort(ParamsData.begin(), ParamsData.end(),
+                [shaderClassIndex](const SFXParam* a, const SFXParam* b)
+                {
+                    const uint16 bindSlot0 = a->m_BindingSlot;
+                    const uint16 bindSlot1 = b->m_BindingSlot;
+                    const int16 register0 = a->m_Register[shaderClassIndex];
+                    const int16 register1 = b->m_Register[shaderClassIndex];
+
+                    if (bindSlot0 != bindSlot1)
+                    {
+                        return (bindSlot0 < bindSlot1);
+                    }
+                    return (register0 < register1);
+                });
 
             // First we need to declare semantic variables (in CB scopes in case of DX11)
             for (i = 0; i < ParamsData.size(); i++)
@@ -3976,7 +3960,7 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_GenerateShaderData(CParserBin& Par
             Parser.CopyTokens(cf, SHData, Replaces, NewTokens, h);
             if (cf->m_eType == eFT_Sampler)
             {
-                if (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_GL4 || CParserBin::m_nPlatform == SF_GLES3 || CParserBin::m_nPlatform == SF_METAL) // ACCEPTED_USE
+                if (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_GL4 || CParserBin::m_nPlatform == SF_GLES3 || CParserBin::m_nPlatform == SF_METAL)
                 {
                     int nT = Parser.m_Tokens[cf->m_nLastToken - 1];
                     //CRY_ASSERT(nT >= eT_s0 && nT <= eT_s15);
@@ -5264,7 +5248,7 @@ bool CShaderManBin::ParseBinFX(SShaderBin* pBin, CShader* ef, uint64 nMaskGen)
                     }
                 }
                 else
-                if (CParserBin::m_nPlatform & (SF_D3D11 | SF_ORBIS | SF_DURANGO | SF_GL4 | SF_GLES3 | SF_METAL)) // ACCEPTED_USE
+                if (CParserBin::m_nPlatform & (SF_D3D11 | SF_ORBIS | SF_DURANGO | SF_GL4 | SF_GLES3 | SF_METAL))
                 {
                     uint32 nTokName = Parser.GetToken(Parser.m_Name);
                     const char* name = Parser.GetString(nTokName);

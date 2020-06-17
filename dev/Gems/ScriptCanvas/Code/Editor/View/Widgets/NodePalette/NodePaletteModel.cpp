@@ -16,6 +16,7 @@
 #include <AzCore/Serialization/SerializeContext.h>
 
 #include <AzToolsFramework/ToolsComponents/EditorComponentBase.h>
+#include <AzToolsFramework/AssetBrowser/Entries/ProductAssetBrowserEntry.h>
 
 #include <Editor/View/Widgets/NodePalette/NodePaletteModel.h>
 
@@ -50,22 +51,18 @@ namespace
         return isDeprecated;
     }
 
-    bool ShouldExcludeFromNodeList(const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>* excludeAttributeData, const AZ::Uuid& typeId, bool showExcludedPreviewNodes)
+    bool ShouldExcludeFromNodeList(const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>* excludeAttributeData, const AZ::Uuid& typeId)
     {
         if (excludeAttributeData)
         {
             AZ::u64 exclusionFlags = AZ::Script::Attributes::ExcludeFlags::List | AZ::Script::Attributes::ExcludeFlags::ListOnly;
-            if (!showExcludedPreviewNodes)
-            {
-                exclusionFlags |= AZ::Script::Attributes::ExcludeFlags::Preview;
-            }
 
             if (typeId == AzToolsFramework::Components::EditorComponentBase::TYPEINFO_Uuid())
             {
                 return true;
             }
 
-            return (static_cast<AZ::u64>(excludeAttributeData->Get(nullptr)) & exclusionFlags);
+            return (static_cast<AZ::u64>(excludeAttributeData->Get(nullptr)) & exclusionFlags) != 0; // warning C4800: 'AZ::u64': forcing value to bool 'true' or 'false' (performance warning)
         }
         return false;
     }
@@ -75,13 +72,13 @@ namespace
     {
         if (excludeAttributeData)
         {
-            return static_cast<AZ::u64>(excludeAttributeData->Get(nullptr)) & AZ::Script::Attributes::ExcludeFlags::Preview;
+            return (static_cast<AZ::u64>(excludeAttributeData->Get(nullptr)) & AZ::Script::Attributes::ExcludeFlags::Preview) != 0; // warning C4800: 'AZ::u64': forcing value to bool 'true' or 'false' (performance warning)
         }
 
         return false;
     }
 
-    bool HasExcludeFromNodeListAttribute(AZ::SerializeContext* serializeContext, const AZ::Uuid& typeId, bool showExcludedPreviewNodes)
+    bool HasExcludeFromNodeListAttribute(AZ::SerializeContext* serializeContext, const AZ::Uuid& typeId)
     {
         const AZ::SerializeContext::ClassData* classData = serializeContext->FindClassData(typeId);
         if (classData && classData->m_editData)
@@ -91,7 +88,7 @@ namespace
                 if (auto excludeAttribute = editorElementData->FindAttribute(AZ::Script::Attributes::ExcludeFrom))
                 {
                     auto excludeAttributeData = azdynamic_cast<const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>*>(excludeAttribute);
-                    return excludeAttributeData && ShouldExcludeFromNodeList(excludeAttributeData, typeId, showExcludedPreviewNodes);
+                    return excludeAttributeData && ShouldExcludeFromNodeList(excludeAttributeData, typeId);
                 }
             }
         }
@@ -101,7 +98,7 @@ namespace
 
     bool MethodHasAttribute(const AZ::BehaviorMethod* method, AZ::Crc32 attribute)
     {
-        return AZ::FindAttribute(attribute, method->m_attributes);
+        return AZ::FindAttribute(attribute, method->m_attributes) != nullptr; // warning C4800: 'AZ::Attribute *': forcing value to bool 'true' or 'false' (performance warning)
     }
 
     bool HasAttribute(AZ::BehaviorClass* behaviorClass, AZ::Crc32 attribute)
@@ -139,14 +136,7 @@ namespace
         AZ::ComponentApplicationBus::BroadcastResult(serializeContext, &AZ::ComponentApplicationRequests::GetSerializeContext);
 
         AZ::BehaviorContext* behaviorContext = nullptr;
-        AZ::ComponentApplicationBus::BroadcastResult(behaviorContext, &AZ::ComponentApplicationRequests::GetBehaviorContext);
-
-        bool showExcludedPreviewNodes = false;
-        AZStd::intrusive_ptr<ScriptCanvasEditor::EditorSettings::ScriptCanvasEditorSettings> settings = AZ::UserSettings::CreateFind<ScriptCanvasEditor::EditorSettings::ScriptCanvasEditorSettings>(AZ_CRC("ScriptCanvasPreviewSettings", 0x1c5a2965), AZ::UserSettings::CT_LOCAL);
-        if (settings)
-        {
-            showExcludedPreviewNodes = settings->m_showExcludedNodes;
-        }
+        AZ::ComponentApplicationBus::BroadcastResult(behaviorContext, &AZ::ComponentApplicationRequests::GetBehaviorContext);        
 
         AZ_Assert(serializeContext, "Could not find SerializeContext. Aborting Palette Creation.");
         AZ_Assert(behaviorContext, "Could not find BehaviorContext. Aborting Palette Creation.");
@@ -159,7 +149,7 @@ namespace
         {
             // Get all the types.
             serializeContext->EnumerateDerived<ScriptCanvas::Library::LibraryDefinition>(
-                [&nodePaletteModel, &showExcludedPreviewNodes, serializeContext]
+                [&nodePaletteModel, serializeContext]
             (const AZ::SerializeContext::ClassData* classData, const AZ::Uuid& classUuid) -> bool
             {
                 ScriptCanvasEditor::CategoryInformation categoryInfo;
@@ -205,7 +195,7 @@ namespace
                 {
                     GraphCanvas::NodePaletteTreeItem* nodeParent = nullptr;
 
-                    if (HasExcludeFromNodeListAttribute(serializeContext, node.first, showExcludedPreviewNodes))
+                    if (HasExcludeFromNodeListAttribute(serializeContext, node.first))
                     {
                         continue;
                     }
@@ -274,12 +264,18 @@ namespace
                     continue;
                 }
 
+                // Only bind Behavior Classes marked with the Scope type of Launcher
+                if (!AZ::Internal::IsInScope(behaviorClass->m_attributes, AZ::Script::Attributes::ScopeFlags::Launcher))
+                {
+                    continue; // skip this class
+                }
+
                 // Check for "ExcludeFrom" attribute for ScriptCanvas
                 auto excludeClassAttributeData = azdynamic_cast<const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>*>(AZ::FindAttribute(AZ::Script::Attributes::ExcludeFrom, behaviorClass->m_attributes));
 
                 // We don't want to show any components, since there isn't anything we can do with them
                 // from ScriptCanvas since we use buses to communicate to everything.
-                if (ShouldExcludeFromNodeList(excludeClassAttributeData, behaviorClass->m_azRtti ? behaviorClass->m_azRtti->GetTypeId() : behaviorClass->m_typeId, showExcludedPreviewNodes))
+                if (ShouldExcludeFromNodeList(excludeClassAttributeData, behaviorClass->m_azRtti ? behaviorClass->m_azRtti->GetTypeId() : behaviorClass->m_typeId))
                 {
                     for (const auto& requestBus : behaviorClass->m_requestBuses)
                     {
@@ -389,7 +385,7 @@ namespace
 
                         // Check for "ExcludeFrom" attribute for ScriptCanvas
                         auto excludeMethodAttributeData = azdynamic_cast<const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>*>(AZ::FindAttribute(AZ::Script::Attributes::ExcludeFrom, method.second->m_attributes));
-                        if (ShouldExcludeFromNodeList(excludeMethodAttributeData, behaviorClass->m_azRtti ? behaviorClass->m_azRtti->GetTypeId() : behaviorClass->m_typeId, showExcludedPreviewNodes))
+                        if (ShouldExcludeFromNodeList(excludeMethodAttributeData, behaviorClass->m_azRtti ? behaviorClass->m_azRtti->GetTypeId() : behaviorClass->m_typeId))
                         {
                             continue; // skip this method
                         }
@@ -455,6 +451,12 @@ namespace
                 {
                     continue;
                 }
+                
+                // Only bind Behavior Buses marked with the Scope type of Launcher
+                if (!AZ::Internal::IsInScope(ebus->m_attributes, AZ::Script::Attributes::ScopeFlags::Launcher))
+                {
+                    continue; // skip this bus
+                }
 
                 // EBus Handler
                 {
@@ -472,7 +474,7 @@ namespace
                                 }
 
                                 auto excludeEventAttributeData = azdynamic_cast<const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>*>(AZ::FindAttribute(AZ::Script::Attributes::ExcludeFrom, ebus->m_attributes));
-                                if (ShouldExcludeFromNodeList(excludeEventAttributeData, handler->RTTI_GetType(), showExcludedPreviewNodes))
+                                if (ShouldExcludeFromNodeList(excludeEventAttributeData, handler->RTTI_GetType()))
                                 {
                                     continue;
                                 }
@@ -557,7 +559,7 @@ namespace
                         }
 
                         auto excludeEBusAttributeData = azdynamic_cast<const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>*>(AZ::FindAttribute(AZ::Script::Attributes::ExcludeFrom, ebus->m_attributes));
-                        if (ShouldExcludeFromNodeList(excludeEBusAttributeData, AZ::Uuid::CreateNull(), showExcludedPreviewNodes))
+                        if (ShouldExcludeFromNodeList(excludeEBusAttributeData, AZ::Uuid::CreateNull()))
                         {
                             continue;
                         }
@@ -617,7 +619,7 @@ namespace
                             }
 
                             auto excludeEventAttributeData = azdynamic_cast<const AZ::Edit::AttributeData<AZ::Script::Attributes::ExcludeFlags>*>(AZ::FindAttribute(AZ::Script::Attributes::ExcludeFrom, event.second.m_attributes));
-                            if (ShouldExcludeFromNodeList(excludeEventAttributeData, AZ::Uuid::CreateNull(), showExcludedPreviewNodes))
+                            if (ShouldExcludeFromNodeList(excludeEventAttributeData, AZ::Uuid::CreateNull()))
                             {
                                 continue; // skip this event
                             }
@@ -660,8 +662,8 @@ namespace ScriptCanvasEditor
     /////////////////////
 
     NodePaletteModel::NodePaletteModel()
+        : m_paletteId(AZ::Entity::MakeId())
     {
-
     }
 
     NodePaletteModel::~NodePaletteModel()
@@ -669,11 +671,43 @@ namespace ScriptCanvasEditor
         ClearRegistry();
     }
 
+    NodePaletteId NodePaletteModel::GetNotificationId() const
+    {
+        return m_paletteId;
+    }
+
+    void NodePaletteModel::AssignAssetModel(AzToolsFramework::AssetBrowser::AssetBrowserFilterModel* assetModel)
+    {
+        m_assetModel = assetModel;
+
+        if (m_assetModel)
+        {
+            TraverseTree();
+
+            {
+                auto connection = QObject::connect(m_assetModel, &QAbstractItemModel::rowsInserted, [this](const QModelIndex& parentIndex, int first, int last) { this->OnRowsInserted(parentIndex, first, last); });
+                m_lambdaConnections.emplace_back(connection);
+            }
+
+            {
+                auto connection = QObject::connect(m_assetModel, &QAbstractItemModel::rowsAboutToBeRemoved, [this](const QModelIndex& parentIndex, int first, int last) { this->OnRowsAboutToBeRemoved(parentIndex, first, last); });
+                m_lambdaConnections.emplace_back(connection);
+            }
+        }
+    }
+
     void NodePaletteModel::RepopulateModel()
     {
         ClearRegistry();
 
         PopulateNodePaletteModel((*this));
+
+        if (m_assetModel)
+        {
+            TraverseTree();
+        }
+
+        NodePaletteModelNotificationBus::Event(m_paletteId, &NodePaletteModelNotifications::OnAssetModelRepopulated);
     }
 
     void NodePaletteModel::RegisterCustomNode(AZStd::string_view categoryPath, const AZ::Uuid& uuid, AZStd::string_view name, const AZ::SerializeContext::ClassData* classData)
@@ -871,7 +905,7 @@ namespace ScriptCanvasEditor
             handlerInformation->m_toolTip = TranslationHelper::GetKeyTranslation(TranslationContextGroup::EbusHandler, busName.data(), eventName.data(), TranslationItemType::Node, TranslationKeyId::Tooltip);            
 
             m_registeredNodes.emplace(AZStd::make_pair(nodeIdentifier, handlerInformation));
-        }        
+        }
     }
 
     void NodePaletteModel::RegisterEBusSenderNodeModelInformation(AZStd::string_view categoryPath, AZStd::string_view busName, AZStd::string_view eventName, const ScriptCanvas::EBusBusId& busId, const ScriptCanvas::EBusEventId& eventId, const AZ::BehaviorEBusEventSender& eventDefinition)
@@ -908,6 +942,66 @@ namespace ScriptCanvasEditor
 
             m_registeredNodes.emplace(AZStd::make_pair(nodeIdentifier, senderInformation));
         }
+    }
+
+    AZStd::vector<ScriptCanvas::NodeTypeIdentifier> NodePaletteModel::RegisterScriptEvent(ScriptEvents::ScriptEventsAsset* scriptEventAsset)
+    {
+        const ScriptEvents::ScriptEvent& scriptEvent = scriptEventAsset->m_definition;
+
+        ScriptCanvas::EBusBusId busId = scriptEventAsset->GetBusId();
+
+        AZStd::string category = scriptEvent.GetCategory();
+        
+        auto methods = scriptEvent.GetMethods();
+
+        AZStd::vector<ScriptCanvas::NodeTypeIdentifier> identifiers;
+
+        // Each event has a handler and a reciever
+        identifiers.reserve(methods.size() * 2);
+
+        for (const auto& method : methods)
+        {
+            ScriptCanvas::EBusEventId eventId = method.GetEventId();
+
+            ScriptCanvas::NodeTypeIdentifier senderIdentifier = ScriptCanvas::NodeUtils::ConstructSendScriptEventIdentifier(busId, eventId);
+            ScriptCanvas::NodeTypeIdentifier receiverIdentifier = ScriptCanvas::NodeUtils::ConstructScriptEventReceiverIdentifier(busId, eventId);
+
+            ScriptEventHandlerNodeModelInformation* handlerInformation = aznew ScriptEventHandlerNodeModelInformation();
+
+            handlerInformation->m_titlePaletteOverride = "HandlerNodeTitlePalette";
+            handlerInformation->m_busName = scriptEvent.GetName();
+            handlerInformation->m_eventName = method.GetName();
+            handlerInformation->m_displayName = method.GetName();
+            handlerInformation->m_categoryPath = scriptEvent.GetCategory();
+
+            handlerInformation->m_busId = busId;
+            handlerInformation->m_eventId = eventId;
+            handlerInformation->m_nodeIdentifier = receiverIdentifier;
+
+            m_registeredNodes.emplace(AZStd::make_pair(receiverIdentifier, handlerInformation));
+
+            ScriptEventSenderNodeModelInformation* senderInformation = aznew ScriptEventSenderNodeModelInformation();
+            
+            senderInformation->m_titlePaletteOverride = "MethodNodeTitlePalette";
+            senderInformation->m_busName = scriptEvent.GetName();
+            senderInformation->m_eventName = method.GetName();
+            senderInformation->m_displayName = method.GetName();
+            senderInformation->m_categoryPath = scriptEvent.GetCategory();
+
+            senderInformation->m_busId = busId;
+            senderInformation->m_eventId = eventId;
+            senderInformation->m_nodeIdentifier = senderIdentifier;
+
+            m_registeredNodes.emplace(AZStd::make_pair(senderIdentifier, senderInformation));
+
+            m_assetMapping.insert(AZStd::make_pair(scriptEventAsset->GetId(), senderIdentifier));
+            m_assetMapping.insert(AZStd::make_pair(scriptEventAsset->GetId(), receiverIdentifier));
+
+            identifiers.emplace_back(senderIdentifier);
+            identifiers.emplace_back(receiverIdentifier);
+        }
+
+        return identifiers;
     }
 
     void NodePaletteModel::RegisterCategoryInformation(const AZStd::string& category, const CategoryInformation& categoryInformation)
@@ -1007,6 +1101,114 @@ namespace ScriptCanvasEditor
         }
 
         return treeItem;
+    }
+
+    void NodePaletteModel::OnRowsInserted(const QModelIndex& parentIndex, int first, int last)
+    {
+        for (int i = first; i <= last; ++i)
+        {
+            QModelIndex modelIndex = m_assetModel->index(i, 0, parentIndex);
+            QModelIndex sourceIndex = m_assetModel->mapToSource(modelIndex);
+
+            AzToolsFramework::AssetBrowser::AssetBrowserEntry* entry = reinterpret_cast<AzToolsFramework::AssetBrowser::AssetBrowserEntry*>(sourceIndex.internalPointer());
+            auto nodeTypeIdentifiers = ProcessAsset(entry);
+
+            for (auto nodeTypeIdentifier : nodeTypeIdentifiers)
+            {
+                auto nodeIter = m_registeredNodes.find(nodeTypeIdentifier);
+
+                if (nodeIter != m_registeredNodes.end())
+                {
+                    NodePaletteModelNotificationBus::Event(m_paletteId, &NodePaletteModelNotifications::OnAssetNodeAdded, nodeIter->second);
+                }
+            }
+        }
+    }
+
+    void NodePaletteModel::OnRowsAboutToBeRemoved(const QModelIndex& parentIndex, int first, int last)
+    {
+        for (int i = first; i <= last; ++i)
+        {
+            QModelIndex modelIndex = m_assetModel->index(first, 0, parentIndex);
+            QModelIndex sourceIndex = m_assetModel->mapToSource(modelIndex);
+
+            const AzToolsFramework::AssetBrowser::AssetBrowserEntry* entry = reinterpret_cast<AzToolsFramework::AssetBrowser::AssetBrowserEntry*>(sourceIndex.internalPointer());
+
+            if (entry->GetEntryType() == AzToolsFramework::AssetBrowser::AssetBrowserEntry::AssetEntryType::Product)
+            {
+                const AzToolsFramework::AssetBrowser::ProductAssetBrowserEntry* productEntry = azrtti_cast<const AzToolsFramework::AssetBrowser::ProductAssetBrowserEntry*>(entry);
+
+                if (productEntry)
+                {
+                    RemoveAsset(productEntry->GetAssetId());
+                }
+            }
+        }
+    }
+
+    void NodePaletteModel::TraverseTree(QModelIndex index)
+    {
+        QModelIndex sourceIndex = m_assetModel->mapToSource(index);
+        AzToolsFramework::AssetBrowser::AssetBrowserEntry* entry = reinterpret_cast<AzToolsFramework::AssetBrowser::AssetBrowserEntry*>(sourceIndex.internalPointer());
+
+        ProcessAsset(entry);
+
+        int rowCount = m_assetModel->rowCount(index);
+
+        for (int i = 0; i < rowCount; ++i)
+        {
+            QModelIndex nextIndex = m_assetModel->index(i, 0, index);
+            TraverseTree(nextIndex);
+        }
+    }
+
+    AZStd::vector<ScriptCanvas::NodeTypeIdentifier> NodePaletteModel::ProcessAsset(AzToolsFramework::AssetBrowser::AssetBrowserEntry* entry)
+    {
+        if (entry)
+        {
+            if (entry->GetEntryType() == AzToolsFramework::AssetBrowser::AssetBrowserEntry::AssetEntryType::Product)
+            {
+                const AzToolsFramework::AssetBrowser::ProductAssetBrowserEntry* productEntry = static_cast<const AzToolsFramework::AssetBrowser::ProductAssetBrowserEntry*>(entry);
+
+                if (productEntry->GetAssetType() == azrtti_typeid<ScriptEvents::ScriptEventsAsset>())
+                {
+                    const AZ::Data::AssetId& assetId = productEntry->GetAssetId();
+                    
+                    const bool loadBlocking = true;
+                    auto busAsset = AZ::Data::AssetManager::Instance().GetAsset(assetId, azrtti_typeid<ScriptEvents::ScriptEventsAsset>(), true, &AZ::ObjectStream::AssetFilterDefault, loadBlocking);
+
+                    if (busAsset.IsReady())
+                    {
+                        ScriptEvents::ScriptEventsAsset* data = busAsset.GetAs<ScriptEvents::ScriptEventsAsset>();
+
+                        return RegisterScriptEvent(data);
+                    }
+                    else
+                    {
+                        AZ_TracePrintf("NodePaletteModel", "Could not refresh node palette properly, the asset failed to load correctly.");
+                    }
+                }
+            }
+        }
+
+        return AZStd::vector<ScriptCanvas::NodeTypeIdentifier>();
+    }
+
+    void NodePaletteModel::RemoveAsset(const AZ::Data::AssetId& assetId)
+    {
+        auto mapRange = m_assetMapping.equal_range(assetId);
+
+        for (auto rangeIter = mapRange.first; rangeIter != mapRange.second; ++rangeIter)
+        {
+            auto nodeIter = m_registeredNodes.find(rangeIter->second);
+
+            if (nodeIter != m_registeredNodes.end())
+            {
+                NodePaletteModelNotificationBus::Event(m_paletteId, &NodePaletteModelNotifications::OnAssetNodeRemoved, nodeIter->second);
+                delete nodeIter->second;
+                m_registeredNodes.erase(nodeIter);
+            }
+        }
     }
 
     void NodePaletteModel::ClearRegistry()

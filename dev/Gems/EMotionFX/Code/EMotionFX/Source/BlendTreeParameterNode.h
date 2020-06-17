@@ -44,7 +44,7 @@ namespace EMotionFX
         AnimGraphObject::ECategory GetPaletteCategory() const override;
 
         const AZStd::vector<AZ::u32>& GetParameterIndices() const;
-        uint32 GetParameterIndex(uint32 portNr) const;
+        uint32 GetParameterIndex(size_t portNr) const;
 
         /// Add a parameter to the parameter mask and also add a port for it.
         void AddParameter(const AZStd::string& parameterName);
@@ -61,9 +61,6 @@ namespace EMotionFX
         /// Remove the given parameter by name. This removes the parameter from the parameter mask and also deletes the port.
         void RemoveParameterByName(const AZStd::string& parameterName);
 
-        /// Renames the given currentName parameter to newName
-        void RenameParameterName(const AZStd::string& currentName, const AZStd::string& newName);
-
         /// Sort the parameter names based on the order of the parameters in the anim graph.
         static void SortParameterNames(AnimGraph* animGraph, AZStd::vector<AZStd::string>& outParameterNames);
 
@@ -74,7 +71,7 @@ namespace EMotionFX
         AnimGraph* GetParameterAnimGraph() const override;
         void ParameterMaskChanged(const AZStd::vector<AZStd::string>& newParameterMask) override;
         void AddRequiredParameters(AZStd::vector<AZStd::string>& parameterNames) const override;
-        void ParameterAdded(size_t newParameterIndex) override;
+        void ParameterAdded(const AZStd::string& newParameterName) override;
         void ParameterRenamed(const AZStd::string& oldParameterName, const AZStd::string& newParameterName) override;
         void ParameterOrderChanged(const ValueParameterVector& beforeChange, const ValueParameterVector& afterChange) override;
         void ParameterRemoved(const AZStd::string& oldParameterName) override;
@@ -84,6 +81,7 @@ namespace EMotionFX
 
         AZStd::vector<AZStd::string>    m_parameterNames;
         AZStd::vector<AZ::u32>          m_parameterIndices;              /**< The indices of the visible and available parameters. */
+        AZStd::stack<AZStd::string>     m_deletedParameterNames;
 
         void Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
     };

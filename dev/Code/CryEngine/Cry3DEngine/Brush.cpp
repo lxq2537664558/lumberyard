@@ -16,12 +16,10 @@
 #include "StatObj.h"
 #include "ObjMan.h"
 #include "VisAreas.h"
-#include "terrain_sector.h"
 #include "CullBuffer.h"
 #include "3dEngine.h"
 #include "IndexedMesh.h"
 #include "Brush.h"
-#include "terrain.h"
 
 const char* CBrush::GetEntityClassName() const
 {
@@ -334,8 +332,10 @@ CBrush::~CBrush()
 {
     INDENT_LOG_DURING_SCOPE(true, "Destroying brush \"%s\"", this->GetName());
 
+    I3DEngine* p3DEngine = GetISystem()->GetI3DEngine();
+
     Dephysicalize();
-    Get3DEngine()->FreeRenderNodeState(this);
+    p3DEngine->FreeRenderNodeState(this);
 
     m_pStatObj = NULL;
     if (m_pDeform)
@@ -345,7 +345,7 @@ CBrush::~CBrush()
 
     if (m_pRNTmpData)
     {
-        Get3DEngine()->FreeRNTmpData(&m_pRNTmpData);
+        p3DEngine->FreeRNTmpData(&m_pRNTmpData);
     }
     assert(!m_pRNTmpData);
 

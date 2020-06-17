@@ -62,9 +62,15 @@ namespace ScriptCanvas
         void CreateEngineComponentsOnEntity(AZ::Entity* entity) override;
         Graph* CreateGraphOnEntity(AZ::Entity* entity) override;
         ScriptCanvas::Graph* MakeGraph() override;
-        AZ::EntityId FindGraphId(AZ::Entity* graphEntity) override;
+        ScriptCanvasId FindScriptCanvasId(AZ::Entity* graphEntity) override;
         ScriptCanvas::Node* GetNode(const AZ::EntityId&, const AZ::Uuid&) override;
-        ScriptCanvas::Node* CreateNodeOnEntity(const AZ::EntityId& entityId, AZ::EntityId graphId, const AZ::Uuid& nodeType) override;
+        ScriptCanvas::Node* CreateNodeOnEntity(const AZ::EntityId& entityId, ScriptCanvasId scriptCanvasId, const AZ::Uuid& nodeType) override;
+        SystemComponentConfiguration GetSystemComponentConfiguration()
+        {
+            SystemComponentConfiguration configuration;
+            configuration.m_maxIterationsForInfiniteLoopDetection = m_infiniteLoopDetectionMaxIterations;
+            return configuration;
+        }
         ////
 
         // BehaviorEventBus::Handler
@@ -74,14 +80,14 @@ namespace ScriptCanvas
 
     private:
         void RegisterCreatableTypes();
-        // Workaround for VS2013 - Delete the copy constructor and make it private
-        // https://connect.microsoft.com/VisualStudio/feedback/details/800328/std-is-copy-constructible-is-broken
-        SystemComponent(const SystemComponent&) = delete;
         
         // excruciatingly meticulous ScriptCanvas memory tracking
         using MutexType = AZStd::recursive_mutex;
         using LockType = AZStd::lock_guard<MutexType>;
         AZStd::unordered_map<const void*, BehaviorContextObject*> m_ownedObjectsByAddress;
         MutexType m_ownedObjectsByAddressMutex;
+
+        int m_infiniteLoopDetectionMaxIterations = 3000;
+
     };
 }

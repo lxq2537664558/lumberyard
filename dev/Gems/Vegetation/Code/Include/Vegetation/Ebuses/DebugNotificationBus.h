@@ -47,20 +47,10 @@ namespace Vegetation
         virtual void DeleteInstance(InstanceId instanceId) {};
         virtual void DeleteAllInstances() {};
 
-        virtual void SetAreaDebugColor(AZ::EntityId areaId, AZ::Color debugColor, bool render) {};
-
         // input requests
 
         virtual void ExportCurrentReport() {}; // writes out the current report to disk, helper for cvars
         virtual void ToggleVisualization() {}; // toggles the 3D visualization in the 3D client, helper for cvars.
     };
     using DebugNotificationBus = AZ::EBus<DebugNotifications>;
-
-    // VEG_PROFILE_ENABLED is defined in the wscript
-    // VEG_PROFILE_ENABLED is only defined in the Vegetation gem by default
-#if defined(VEG_PROFILE_ENABLED)
-#define VEG_PROFILE_METHOD(Method) Method
-#else
-#define VEG_PROFILE_METHOD(...) // no-op
-#endif
 }

@@ -39,7 +39,7 @@ public: // member functions
     virtual ~UiCanvasInterface() {}
 
     //! Get the asset ID path name of this canvas. If not loaded or saved yet this will be ""
-    virtual const string& GetPathname() = 0;
+    virtual const AZStd::string& GetPathname() = 0;
 
     //! Get the ID of this canvas. This will remain the same while this canvas is loaded.
     virtual LyShine::CanvasId GetCanvasId() = 0;
@@ -320,8 +320,14 @@ public: // member functions
     //! Set the element to be displayed when hovering over an interactable
     virtual void SetTooltipDisplayElement(AZ::EntityId entityId) = 0;
 
-    //! Force the active interactable for the canvas to be the given one, this is intended for internal
-    //! use by UI components
+    //! Force the active interactable for the canvas to be the given one,
+    //! also force AutoActivation of interactable,
+    //! intended for internal use by UI components
+    virtual void ForceFocusInteractable(AZ::EntityId interactableId) = 0;
+
+    //! Force the active interactable for the canvas to be the given one,
+    //! also set last mouse pos to point,
+    //! intended for internal use by UI components
     virtual void ForceActiveInteractable(AZ::EntityId interactableId, bool shouldStayActive, AZ::Vector2 point) = 0;
 
     //! Get the hover interactable
@@ -336,6 +342,10 @@ public: // member functions
     //! This is intended for internal use by UI components
     virtual void ClearAllInteractables() = 0;
 
+    //! Generate Enter pressed/released input events on an interactable.
+    //! Useful for automated testing to simulate button clicks
+    virtual void ForceEnterInputEventOnInteractable(AZ::EntityId interactableId) = 0;
+
 public: // static member data
 
     //! Only one component on an entity can implement the events
@@ -345,7 +355,7 @@ public: // static member data
 typedef AZ::EBus<UiCanvasInterface> UiCanvasBus;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-//! The canvas component implements this bus and it is provided for C++ implementations of 
+//! The canvas component implements this bus and it is provided for C++ implementations of
 //! UI components to use to talk to the canvas
 class UiCanvasComponentImplementationInterface
     : public AZ::ComponentBus

@@ -67,6 +67,11 @@ namespace AzToolsFramework
         return action;
     }
 
+    AZStd::shared_ptr<SurfaceManipulator> SurfaceManipulator::MakeShared(const AZ::Transform& worldFromLocal)
+    {
+        return AZStd::shared_ptr<SurfaceManipulator>(aznew SurfaceManipulator(worldFromLocal));
+    }
+
     SurfaceManipulator::SurfaceManipulator(const AZ::Transform& worldFromLocal)
         : m_worldFromLocal(worldFromLocal)
     {
@@ -92,10 +97,7 @@ namespace AzToolsFramework
     {
         const AZ::Transform worldFromLocalUniformScale = TransformUniformScale(m_worldFromLocal);
 
-        const bool snapping =
-            GridSnapping(interaction.m_interactionId.m_viewportId);
-        const float gridSize =
-            GridSize(interaction.m_interactionId.m_viewportId);
+        const GridSnapParameters gridSnapParams = GridSnapSettings(interaction.m_interactionId.m_viewportId);
 
         AZ::Vector3 worldSurfacePosition;
         ViewportInteraction::MainEditorViewportInteractionRequestBus::EventResult(
@@ -106,13 +108,15 @@ namespace AzToolsFramework
 
         m_startInternal = CalculateManipulationDataStart(
             worldFromLocalUniformScale, worldSurfacePosition, m_position,
-            snapping, gridSize, interaction.m_interactionId.m_viewportId);
+            gridSnapParams.m_gridSnap, gridSnapParams.m_gridSize,
+            interaction.m_interactionId.m_viewportId);
 
         if (m_onLeftMouseDownCallback)
         {
             m_onLeftMouseDownCallback(CalculateManipulationDataAction(
                 m_startInternal, worldFromLocalUniformScale, worldSurfacePosition,
-                snapping, gridSize, interaction.m_keyboardModifiers,
+                gridSnapParams.m_gridSnap, gridSnapParams.m_gridSize,
+                interaction.m_keyboardModifiers,
                 interaction.m_interactionId.m_viewportId));
         }
     }
@@ -128,10 +132,12 @@ namespace AzToolsFramework
                 ViewportInteraction::QPointFromScreenPoint(
                     interaction.m_mousePick.m_screenCoordinates));
 
+            const GridSnapParameters gridSnapParams = GridSnapSettings(interaction.m_interactionId.m_viewportId);
+
             m_onLeftMouseUpCallback(CalculateManipulationDataAction(
                 m_startInternal, TransformUniformScale(m_worldFromLocal), worldSurfacePosition,
-                GridSnapping(interaction.m_interactionId.m_viewportId),
-                GridSize(interaction.m_interactionId.m_viewportId),
+                gridSnapParams.m_gridSnap,
+                gridSnapParams.m_gridSize,
                 interaction.m_keyboardModifiers, interaction.m_interactionId.m_viewportId));
         }
     }
@@ -147,10 +153,12 @@ namespace AzToolsFramework
                 ViewportInteraction::QPointFromScreenPoint(
                     interaction.m_mousePick.m_screenCoordinates));
 
+            const GridSnapParameters gridSnapParams = GridSnapSettings(interaction.m_interactionId.m_viewportId);
+
             m_onMouseMoveCallback(CalculateManipulationDataAction(
                 m_startInternal, TransformUniformScale(m_worldFromLocal), worldSurfacePosition,
-                GridSnapping(interaction.m_interactionId.m_viewportId),
-                GridSize(interaction.m_interactionId.m_viewportId),
+                gridSnapParams.m_gridSnap,
+                gridSnapParams.m_gridSize,
                 interaction.m_keyboardModifiers, interaction.m_interactionId.m_viewportId));
         }
     }

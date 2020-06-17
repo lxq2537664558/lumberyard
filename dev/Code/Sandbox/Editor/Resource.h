@@ -71,11 +71,12 @@
 #define IDC_POINTER_SO_SELECT_MINUS                2000
 #define IDC_SELECTION                              2634
 #define IDC_SELECTION_MASK                         2637
-#define IDC_PLATFORM_XBOXONE                       2757 // ACCEPTED_USE
-#define IDC_PLATFORM_PS4                           2758 // ACCEPTED_USE
-#define IDC_GROUPBOX_GLOBALTAGS                     2916
-#define IDC_GROUPBOX_FRAGMENTTAGS                   2917
-#define ID_PARTICLE_EDITOR              2922
+#define IDC_PLATFORM_XENIA                         2757
+#define IDC_PLATFORM_PROVO                         2758
+#define IDC_PLATFORM_SALEM                         2759
+#define IDC_GROUPBOX_GLOBALTAGS                    2916
+#define IDC_GROUPBOX_FRAGMENTTAGS                  2917
+#define ID_PARTICLE_EDITOR                         2922
 #define ID_RESOURCES_GENERATECGFTHUMBNAILS         32894
 #define ID_AI_GENERATETRIANGULATION                32895
 #define ID_RESOURCES_REDUCEWORKINGSET              32896
@@ -277,10 +278,6 @@
 #define ID_OPEN_EMOTIONFX_EDITOR                   39742
 #define ID_OPEN_DATABASE                           33825
 #define ID_AI_GENERATE3DVOLUMES                    33828
-#define ID_BRUSH_MAKEHOLLOW                        33829
-#define ID_BRUSH_CSGCOMBINE                        33830
-#define ID_BRUSH_CSGINTERSECT                      33831
-#define ID_BRUSH_CSGSUBSTRUCT2                     33832
 #define ID_SUBOBJECTMODE_VERTEX                    33833
 #define ID_SUBOBJECTMODE_EDGE                      33834
 #define ID_SUBOBJECTMODE_FACE                      33835
@@ -328,19 +325,11 @@
 #define ID_MODIFY_ALIGNOBJTOSURF                   33968
 #define ID_PANEL_VEG_CREATE_SEL                    33990
 #define ID_PREFABS_ADDSELECTIONTOPREFAB            33992
-#define ID_START_STOP                              33996
-#define ID_NEXT_KEY                                33997
-#define ID_PREV_KEY                                33998
 #define ID_TOOLS_UPDATEPROCEDURALVEGETATION        33999
 #define ID_DISPLAY_GOTOPOSITION                    34004
 #define ID_PHYSICS_SIMULATEOBJECTS                 34007
 #define ID_TERRAIN_TEXTURE_EXPORT                  34008
 #define ID_DISPLAY_SETVECTOR                       34010
-#define ID_OPEN_FLOWGRAPH                          34014
-#define ID_SET_KEY                                 34023
-#define ID_SELECT_ALL                              34024
-#define ID_NEXT_FRAME                              34026
-#define ID_PREV_FRAME                              34027
 #define ID_TV_SEQUENCE_NEW                         34049
 #define ID_TV_MODE_DOPESHEET                       34052
 #define ID_VIEW_LAYOUTS                            34053
@@ -404,9 +393,6 @@
 #define ID_AI_NAVIGATION_VISUALIZE_ACCESSIBILITY   34315
 #define ID_SNAP_TO_ANGLE_RANGE_BEGIN    34323
 #define ID_SNAP_TO_ANGLE_RANGE_END      34330
-#define ID_EDIT_PHYS_RESET              34342
-#define ID_EDIT_PHYS_GET                34343
-#define ID_EDIT_PHYS_SIMULATE           34344
 #define ID_MODIFY_LINK                  34355
 #define ID_MODIFY_UNLINK                34356
 #define ID_MODIFY_OBJECT_HEIGHT         34357
@@ -443,7 +429,6 @@
 #define ID_GAME_IOS_ENABLEHIGHSPEC                 34496
 #define ID_GAME_IOS_ENABLEVERYHIGHSPEC             34497
 #define ID_OPEN_AUDIO_CONTROLS_BROWSER              34580
-#define ID_GAMEP1_AUTOGEN                           34583
 #define ID_COMMERCE_PUBLISH             35072
 #define ID_COMMERCE_MERCH               35074
 #define ID_CREATE_GLOBAL_FG_MODULE_FROM_SELECTION                   35076
@@ -498,16 +483,19 @@
 #define ID_EDIT_RESET_LOCAL                          36205
 #define ID_EDIT_RESET_WORLD                          36206
 #define ID_EDIT_RESET_MANIPULATOR                    36207
-#define ID_GAME_XBONE_ENABLELOWSPEC                 34600 // ACCEPTED_USE
-#define ID_GAME_XBONE_ENABLEMEDIUMSPEC              34601 // ACCEPTED_USE
-#define ID_GAME_XBONE_ENABLEHIGHSPEC                34602 // ACCEPTED_USE
-#define ID_GAME_PS4_ENABLELOWSPEC                   34603 // ACCEPTED_USE
-#define ID_GAME_PS4_ENABLEMEDIUMSPEC                34604 // ACCEPTED_USE
-#define ID_GAME_PS4_ENABLEHIGHSPEC                  34605 // ACCEPTED_USE
+#define ID_GAME_XENIA_ENABLELOWSPEC                 34600
+#define ID_GAME_XENIA_ENABLEMEDIUMSPEC              34601
+#define ID_GAME_XENIA_ENABLEHIGHSPEC                34602
+#define ID_GAME_PROVO_ENABLELOWSPEC                   34603
+#define ID_GAME_PROVO_ENABLEMEDIUMSPEC                34604
+#define ID_GAME_PROVO_ENABLEHIGHSPEC                  34605
 #define ID_GAME_OSXMETAL_ENABLELOWSPEC              34606
 #define ID_GAME_OSXMETAL_ENABLEMEDIUMSPEC           34607
 #define ID_GAME_OSXMETAL_ENABLEHIGHSPEC             34608
 #define ID_GAME_OSXMETAL_ENABLEVERYHIGHSPEC         34609
+#define ID_GAME_SALEM_ENABLELOWSPEC                 34610
+#define ID_GAME_SALEM_ENABLEMEDIUMSPEC              34611
+#define ID_GAME_SALEM_ENABLEHIGHSPEC                34612
 #define ID_FILE_RESAVESLICES                        36210
 #define FIRST_QT_ACTION                      50000
 #define ID_VIEW_ROLLUPBAR                    50000

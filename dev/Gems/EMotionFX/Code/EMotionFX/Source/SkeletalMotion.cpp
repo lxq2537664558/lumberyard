@@ -25,6 +25,7 @@
 #include "EMotionFXManager.h"
 #include "MorphSetupInstance.h"
 #include <MCore/Source/Compare.h>
+#include <MCore/Source/LogManager.h>
 
 
 namespace EMotionFX
@@ -102,7 +103,15 @@ namespace EMotionFX
         const MotionLink* motionLink = instance->GetMotionLink(nodeIndex);
         if (motionLink->GetIsActive() == false)
         {
-            *outTransform = transformData->GetCurrentPose()->GetLocalSpaceTransform(nodeIndex);
+            if (!GetIsAdditive())
+            {
+                *outTransform = transformData->GetCurrentPose()->GetLocalSpaceTransform(nodeIndex);
+            }
+            else
+            {
+                outTransform->Identity();
+            }
+
             return;
         }
 
@@ -116,7 +125,7 @@ namespace EMotionFX
             auto* posTrack = subMotion->GetPosTrack();
             if (posTrack)
             {
-                outTransform->mPosition = AZ::Vector3(posTrack->GetValueAtTime(timeValue));
+                outTransform->mPosition = posTrack->GetValueAtTime(timeValue);
             }
             else
             {
@@ -124,7 +133,7 @@ namespace EMotionFX
             }
 
             // get rotation
-            KeyTrackLinear<MCore::Quaternion, MCore::Compressed16BitQuaternion>* rotTrack = subMotion->GetRotTrack();
+            KeyTrackLinear<AZ::Quaternion, MCore::Compressed16BitQuaternion>* rotTrack = subMotion->GetRotTrack();
             if (rotTrack)
             {
                 outTransform->mRotation = rotTrack->GetValueAtTime(timeValue);
@@ -139,7 +148,7 @@ namespace EMotionFX
             auto* scaleTrack = subMotion->GetScaleTrack();
             if (scaleTrack)
             {
-                outTransform->mScale = AZ::Vector3(scaleTrack->GetValueAtTime(timeValue));
+                outTransform->mScale = scaleTrack->GetValueAtTime(timeValue);
             }
             else
             {
@@ -333,8 +342,11 @@ namespace EMotionFX
             inOutTransform.mPosition += displacement;
         }
 
-        const AZ::Vector3 scaleOffset = bindPoseTransform.mScale - subMotion->GetBindPoseScale();
-        inOutTransform.mScale += scaleOffset;
+        EMFX_SCALECODE
+        (
+            const AZ::Vector3 scaleOffset = bindPoseTransform.mScale - subMotion->GetBindPoseScale();
+            inOutTransform.mScale += scaleOffset;
+        )
     }
 
 
@@ -349,6 +361,7 @@ namespace EMotionFX
 
         // get the time value
         const float timeValue = instance->GetCurrentTime();
+        const bool isAdditive = GetIsAdditive();
 
         // reset the cache hit counters
         instance->ResetCacheHitCounters();
@@ -372,8 +385,16 @@ namespace EMotionFX
             // if there is no submotion linked to this node
             if (link->GetIsActive() == false)
             {
-                outTransform = inPose->GetLocalSpaceTransform(nodeNumber);
-                outPose->SetLocalSpaceTransformDirect(nodeNumber, outTransform);
+                if (!isAdditive)
+                {
+                    outTransform = inPose->GetLocalSpaceTransform(nodeNumber);
+                    outPose->SetLocalSpaceTransformDirect(nodeNumber, outTransform);
+                }
+                else
+                {
+                    outTransform.Identity();
+                    outPose->SetLocalSpaceTransformDirect(nodeNumber, outTransform);
+                }
                 continue;
             }
 
@@ -384,7 +405,7 @@ namespace EMotionFX
                 auto* posTrack = subMotion->GetPosTrack();
                 if (posTrack)
                 {
-                    outTransform.mPosition = AZ::Vector3(posTrack->GetValueAtTime(timeValue));
+                    outTransform.mPosition = posTrack->GetValueAtTime(timeValue);
                 }
                 else
                 {
@@ -392,12 +413,12 @@ namespace EMotionFX
                 }
 
                 // get rotation
-                KeyTrackLinear<MCore::Quaternion, MCore::Compressed16BitQuaternion>* rotTrack = subMotion->GetRotTrack();
+                KeyTrackLinear<AZ::Quaternion, MCore::Compressed16BitQuaternion>* rotTrack = subMotion->GetRotTrack();
                 if (rotTrack)
                 {
                     uint8 wasHit;
                     uint32 cachedKeyIndex = instance->GetCachedKey(nodeNumber);
-                    outTransform.mRotation = rotTrack->GetValueAtTime(timeValue, &cachedKeyIndex, &wasHit);
+                    outTransform.mRotation = rotTrack->GetValueAtTime(timeValue, cachedKeyIndex, wasHit);
                     instance->SetCachedKey(nodeNumber, cachedKeyIndex);
                     instance->ProcessCacheHitResult(wasHit);
                 }
@@ -412,7 +433,7 @@ namespace EMotionFX
                 auto* scaleTrack = subMotion->GetScaleTrack();
                 if (scaleTrack)
                 {
-                    outTransform.mScale = AZ::Vector3(scaleTrack->GetValueAtTime(timeValue));
+                    outTransform.mScale = scaleTrack->GetValueAtTime(timeValue);
                 }
                 else
                 {
@@ -461,7 +482,7 @@ namespace EMotionFX
             }
             else
             {
-                outPose->SetMorphWeight(i, inPose->GetMorphWeight(i));
+                outPose->SetMorphWeight(i, !isAdditive ? inPose->GetMorphWeight(i) : 0.0f);
             }
         }
     }
@@ -505,11 +526,14 @@ namespace EMotionFX
             }
 
             // compare the bind pose rotation of the node with the one from the submotion
-            MCore::Quaternion nodeRotation      = bindTransform.mRotation;
-            MCore::Quaternion submotionRotation = subMotion->GetBindPoseRot();
-            if (MCore::Compare<MCore::Quaternion>::CheckIfIsClose(submotionRotation, nodeRotation, MCore::Math::epsilon) == false)
+            AZ::Quaternion nodeRotation      = bindTransform.mRotation;
+            AZ::Quaternion submotionRotation = subMotion->GetBindPoseRot();
+            if (MCore::Compare<AZ::Quaternion>::CheckIfIsClose(submotionRotation, nodeRotation, MCore::Math::epsilon) == false)
             {
-                MCore::LogWarning("Bind pose rotation of the node '%s' (%f, %f, %f, %f) does not match the skeletal submotion bind pose rotation (%f, %f, %f, %f).", node->GetName(), nodeRotation.x, nodeRotation.y, nodeRotation.z, nodeRotation.w, submotionRotation.x, submotionRotation.y, submotionRotation.z, submotionRotation.w);
+                MCore::LogWarning("Bind pose rotation of the node '%s' (%s) does not match the skeletal submotion bind pose rotation (%s).", 
+                    node->GetName(), 
+                    AZStd::to_string(nodeRotation).c_str(), 
+                    AZStd::to_string(submotionRotation).c_str());
                 bindPosesMatching = false;
             }
 
@@ -528,9 +552,9 @@ namespace EMotionFX
                 }
                 /*
                             // compare the bind pose scale rotation of the node with the one from the submotion
-                            MCore::Quaternion nodeScaleRot      = bindTransform.mScaleRotation;
-                            MCore::Quaternion submotionScaleRot = subMotion->GetBindPoseScaleRot();
-                            if (Compare<MCore::Quaternion>::CheckIfIsClose( submotionScaleRot, nodeScaleRot, Math::epsilon ) == false)
+                            AZ::Quaternion nodeScaleRot      = bindTransform.mScaleRotation;
+                            AZ::Quaternion submotionScaleRot = subMotion->GetBindPoseScaleRot();
+                            if (Compare<AZ::Quaternion>::CheckIfIsClose( submotionScaleRot, nodeScaleRot, Math::epsilon ) == false)
                             {
                                 LogWarning("Bind pose scale rotation of the node '%s' (%f, %f, %f, %f) does not match the skeletal submotion bind pose scale rotation (%f, %f, %f, %f).", node->GetName(), nodeScaleRot.x, nodeScaleRot.y, nodeScaleRot.z, nodeScaleRot.w, submotionScaleRot.x, submotionScaleRot.y, submotionScaleRot.z, submotionScaleRot.w);
                                 bindPosesMatching = false;
@@ -797,7 +821,7 @@ namespace EMotionFX
                 for (uint32 k = 0; k < numKeys; ++k)
                 {
                     auto key = posTrack->GetKey(k);
-                    key->SetValue(AZ::PackedVector3f(AZ::Vector3(key->GetValue()) * scaleFactor));
+                    key->SetValue(key->GetValue() * scaleFactor);
                 }
             }
         }

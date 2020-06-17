@@ -11,7 +11,9 @@
  */
 
 #include <PhysX_precompiled.h>
+
 #include "EditorSystemComponent.h"
+#include <AzCore/Interface/Interface.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzFramework/Physics/SystemBus.h>
 #include <PhysX/ConfigurationBus.h>
@@ -37,22 +39,21 @@ namespace PhysX
         Physics::EditorWorldBus::Handler::BusConnect();
         AZ::TickBus::Handler::BusConnect();
 
-        PhysX::Configuration configuration;
-        PhysX::ConfigurationRequestBus::BroadcastResult(configuration, &PhysX::ConfigurationRequests::GetConfiguration);
-        Physics::WorldConfiguration editorWorldConfiguration = configuration.m_worldConfiguration;
+        Physics::WorldConfiguration editorWorldConfiguration = AZ::Interface<Physics::SystemRequests>::Get()->GetDefaultWorldConfiguration();
         editorWorldConfiguration.m_fixedTimeStep = 0.0f;
 
-        Physics::SystemRequestBus::BroadcastResult(m_editorWorld, &Physics::SystemRequests::CreateWorldCustom,
-            AZ_CRC("EditorWorld", 0x8d93f191), editorWorldConfiguration);
+        m_editorWorld = AZ::Interface<Physics::System>::Get()->CreateWorldCustom(Physics::EditorPhysicsWorldId, editorWorldConfiguration);
 
         PhysX::RegisterConfigStringLineEditHandler(); // Register custom unique string line edit control
 
         AzToolsFramework::EditorEvents::Bus::Handler::BusConnect();
         CrySystemEventBus::Handler::BusConnect();
+        AzToolsFramework::EditorEntityContextNotificationBus::Handler::BusConnect();
     }
 
     void EditorSystemComponent::Deactivate()
     {
+        AzToolsFramework::EditorEntityContextNotificationBus::Handler::BusDisconnect();
         AzToolsFramework::EditorEvents::Bus::Handler::BusDisconnect();
         CrySystemEventBus::Handler::BusDisconnect();
         AZ::TickBus::Handler::BusDisconnect();
@@ -79,8 +80,6 @@ namespace PhysX
             m_editorWorld->Update(s_fixedDeltaTime);
             m_intervalCountdown = s_minEditorWorldUpdateInterval;
             m_editorWorldDirty = false;
-
-            Physics::SystemNotificationBus::Broadcast(&Physics::SystemNotifications::OnPostPhysicsUpdate, s_fixedDeltaTime, m_editorWorld.get());
         }
     }
 
@@ -88,6 +87,16 @@ namespace PhysX
     void EditorSystemComponent::NotifyRegisterViews()
     {
         RegisterForEditorEvents();
+    }
+
+    void EditorSystemComponent::OnStartPlayInEditorBegin()
+    {
+        AZ::TickBus::Handler::BusDisconnect();
+    }
+
+    void EditorSystemComponent::OnStopPlayInEditor()
+    {
+        AZ::TickBus::Handler::BusConnect();
     }
 
     void EditorSystemComponent::OnCrySystemShutdown(ISystem&)
@@ -127,11 +136,12 @@ namespace PhysX
 
     void EditorSystemComponent::UpdateDefaultMaterialLibrary()
     {
-#ifdef ENABLE_DEFAULT_MATERIAL_LIBRARY
-        PhysX::Configuration configuration;
-        PhysX::ConfigurationRequestBus::BroadcastResult(configuration, &ConfigurationRequests::GetConfiguration);
+        AZ::Data::Asset<Physics::MaterialLibraryAsset> materialLibrary = *AZ::Interface<Physics::SystemRequests>::
+            Get()->GetDefaultMaterialLibraryAssetPtr();
 
-        if (!configuration.m_materialLibrary.GetId().IsValid())
+        AZ_Error("Physics", !materialLibrary.IsError(), "Default material library '%s' not found, generating default library", materialLibrary.GetHint().c_str());
+
+        if (!materialLibrary.GetId().IsValid() || materialLibrary.IsError())
         {
             // if the default material library is not set, we generate a new one from the Cry Engine surface types
             AZ::Data::AssetId newLibraryAssetId = GenerateSurfaceTypesLibrary();
@@ -139,14 +149,13 @@ namespace PhysX
             if (newLibraryAssetId.IsValid())
             {
                 // New material library successfully created, set it to configuration
-                configuration.m_materialLibrary =
+                materialLibrary =
                     AZ::Data::AssetManager::Instance().GetAsset<Physics::MaterialLibraryAsset>(newLibraryAssetId, true, nullptr, true);
 
                 // Update the configuration (this will also update the configuration file)
-                PhysX::ConfigurationRequestBus::Broadcast(&ConfigurationRequests::SetConfiguration, configuration);
+                AZ::Interface<Physics::SystemRequests>::Get()->SetDefaultMaterialLibrary(materialLibrary);
             }
         }
-#endif
     }
 
     AZ::Data::AssetId EditorSystemComponent::GenerateSurfaceTypesLibrary()
@@ -165,32 +174,38 @@ namespace PhysX
             // Constructing the path to the library asset
             const AZStd::string& assetExtension = assetTypeExtensions[0];
 
-            const char* assetRoot = AZ::IO::FileIOBase::GetInstance()->GetAlias("@devassets@");
+            // Use the path relative to the asset root to avoid hardcoding full path in the configuration
+            AZStd::string relativePath = DefaultAssetFilename;
+            AzFramework::StringFunc::Path::ReplaceExtension(relativePath, assetExtension.c_str());
 
-            AZStd::string fullPath;
-            AzFramework::StringFunc::Path::ConstructFull(assetRoot, DefaultAssetFilename, assetExtension.c_str(), fullPath);
+            // Try to find an already existing material library
+            AZ::Data::AssetCatalogRequestBus::BroadcastResult(resultAssetId, &AZ::Data::AssetCatalogRequests::GetAssetIdByPath, relativePath.c_str(), azrtti_typeid<Physics::MaterialLibraryAsset>(), false);
 
-            bool materialLibraryCreated = false;
-            AZ::LegacyConversion::LegacyConversionRequestBus::BroadcastResult(materialLibraryCreated,
-                &AZ::LegacyConversion::LegacyConversionRequests::CreateSurfaceTypeMaterialLibrary, fullPath);
-
-            if (materialLibraryCreated)
+            if (!resultAssetId.IsValid())
             {
-                // Use the path relative to the asset root to avoid hardcoding full path in the configuration
-                AZStd::string relativePath = DefaultAssetFilename;
-                AzFramework::StringFunc::Path::ReplaceExtension(relativePath, assetExtension.c_str());
+                const char* assetRoot = AZ::IO::FileIOBase::GetInstance()->GetAlias("@devassets@");
 
-                // Find out the asset ID for the material library we've just created
-                AZ::Data::AssetCatalogRequestBus::BroadcastResult(
-                    resultAssetId, &AZ::Data::AssetCatalogRequests::GetAssetIdByPath,
-                    relativePath.c_str(),
-                    azrtti_typeid<Physics::MaterialLibraryAsset>(), true);
-            }
-            else
-            {
-                AZ_Warning("PhysX", false,
-                    "GenerateSurfaceTypesLibrary: Failed to create material library at %s. "
-                    "Please check if the file is writable", fullPath.c_str());
+                AZStd::string fullPath;
+                AzFramework::StringFunc::Path::ConstructFull(assetRoot, DefaultAssetFilename, assetExtension.c_str(), fullPath);
+
+                bool materialLibraryCreated = false;
+                AZ::LegacyConversion::LegacyConversionRequestBus::BroadcastResult(materialLibraryCreated,
+                    &AZ::LegacyConversion::LegacyConversionRequests::CreateSurfaceTypeMaterialLibrary, fullPath);
+
+                if (materialLibraryCreated)
+                {
+                    // Find out the asset ID for the material library we've just created
+                    AZ::Data::AssetCatalogRequestBus::BroadcastResult(
+                        resultAssetId, &AZ::Data::AssetCatalogRequests::GetAssetIdByPath,
+                        relativePath.c_str(),
+                        azrtti_typeid<Physics::MaterialLibraryAsset>(), true);
+                }
+                else
+                {
+                    AZ_Warning("PhysX", false,
+                        "GenerateSurfaceTypesLibrary: Failed to create material library at %s. "
+                        "Please check if the file is writable", fullPath.c_str());
+                }
             }
         }
         else

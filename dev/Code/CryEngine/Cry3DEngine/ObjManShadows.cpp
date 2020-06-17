@@ -16,7 +16,6 @@
 
 #include "StdAfx.h"
 
-#include "terrain.h"
 #include "ObjMan.h"
 #include "VisAreas.h"
 #include "3dEngine.h"
@@ -25,6 +24,9 @@
 #include "Brush.h"
 #include "LightEntity.h"
 #include "ObjectsTree.h"
+
+#include <Terrain/ITerrainNode.h>
+#include <Terrain/Bus/LegacyTerrainBus.h>
 
 bool IsAABBInsideHull(const SPlaneObject* pHullPlanes, int nPlanesNum, const AABB& aabbBox);
 
@@ -84,9 +86,6 @@ void CObjManager::MakeShadowCastersList(CVisArea* pArea, const AABB& aabbReceive
     }
     else
     {
-        PodArray<CTerrainNode*>& lstCastingNodes = m_lstTmpCastingNodes;
-        lstCastingNodes.Clear();
-
         if (Get3DEngine()->IsObjectTreeReady())
         {
             Get3DEngine()->GetObjectTree()->FillShadowCastersList(false, pLight, pFr, pShadowHull, nRenderNodeFlags, passInfo);
@@ -132,19 +131,20 @@ void CObjManager::MakeShadowCastersList(CVisArea* pArea, const AABB& aabbReceive
             }
         }
 
+        PodArray<ITerrainNode*>& lstCastingNodes = m_lstTmpCastingNodes;
+        lstCastingNodes.Clear();
         bool bNeedRenderTerrain = GetCVars()->e_GsmCastFromTerrain && (pLight->m_Flags & DLF_SUN);      // Sunlight with terrain shadows
         bNeedRenderTerrain = bNeedRenderTerrain || (pLight->m_Flags & DLF_CAST_TERRAIN_SHADOWS);        // Light with terrain shadow flag
-        bNeedRenderTerrain = bNeedRenderTerrain && GetTerrain();                                        // Terrain has to exist to cast shadows
 
-        if (bNeedRenderTerrain && passInfo.RenderTerrain() && Get3DEngine()->m_bShowTerrainSurface)
+        if (bNeedRenderTerrain && passInfo.RenderTerrain())
         {
             // find all caster sectors
-            GetTerrain()->IntersectWithShadowFrustum(&lstCastingNodes, pFr, passInfo);
+            LegacyTerrain::LegacyTerrainDataRequestBus::Broadcast(&LegacyTerrain::LegacyTerrainDataRequests::IntersectWithShadowFrustum, &lstCastingNodes, pFr, passInfo);
 
             // make list of entities
             for (int s = 0; s < lstCastingNodes.Count(); s++)
             {
-                CTerrainNode* pNode = (CTerrainNode*)lstCastingNodes[s];
+                ITerrainNode* pNode = lstCastingNodes[s];
 
                 if (pLight->m_Flags & DLF_SUN)
                 {

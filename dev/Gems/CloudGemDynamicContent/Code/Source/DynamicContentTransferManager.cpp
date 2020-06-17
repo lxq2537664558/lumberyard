@@ -23,6 +23,7 @@
 
 #include <AzCore/std/smart_ptr/shared_ptr.h>
 #include <AzCore/std/smart_ptr/make_shared.h>
+#include <AzCore/std/time.h>
 #include <AzCore/IO/SystemFile.h>
 
 #include <platform.h>
@@ -185,6 +186,10 @@ namespace CloudCanvas
                     ->Event("GetPakStatus", &DynamicContentRequestBus::Events::GetPakStatus)
                     ->Event("GetPakStatusString", &DynamicContentRequestBus::Events::GetPakStatusString)
                     ->Event("HandleWebCommunicatorUpdate", &DynamicContentRequestBus::Events::HandleWebCommunicatorUpdate)
+                    ->Event("UpdateFileStatusList", &DynamicContentRequestBus::Events::UpdateFileStatusList)
+                    ->Event("UpdateFileStatus", &DynamicContentRequestBus::Events::UpdateFileStatus)
+                    ->Event("RequestDownload", &DynamicContentRequestBus::Events::RequestDownload)
+                    ->Event("IsUpdated", &DynamicContentRequestBus::Events::IsUpdated)
                     ;
 
                 behaviorContext->Class<DynamicContentTransferManager>("DynamicContent")
@@ -200,6 +205,8 @@ namespace CloudCanvas
         void DynamicContentTransferManager::GotPresignedURLResult(const AZStd::string& requestURL, int responseCode, const AZStd::string& resultString, const AZStd::string& outputFile)
         {
             DynamicFileInfoPtr requestPtr = GetAndRemovePresignedRequest(requestURL);
+            AZStd::string fileName = requestPtr->GetKeyName();
+
             if(!requestPtr)
             {
                 AZ_Warning("CloudCanvas", false,"Could not find URL entry for %s!", requestURL.c_str());
@@ -213,18 +220,40 @@ namespace CloudCanvas
             else
             {
                 AZ_Warning("CloudCanvas", false, "Signed download failed: %d : %s", responseCode, resultString.c_str());
+
+                if (requestPtr->GetRequestType() == DynamicContentFileInfo::RequestType::STANDALONE)
+                {
+                    if (m_bucketKeyToDownloadRetryCount[fileName] < fileDownloadRetryMax)
+                    {
+                        AZ_TracePrintf("CloudCanvas", "Retry signed download for %s", fileName.c_str());
+                        UpdateFileStatus(fileName.c_str(), true);
+
+                        ++m_bucketKeyToDownloadRetryCount[fileName];
+                        return;
+                    }
+                    else
+                    {
+                        AZ_TracePrintf("CloudCanvas", "Reached the max retry times for %s", fileName.c_str());
+                    }
+                }
+
                 OnDownloadFailure(requestPtr);
             }
+
+            m_bucketKeyToDownloadRetryCount.erase(fileName);
         }
 
         void DynamicContentTransferManager::OnDownloadSuccess(DynamicFileInfoPtr requestPtr)
         {
+            requestPtr->UpdateLocalHash();
             if (!ValidateSignature(requestPtr))
             {
                 requestPtr->SetStatus(DynamicContentFileInfo::FileStatus::SIGNATURE_FAILED);
                 return;
             }
             SetPakReady(requestPtr);
+
+            DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::DownloadSucceeded, requestPtr->GetFullLocalFileName(), requestPtr->GetKeyName());
         }
 
         void DynamicContentTransferManager::SetPakReady(DynamicFileInfoPtr requestPtr)
@@ -243,7 +272,7 @@ namespace CloudCanvas
             {
                 requestPtr->SetStatus(DynamicContentFileInfo::FileStatus::DOWNLOAD_FAILED);
             }
-            EBUS_EVENT(CloudCanvas::DynamicContent::DynamicContentUpdateBus, DownloadFailed, requestPtr->GetFullLocalFileName());
+            DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::DownloadFailed, requestPtr->GetFullLocalFileName());
         }
 
         AZStd::string DynamicContentTransferManager::GetRequestString(const AZStd::string& bucketName, const AZStd::string& keyName) 
@@ -903,13 +932,13 @@ namespace CloudCanvas
 
         void DynamicContentTransferManager::NewContentReady(DynamicFileInfoPtr fileInfo)
         {
-            EBUS_EVENT(CloudCanvas::DynamicContent::DynamicContentUpdateBus, NewContentReady, fileInfo->GetFullLocalFileName());
+            DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::NewContentReady, fileInfo->GetFullLocalFileName());
         }
 
         void DynamicContentTransferManager::RequestsCompleted()
         {
             AZ::TickBus::Handler::BusDisconnect();
-            EBUS_EVENT(CloudCanvas::DynamicContent::DynamicContentUpdateBus, RequestsCompleted);
+            DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::RequestsCompleted);
         }
 
         void DynamicContentTransferManager::UpdatePakFilesToMount()
@@ -944,7 +973,7 @@ namespace CloudCanvas
                     pakFileToMount->SetStatus(DynamicContentFileInfo::FileStatus::MOUNTED);
                     paksMounted.push_back(pakFileToMount);
                     m_pakFilesToMount.pop_front();
-                    EBUS_EVENT(CloudCanvas::DynamicContent::DynamicContentUpdateBus, NewPakContentReady, pakFileToMount->GetKeyName());
+                    DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::NewPakContentReady, pakFileToMount->GetKeyName());
                 }
             }
 
@@ -988,7 +1017,7 @@ namespace CloudCanvas
                 // Top level manifests and user requested paks can be removed from the pending list - they have no dependencies
                 RemovePendingPak(requestPtr);
             }
-            EBUS_EVENT(CloudCanvas::DynamicContent::DynamicContentUpdateBus, FileStatusFailed, requestPtr->GetKeyName());
+            DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::FileStatusFailed, requestPtr->GetKeyName());
         }
 
         bool DynamicContentTransferManager::RequestFileStatus(FileTransferSupport::FileRequestMap& requestMap, bool manifestRequest)
@@ -1022,10 +1051,9 @@ namespace CloudCanvas
                     }
                     AddPresignedURLRequest(fileURL, requestPtr);
 
-                    requestPtr->SetSignature(signatureString);
+                    requestPtr->SetResultData(thisResult);
                     AZStd::string localFile = requestPtr->GetFullLocalFileName();
- 
-                    EBUS_EVENT(CloudCanvas::PresignedURLRequestBus, RequestDownloadSignedURL, fileURL, localFile, AZ::EntityId());
+                    CloudCanvas::PresignedURLRequestBus::Broadcast(&CloudCanvas::IPresignedURLRequest::RequestDownloadSignedURL, fileURL, localFile, AZ::EntityId());
                 }
             },
             [this](PostClientContentRequestJob* job)
@@ -1148,7 +1176,7 @@ namespace CloudCanvas
                 const AZStd::string fileName{ parseDoc["pak_name"].GetString() };
                 const AZStd::string fileStatus{ parseDoc["status"].GetString() };
 
-                EBUS_EVENT(CloudCanvas::DynamicContent::DynamicContentUpdateBus, FileStatusChanged, fileName, fileStatus);
+                DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::FileStatusChanged, fileName, fileStatus);
             }
         }
 
@@ -1312,6 +1340,181 @@ namespace CloudCanvas
             }
 
             return (stringLength * 3 / 4 - padding);
+        }
+
+        bool DynamicContentTransferManager::UpdateFileStatus(const char* fileName, bool autoDownload)
+        {
+            AZStd::vector<AZStd::string> requestList;
+            requestList.push_back(fileName);
+            return UpdateFileStatusList(requestList, autoDownload);
+        }
+
+        bool DynamicContentTransferManager::RequestDownload(const AZStd::string& fileName, bool forceDownload)
+        {
+            DynamicFileInfoPtr requestPtr = GetLocalEntryFromBucketKey(fileName.c_str());
+
+            if (!requestPtr)
+            {
+                AZ_Warning("CloudCanvas", false, "Could not find request info for %s!", fileName.c_str());
+                return false;
+            }
+
+            if(!requestPtr->GetRequestURL().length())
+            {
+                AZ_Warning("CloudCanvas", false, "%s doesn't have a known request URL", fileName.c_str());
+                return false;
+            }
+
+            // Check whether the presigned URL is expired and retry the download
+            if (RequestUrlExpired(fileName.c_str()))
+            {
+                if (m_bucketKeyToDownloadRetryCount[fileName] < fileDownloadRetryMax)
+                {
+                    AZ_Warning("CloudCanvas", false, "Presigned URL for %s expired. Retry signed download", fileName.c_str());
+                    ++m_bucketKeyToDownloadRetryCount[fileName];
+
+                    return UpdateFileStatus(fileName.c_str(), true);
+                }
+                else
+                {
+                    AZ_Error("CloudCanvas", false, "Presigned URL for %s expired. Reached the max retry times", fileName.c_str());
+                    m_bucketKeyToDownloadRetryCount.erase(fileName);
+
+                    return false;
+                }
+            }
+
+            AddPresignedURLRequest(requestPtr->GetRequestURL(), requestPtr);
+
+            AZStd::string localFile = requestPtr->GetFullLocalFileName();
+
+            bool isUpdated;
+            CloudCanvas::DynamicContent::DynamicContentRequestBus::BroadcastResult(isUpdated, &CloudCanvas::DynamicContent::DynamicContentRequestBus::Events::IsUpdated, fileName.c_str());
+
+            if (!isUpdated && !forceDownload)
+            {
+                DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::DownloadSucceeded, requestPtr->GetFullLocalFileName(), requestPtr->GetKeyName());
+                return true;
+            }
+
+            CloudCanvas::PresignedURLRequestBus::Broadcast(&CloudCanvas::IPresignedURLRequest::RequestDownloadSignedURL, requestPtr->GetRequestURL(), localFile, AZ::EntityId());
+            return true;
+        }
+
+        bool DynamicContentTransferManager::RequestUrlExpired(const AZStd::string& fileName)
+        {
+            DynamicFileInfoPtr requestPtr = GetLocalEntryFromBucketKey(fileName.c_str());
+            if (!requestPtr && !requestPtr->GetRequestURL().length())
+            {
+                return true;
+            }
+
+            AZStd::unordered_map<AZStd::string, AZStd::string> queryParameters;
+            CloudCanvas::PresignedURLRequestBus::BroadcastResult(queryParameters, &CloudCanvas::IPresignedURLRequest::GetQueryParameters, requestPtr->GetRequestURL());
+
+            if (queryParameters[presignedUrlLifeTimeKey].empty())
+            {
+                AZ_Warning("CloudCanvas", false, "Failed to find the life time of the request URL %s", requestPtr->GetRequestURL().c_str());
+                return true;
+            }
+
+            AZ::u64 presignedUrlLifeTime = strtoll(queryParameters[presignedUrlLifeTimeKey].c_str(), nullptr, 0);
+            presignedUrlLifeTime = presignedUrlLifeTime * 1000;
+
+            // Check whether the presigned URL is expired and retry the download
+            return AZStd::GetTimeUTCMilliSecond() >= requestPtr->GetUrlCreationTimestamp() + presignedUrlLifeTime;
+        }
+
+        bool DynamicContentTransferManager::UpdateFileStatusList(const AZStd::vector<AZStd::string>& requestList, bool autoDownload)
+        {
+            auto requestJob = PostClientContentRequestJob::Create([autoDownload, this](PostClientContentRequestJob* job)
+            {
+                auto resultList = job->result.ResultList;
+                for (auto thisResult : resultList)
+                {
+                    AZStd::string requestFile{ thisResult.FileName };
+                    AZ_TracePrintf("CloudCanvas", "Request %s returned status %s URL %s", requestFile.c_str(), thisResult.FileStatus.c_str(), thisResult.PresignedURL.c_str());
+                    AZ_TracePrintf("CloudCanvas", "Request Signature: %s Size %s Hash %s", thisResult.Signature.c_str(), thisResult.Size.c_str(), thisResult.Hash.c_str());
+
+                    DynamicFileInfoPtr requestPtr = GetLocalEntryFromBucketKey(requestFile.c_str());
+
+                    if (!requestPtr)
+                    {
+                        AZ_Warning("CloudCanvas", false, "Could not find request info for %s!", requestFile.c_str());
+                        continue;
+                    }
+
+                    if (!thisResult.PresignedURL.length())
+                    {
+                        OnFileStatusFailed(requestPtr);
+                        continue;
+                    }
+
+                    requestPtr->SetResultData(thisResult); 
+                    AZ_TracePrintf("CloudCanvas", "IsUpdated %d", requestPtr->IsUpdated());
+
+                    if (autoDownload)
+                    {
+                        RequestDownload(requestFile.c_str(), false);
+                    }
+                    else
+                    {
+                        DynamicContentUpdateBus::Broadcast(&DynamicContentUpdate::DownloadReady, requestFile, requestPtr->GetFileSize());
+                    }
+                }
+            },
+                [this](PostClientContentRequestJob* job)
+            {
+                AZStd::string requestString;
+                if (job->parameters.request_content.FileList.size())
+                {
+                    requestString = job->parameters.request_content.FileList.front();
+                }
+                auto requestList = job->parameters.request_content.FileList;
+                AZ_Warning("CloudCanvas", false, "Failed to retrieve status request list");
+                for (auto thisRequest : requestList)
+                {
+                    DynamicFileInfoPtr pakEntry = GetLocalEntryFromBucketKey(thisRequest.c_str());
+                    if (pakEntry)
+                    {
+                        OnFileStatusFailed(pakEntry);
+                    }
+                }
+            }
+            );
+
+            for (const auto& thisFile : requestList)
+            {
+                auto thisEntry = GetLocalEntryFromBucketKey(thisFile.c_str());
+                if (!thisEntry)
+                {
+                    AZStd::string writeFile{ AZStd::string::format("%s%s", basePakFolder, thisFile.c_str()) };
+
+                    thisEntry = AZStd::make_shared<DynamicContentFileInfo>(thisFile, writeFile);
+                    thisEntry->SetRequestType(DynamicContentFileInfo::RequestType::STANDALONE);
+                    SetFileInfo(thisEntry);
+                }
+
+                thisEntry->SetStatus(DynamicContentFileInfo::FileStatus::WAITING_FOR_USER);
+
+                requestJob->parameters.request_content.FileList.push_back(thisFile);
+            }
+            // Request manifest data including hash and size
+            requestJob->parameters.request_content.ManifestData = true;
+            requestJob->Start();
+            return true;
+        }
+
+        bool DynamicContentTransferManager::IsUpdated(const char* fileName)
+        {
+            auto thisEntry = GetLocalEntryFromBucketKey(fileName);
+
+            if (!thisEntry)
+            {
+                return false;
+            }
+
+            return thisEntry->IsUpdated();
         }
     }
 }

@@ -15,7 +15,6 @@
 #include <AzTest/AzTest.h>
 #include <Processing/PixelFormatInfo.h>
 #include <ImageLoader/ImageLoaders.h>
-#include <Processing/ImageObject.h>
 #include <Editor/EditorCommon.h>
 
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
@@ -38,6 +37,8 @@
 #include <Converters/Cubemap.h>
 #include <Processing/ImageConvert.h>
 #include <Processing/ImageToProcess.h>
+#include <Processing/ImageFlags.h>
+#include <ImageBuilderComponent.h>
 
 #include <QFileInfo>
 #include <qdir.h>
@@ -91,6 +92,10 @@ protected:
         // Adding this handler to allow utility functions access the serialize context
         AZ::ComponentApplicationBus::Handler::BusConnect();
 
+        // Prepare Qt paths to correctly load image format plugins
+        // (Has to be done before the coreApplication is reset)
+        AzQtComponents::PrepareQtPaths();
+
         //load qt plugins for some image file formats support
         int argc = 0;
         char** argv = nullptr;
@@ -127,6 +132,7 @@ protected:
     bool DeleteEntity(const AZ::EntityId&) override { return false; }
     AZ::Entity* FindEntity(const AZ::EntityId&) override { return nullptr; }
     AZ::BehaviorContext* GetBehaviorContext() override { return nullptr; }
+    AZ::JsonRegistrationContext* GetJsonRegistrationContext() override { return nullptr; }
     const char* GetExecutableFolder() const override { return nullptr; }
     const char* GetBinFolder() const override { return nullptr; }
     const char* GetAppRoot() override { return nullptr; }
@@ -152,7 +158,8 @@ protected:
         Image_128x128_Transparent_Tga,
         Image_237x177_RGB_Jpg,
         Image_GreyScale_Png,
-        Image_BlackWhite_Png
+        Image_BlackWhite_Png,
+        Image_TerrainHeightmap_Bt
     };
 
     //image file names for testing
@@ -175,6 +182,7 @@ protected:
         m_imagFileNameMap[Image_237x177_RGB_Jpg] = fileFolder + AZStd::string("237x177_RGB.jpg");
         m_imagFileNameMap[Image_GreyScale_Png] = fileFolder + AZStd::string("greyscale.png");
         m_imagFileNameMap[Image_BlackWhite_Png] = fileFolder + AZStd::string("BlackWhite.png");
+        m_imagFileNameMap[Image_TerrainHeightmap_Bt] = fileFolder + AZStd::string("TerrainHeightmap.bt");
     }
 
 public:
@@ -448,6 +456,7 @@ TEST_F(ImageProcessingTest, TestImageLoaders)
     ASSERT_TRUE(IsExtensionSupported("TGA") == true);
     ASSERT_TRUE(IsExtensionSupported("tif") == true);
     ASSERT_TRUE(IsExtensionSupported("tiff") == true);
+    ASSERT_TRUE(IsExtensionSupported("bt") == true);
 
     IImageObjectPtr img;
     img = IImageObjectPtr(LoadImageFromFile(m_imagFileNameMap[Image_1024X1024_RGB8_Tif]));
@@ -492,6 +501,13 @@ TEST_F(ImageProcessingTest, TestImageLoaders)
     img = IImageObjectPtr(LoadImageFromFile(m_imagFileNameMap[Image_32X32_32bit_F_Tif]));
     ASSERT_TRUE(img->GetPixelFormat() == ePixelFormat_R32G32B32A32F);
 
+    //BT
+    img = IImageObjectPtr(LoadImageFromFile(m_imagFileNameMap[Image_TerrainHeightmap_Bt]));
+    ASSERT_TRUE(img != nullptr);
+    EXPECT_EQ(img->GetWidth(0), 128);
+    EXPECT_EQ(img->GetHeight(0), 128);
+    EXPECT_EQ(img->GetMipCount(), 1);
+    EXPECT_EQ(img->GetPixelFormat(), ePixelFormat_R32F);
 }
 
 TEST_F(ImageProcessingTest, PresetSettingCopyAssignmentOperatorOverload_WithDynamicallyAllocatedSettings_ReturnsTwoSeparateAllocations)
@@ -1143,7 +1159,7 @@ protected:
     }
 };
 
-TEST_F(ImageProcessingSerializationTest, LoadBuilderSettingsFromRC_SerializingLegacyDataIn_InvalidFiles)
+TEST_F(ImageProcessingSerializationTest, DISABLED_LoadBuilderSettingsFromRC_SerializingLegacyDataIn_InvalidFiles)
 {
     AZStd::string filepath = m_engineRoot + "/Gems/ImageProcessing/Code/Tests/TestAssets/rc.ini_Missing";
     ASSERT_FALSE(BuilderSettingManager::Instance()->LoadBuilderSettingsFromRC(filepath).IsSuccess());
@@ -1301,7 +1317,7 @@ TEST_F(ImageProcessingSerializationTest, TextureSettingReflect_SerializingModern
     AZ::IO::FileIOBase::GetInstance()->Remove(filepath.c_str());
 }
 
-TEST_F(ImageProcessingSerializationTest, BuilderSettingsReflect_SerializingDataInAndOut_WritesAndParsesFileAccurately)
+TEST_F(ImageProcessingSerializationTest, DISABLED_BuilderSettingsReflect_SerializingDataInAndOut_WritesAndParsesFileAccurately)
 {    
     AZStd::string buildSettingsFilepath = m_engineRoot + "/Gems/ImageProcessing/Code/Tests/TestAssets/tempPresets.settings";
     AZStd::string rcFilePath = m_engineRoot + "/Code/Tools/RC/Config/rc/rc.ini";
@@ -1330,6 +1346,194 @@ TEST_F(ImageProcessingSerializationTest, BuilderSettingsReflect_SerializingDataI
 
     //make sure the preset loaded from RC.ini is same as the preset loaded from builder setting
     ASSERT_EQ(oldPresetSetting, newPresetSetting);
+}
+
+class ProductDependencyTest
+    : public AllocatorsTestFixture
+{
+public:
+    void SetUp() override
+    {
+        AllocatorsTestFixture::SetUp();
+        m_data = AZStd::make_unique<StaticData>();
+        m_data->m_request.m_sourceFileUUID = AZ::Uuid::CreateRandom();
+        m_data->m_rgbBaseFilePath = AZStd::string("Foo/test.dds");
+        m_data->m_alphaBaseFilePath = AZStd::string("Foo/test.dds.a");
+        m_data->m_diffBaseFilePath = "Foo/test_diff.dds";
+
+        for (int idx = 1; idx < NumOfMips; idx++)
+        {
+            m_data->m_rgbMipsFilePath.push_back(AZStd::string::format("Foo/test.dds.%d", idx));
+            m_data->m_alphaMipsFilePath.push_back(AZStd::string::format("Foo/test.dds.%da", idx));
+        }
+    }
+
+    void TearDown() override
+    {
+        m_data.reset();
+        AllocatorsTestFixture::TearDown();
+    }
+
+
+    bool ValidateResult(const AZStd::vector<AZStd::string>& productFilePaths, const AZStd::unordered_map<AZStd::string, size_t>& productDependencyMap)
+    {
+        AZStd::vector<AssetBuilderSDK::JobProduct> jobProducts;
+        m_data->m_imageBuilderWorker.PopulateProducts(m_data->m_request, productFilePaths, jobProducts);
+
+        EXPECT_EQ(productFilePaths.size(), jobProducts.size());
+
+        for (const AssetBuilderSDK::JobProduct& jobProduct : jobProducts)
+        {
+            auto found = productDependencyMap.find(jobProduct.m_productFileName);
+            if (found != productDependencyMap.end())
+            {
+                EXPECT_EQ(jobProduct.m_dependencies.size(), found->second);
+
+                if (jobProduct.m_dependencies.size() != found->second)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+protected:
+
+    struct StaticData
+    {
+        AssetBuilderSDK::ProcessJobRequest m_request;
+        AZStd::string m_rgbBaseFilePath;
+        AZStd::vector<AZStd::string> m_rgbMipsFilePath;
+        AZStd::string m_alphaBaseFilePath;
+        AZStd::vector<AZStd::string> m_alphaMipsFilePath;
+        AZStd::string m_diffBaseFilePath;
+        ImageProcessing::ImageBuilderWorker m_imageBuilderWorker;
+    };
+
+    AZStd::unique_ptr<StaticData> m_data;
+    static const int NumOfMips = 5;
+};
+
+TEST_F(ProductDependencyTest, ProductDependencyBaseRGBFile_Emit_None)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_rgbBaseFilePath);
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = 0;
+    productDependencyMap[m_data->m_alphaBaseFilePath] = 0;
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependencyBaseRGBFileAndMips_Emit_All)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_rgbBaseFilePath);
+    productFilePaths.insert(productFilePaths.end(), m_data->m_rgbMipsFilePath.begin(), m_data->m_rgbMipsFilePath.end());
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = m_data->m_rgbMipsFilePath.size();
+    productDependencyMap[m_data->m_alphaBaseFilePath] = 0;
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependencyBaseRGBFileAndBaseAlpha_Emit_ALL)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_rgbBaseFilePath);
+    productFilePaths.push_back(m_data->m_alphaBaseFilePath);
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = 1; // one for the alphaBaseFile
+    productDependencyMap[m_data->m_alphaBaseFilePath] = 0;
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependencyBaseRGBFile_Emit_ALL)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_rgbBaseFilePath);
+    productFilePaths.push_back(m_data->m_alphaBaseFilePath);
+    productFilePaths.insert(productFilePaths.end(), m_data->m_rgbMipsFilePath.begin(), m_data->m_rgbMipsFilePath.end());
+    productFilePaths.insert(productFilePaths.end(), m_data->m_alphaMipsFilePath.begin(), m_data->m_alphaMipsFilePath.end());
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = m_data->m_rgbMipsFilePath.size() + 1; // adding one for the alphaBaseFile
+    productDependencyMap[m_data->m_alphaBaseFilePath] = m_data->m_alphaMipsFilePath.size();
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependency_Rgb_Diff_EmitALL)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_rgbBaseFilePath);
+    productFilePaths.push_back(m_data->m_diffBaseFilePath);
+    productFilePaths.insert(productFilePaths.end(), m_data->m_rgbMipsFilePath.begin(), m_data->m_rgbMipsFilePath.end());
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = m_data->m_rgbMipsFilePath.size() + 1; // adding one for the diffBaseFile
+    productDependencyMap[m_data->m_alphaBaseFilePath] = 0;
+    productDependencyMap[m_data->m_diffBaseFilePath] = 0;
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependency_Diff_Alpha_EmitALL)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_diffBaseFilePath);
+    productFilePaths.push_back(m_data->m_alphaBaseFilePath);
+    productFilePaths.insert(productFilePaths.end(), m_data->m_rgbMipsFilePath.begin(), m_data->m_rgbMipsFilePath.end());
+    productFilePaths.insert(productFilePaths.end(), m_data->m_alphaMipsFilePath.begin(), m_data->m_alphaMipsFilePath.end());
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = 0;
+    productDependencyMap[m_data->m_alphaBaseFilePath] = m_data->m_alphaMipsFilePath.size();
+    productDependencyMap[m_data->m_diffBaseFilePath] = m_data->m_rgbMipsFilePath.size() + 1; // adding one for the alphaBaseFile
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependency_Rgb_Diff_Alpha_EmitALL)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.push_back(m_data->m_rgbBaseFilePath);
+    productFilePaths.push_back(m_data->m_diffBaseFilePath);
+    productFilePaths.push_back(m_data->m_alphaBaseFilePath);
+    productFilePaths.insert(productFilePaths.end(), m_data->m_rgbMipsFilePath.begin(), m_data->m_rgbMipsFilePath.end());
+    productFilePaths.insert(productFilePaths.end(), m_data->m_alphaMipsFilePath.begin(), m_data->m_alphaMipsFilePath.end());
+
+    AZStd::unordered_map<AZStd::string, size_t> productDependencyMap;
+
+    productDependencyMap[m_data->m_rgbBaseFilePath] = m_data->m_rgbMipsFilePath.size() + 2; // adding one for the alphaBaseFile and one for diffBaseFile
+    productDependencyMap[m_data->m_alphaBaseFilePath] = m_data->m_alphaMipsFilePath.size();
+    productDependencyMap[m_data->m_diffBaseFilePath] = 0;
+    EXPECT_TRUE(ValidateResult(productFilePaths, productDependencyMap));
+}
+
+TEST_F(ProductDependencyTest, ProductDependencyBaseRGBMissing_Error_OK)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.insert(productFilePaths.end(), m_data->m_rgbMipsFilePath.begin(), m_data->m_rgbMipsFilePath.end());
+    AZStd::vector<AssetBuilderSDK::JobProduct> jobProducts;
+    AZ::Outcome<void, AZStd::string> result = m_data->m_imageBuilderWorker.PopulateProducts(m_data->m_request, productFilePaths, jobProducts);
+
+    EXPECT_FALSE(result.IsSuccess());
+}
+
+TEST_F(ProductDependencyTest, ProductDependencyBaseAlphaMissing_Error_OK)
+{
+    AZStd::vector<AZStd::string> productFilePaths;
+    productFilePaths.insert(productFilePaths.end(), m_data->m_alphaMipsFilePath.begin(), m_data->m_alphaMipsFilePath.end());
+    AZStd::vector<AssetBuilderSDK::JobProduct> jobProducts;
+    AZ::Outcome<void, AZStd::string> result = m_data->m_imageBuilderWorker.PopulateProducts(m_data->m_request, productFilePaths, jobProducts);
+
+    EXPECT_FALSE(result.IsSuccess());
 }
 
 }

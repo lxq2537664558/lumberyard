@@ -84,7 +84,9 @@ public:
 
 const AZ::u64 testSaveDataSize = 9;
 const char* testSaveDataName = "TestSaveData";
-const AzFramework::LocalUserId testSaveDataUser = 9;
+
+const AzFramework::LocalUserId testSaveDataUser = AZ_TRAIT_SAVEDATA_TEST_USER_ID;
+
 char testSaveData[testSaveDataSize] = {'a', 'b', 'c', '1', '2', '3', 'x', 'y', 'z'};
 
 AZStd::string GetTestSaveDataCustomDirectoryNameRelative()
@@ -270,6 +272,8 @@ TEST_F(SaveDataTest, SaveDataBufferUsingDataBufferDeleterAzFree)
 class TestObject
 {
 public:
+    virtual ~TestObject() = default;
+
     static constexpr const char* DataBufferName = "TestSaveObject";
 
     AZ_TYPE_INFO(TestObject, "{9CE29971-8FE2-41FF-AD5B-CB15F1B92834}");

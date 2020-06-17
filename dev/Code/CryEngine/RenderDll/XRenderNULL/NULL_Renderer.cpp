@@ -139,7 +139,7 @@ bool CNULLRenderer::ChangeDisplay(unsigned int width, unsigned int height, unsig
 }
 
 //////////////////////////////////////////////////////////////////////
-void CNULLRenderer::ChangeViewport(unsigned int x, unsigned int y, unsigned int width, unsigned int height, bool bMainViewport)
+void CNULLRenderer::ChangeViewport(unsigned int x, unsigned int y, unsigned int width, unsigned int height, bool bMainViewport, float scaleWidth, float scaleHeight)
 {
 }
 
@@ -686,6 +686,10 @@ bool CNULLRenderer::FX_RestoreRenderTarget(int nTarget)
 bool CNULLRenderer::FX_PopRenderTarget(int nTarget)
 {
     return true;
+}
+
+void CNULLRenderer::FX_SetActiveRenderTargets(bool bAllowDIP)
+{
 }
 
 IDynTexture* CNULLRenderer::CreateDynTexture2(uint32 nWidth, uint32 nHeight, uint32 nTexFlags, const char* szSource, ETexPool eTexPool)

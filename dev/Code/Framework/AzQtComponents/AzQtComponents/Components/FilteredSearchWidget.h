@@ -15,9 +15,10 @@
 #include <AzQtComponents/AzQtComponentsAPI.h>
 
 #include <QScopedPointer>
-AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option") // 4251: 'QBrush::d': class 'QScopedPointer<QBrushData,QBrushDataPointerDeleter>' needs to have dll-interface to be used by clients of class 'QBrush'
+AZ_PUSH_DISABLE_WARNING(4251 4244 4800, "-Wunknown-warning-option") // 4251: 'QBrush::d': class 'QScopedPointer<QBrushData,QBrushDataPointerDeleter>' needs to have dll-interface to be used by clients of class 'QBrush'
                                                                // 4800: 'uint': forcing value to bool 'true' or 'false' (performance warning)
 #include <QFrame>
+#include <QStyledItemDelegate>
 AZ_POP_DISABLE_WARNING
 #include <QMap>
 #include <QVariant>
@@ -48,6 +49,7 @@ class QBoxLayout;
 namespace AzQtComponents
 {
     class Style;
+    class FilteredSearchItemDelegate;
 
     class AZ_QT_COMPONENTS_API FilterCriteriaButton
         : public QFrame
@@ -55,7 +57,14 @@ namespace AzQtComponents
         Q_OBJECT
 
     public:
-        explicit FilterCriteriaButton(QString labelText, QWidget* parent = nullptr);
+        enum class ExtraButtonType
+        {
+            None,
+            Locked,
+            Unlocked,
+            Visible,
+        };
+        explicit FilterCriteriaButton(const QString& labelText, QWidget* parent = nullptr, FilterCriteriaButton::ExtraButtonType type = FilterCriteriaButton::ExtraButtonType::None);
 
     protected:
         QHBoxLayout* m_frameLayout;
@@ -63,6 +72,7 @@ namespace AzQtComponents
 
     signals:
         void RequestClose();
+        void ExtraButtonClicked(FilterCriteriaButton::ExtraButtonType type);
     };
 
     struct AZ_QT_COMPONENTS_API SearchTypeFilter
@@ -72,13 +82,15 @@ namespace AzQtComponents
         QVariant metadata;
         int globalFilterValue;
         bool enabled = false;
+        FilterCriteriaButton::ExtraButtonType typeExtraButton = FilterCriteriaButton::ExtraButtonType::None;
 
         SearchTypeFilter() {}
-        SearchTypeFilter(QString category, QString displayName, QVariant metadata = {}, int globalFilterValue = -1)
+        SearchTypeFilter(const QString& category, const QString& displayName, FilterCriteriaButton::ExtraButtonType type = FilterCriteriaButton::ExtraButtonType::None, const QVariant& metadata = {}, int globalFilterValue = -1)
             : category(category)
             , displayName(displayName)
             , metadata(metadata)
             , globalFilterValue(globalFilterValue)
+            , typeExtraButton(type)
         {
         }
     };
@@ -116,7 +128,7 @@ namespace AzQtComponents
         //
         // qproperty-lineEditSearchVisible: 0;
         //
-        Q_PROPERTY(bool lineEditSearchVisible READ lineEditSearchVisible WRITE setLineEditSearchVisible);
+        Q_PROPERTY(bool lineEditSearchVisible READ lineEditSearchVisible WRITE setLineEditSearchVisible)
 
         // The margin to apply around the line edit search field's layout.
         // Defaults to 4.
@@ -125,7 +137,7 @@ namespace AzQtComponents
         //
         // qproperty-searchLayoutMargin: 0;
         //
-        Q_PROPERTY(int searchLayoutMargin READ searchLayoutMargin WRITE setSearchLayoutMargin);
+        Q_PROPERTY(int searchLayoutMargin READ searchLayoutMargin WRITE setSearchLayoutMargin)
 
     public:
         SearchTypeSelector(QPushButton* parent = nullptr);
@@ -144,6 +156,7 @@ namespace AzQtComponents
         int searchLayoutMargin() const;
         void setSearchLayoutMargin(int newMargin);
 
+        const QString& GetFilterString() const { return m_filterString; }
     signals:
         void TypeToggled(int id, bool enabled);
 
@@ -157,6 +170,9 @@ namespace AzQtComponents
         // can be used to override the logic when adding items in RepopulateDataModel
         virtual bool filterItemOut(int index, bool itemMatchesFilter, bool categoryMatchesFilter);
         virtual void initItem(QStandardItem* item, const SearchTypeFilter& filter, int unfilteredDataIndex);
+
+        // Returns the number of items that always appear in the list, regardless of the filtering.
+        virtual int GetNumFixedItems() { return 0; }
 
         void showEvent(QShowEvent* e) override;
 
@@ -211,9 +227,9 @@ namespace AzQtComponents
         void AddTypeFilter(const SearchTypeFilter& typeFilter);
         void SetupOwnSelector(SearchTypeSelector* selector);
 
-        inline void AddTypeFilter(QString category, QString displayName, QVariant metadata = {}, int globalFilterValue = -1)
+        inline void AddTypeFilter(const QString& category, const QString& displayName,  const QVariant& metadata = {}, int globalFilterValue = -1, FilterCriteriaButton::ExtraButtonType type = FilterCriteriaButton::ExtraButtonType::None)
         {
-            AddTypeFilter(SearchTypeFilter(category, displayName, metadata, globalFilterValue));
+            AddTypeFilter(SearchTypeFilter(category, displayName, type, metadata, globalFilterValue));
         }
 
         void SetTextFilterVisible(bool visible);
@@ -238,6 +254,9 @@ namespace AzQtComponents
         void clearLabelText();
         void setLabelText(const QString& newLabelText);
         QString labelText() const;
+
+        static QString GetBackgroundColor();
+        static QString GetSeparatorColor();
 
     signals:
         void TextFilterChanged(const QString& activeTextFilter);
@@ -267,6 +286,7 @@ namespace AzQtComponents
 
         QPushButton* assetTypeSelectorButton() const;
 
+        virtual void SetupPaintDelegates();
     private slots:
         void UpdateTextFilterWidth();
         void OnClearFilterContextMenu(const QPoint& pos);
@@ -299,5 +319,23 @@ namespace AzQtComponents
 
         static bool polish(Style* style, QWidget* widget, const Config& config);
         static bool unpolish(Style* style, QWidget* widget, const Config& config);
+
+        FilteredSearchItemDelegate* m_delegate = nullptr;
+    };
+
+    class FilteredSearchItemDelegate : public QStyledItemDelegate
+    {
+    public:
+        explicit FilteredSearchItemDelegate(QWidget* parent = nullptr);
+
+        void PaintRichText(QPainter* painter, QStyleOptionViewItem& opt, QString& text) const;
+        void SetSelector(SearchTypeSelector* selector) { m_selector = selector; }
+
+        // QStyledItemDelegate overrides.
+        void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
+        QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
+
+    private:
+        SearchTypeSelector* m_selector = nullptr;
     };
 }

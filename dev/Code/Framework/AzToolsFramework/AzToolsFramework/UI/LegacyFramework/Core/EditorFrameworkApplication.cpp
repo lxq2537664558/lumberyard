@@ -27,7 +27,6 @@
 #include <AzCore/Component/ComponentApplication.h>
 #include <AzCore/Memory/MemoryComponent.h>
 #include <AzCore/Jobs/JobManagerComponent.h>
-#include <AzCore/Serialization/ObjectStreamComponent.h>
 #include <AzCore/Asset/AssetManagerComponent.h>
 #include <AzCore/Script/ScriptSystemComponent.h>
 #include <AzCore/IO/StreamerComponent.h>
@@ -199,11 +198,18 @@ namespace LegacyFramework
         ::_splitpath_s(m_applicationModule, szDrv, _MAX_DRIVE, szDir, _MAX_DIR, NULL, 0, NULL, 0);
 
         ::_makepath_s(configFilePath, _MAX_PATH, szDrv, szDir, desc.m_applicationName, ".xml");
-#else
+#elif defined (AZ_PLATFORM_APPLE_OSX)
         uint32_t bufSize = AZ_ARRAY_SIZE(m_applicationModule);
         _NSGetExecutablePath(m_applicationModule, &bufSize);
         QString path = QStringLiteral("%1/%2.xml").arg(m_exeDirectory, desc.m_applicationName);
         qstrcpy(configFilePath, path.toUtf8().data());
+#elif defined (AZ_PLATFORM_LINUX)
+        uint32_t bufSize = AZ_ARRAY_SIZE(m_applicationModule);
+        size_t pathLen = readlink("/proc/self/exe", m_applicationModule, bufSize);
+        QString path = QStringLiteral("%1/%2.xml").arg(m_exeDirectory, desc.m_applicationName);
+        qstrcpy(configFilePath, path.toUtf8().data());
+#else
+#error ("Unsupported Platform")
 #endif
 
         // Enable next line to load from the last state
@@ -552,7 +558,6 @@ namespace LegacyFramework
         EnsureComponentCreated(AZ::MemoryComponent::RTTI_Type());
         EnsureComponentCreated(AZ::JobManagerComponent::RTTI_Type());
         EnsureComponentCreated(AZ::StreamerComponent::RTTI_Type());
-        EnsureComponentCreated(AZ::ObjectStreamComponent::RTTI_Type());
 
         AZ_Assert(!m_desc.m_enableProjectManager || m_desc.m_enableGUI, "Enabling the project manager in the application settings requires enabling the GUI as well.");
 

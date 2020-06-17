@@ -56,6 +56,12 @@
             "_comment": "SceneProcessing"
         },
         {
+            "Path": "Gems/LegacyTerrain",
+            "Uuid": "c87f9fc3e7054f3482311da444e84456",
+            "Version": "0.1.0",
+            "_comment": "LegacyTerrain"
+        },
+        {
             "Path" : "${ProjectName}/Gem",
             "Uuid" : "${GemId}",
             "Version" : "${GemVersion}",

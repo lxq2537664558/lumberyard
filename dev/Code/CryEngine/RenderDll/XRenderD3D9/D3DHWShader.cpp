@@ -25,6 +25,7 @@
 #include "../Common/TypedConstantBuffer.h"
 #include "GraphicsPipeline/FurBendData.h"
 #include "GraphicsPipeline/FurPasses.h"
+#include <AzFramework/Terrain/TerrainDataRequestBus.h>
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #undef AZ_RESTRICTED_SECTION
@@ -2337,11 +2338,16 @@ void CD3D9Renderer::UpdatePerFrameParameters()
     p3DEngine->GetGlobalParameter(E3DPARAM_CLOUDSHADING_SKYCOLOR, PF.m_CloudShadingColorSky);
 
     {
-        const int heightMapSize = p3DEngine->GetTerrainSize();
+        //Prevent division by Zero if there's no terrain system.
+        AZ::Aabb terrainAabb = AZ::Aabb::CreateFromMinMax(AZ::Vector3::CreateZero(), AZ::Vector3::CreateOne());
+        AzFramework::Terrain::TerrainDataRequestBus::BroadcastResult(terrainAabb, &AzFramework::Terrain::TerrainDataRequests::GetTerrainAabb);
+        const float heightMapSizeX = terrainAabb.GetWidth();
+        const float heightMapSizeY = terrainAabb.GetHeight();
+
         Vec3 cloudShadowOffset = m_cloudShadowSpeed * gEnv->pTimer->GetCurrTime();
         cloudShadowOffset.x -= (int)cloudShadowOffset.x;
         cloudShadowOffset.y -= (int)cloudShadowOffset.y;
-        PF.m_CloudShadowAnimParams = Vec4(m_cloudShadowTiling / heightMapSize, -m_cloudShadowTiling / heightMapSize, cloudShadowOffset.x, -cloudShadowOffset.y);
+        PF.m_CloudShadowAnimParams = Vec4(m_cloudShadowTiling / heightMapSizeX, -m_cloudShadowTiling / heightMapSizeY, cloudShadowOffset.x, -cloudShadowOffset.y);
         PF.m_CloudShadowParams = Vec4(0, 0, m_cloudShadowInvert ? 1.0f : 0.0f, m_cloudShadowBrightness);
     }
 
@@ -2809,9 +2815,7 @@ bool CHWShader_D3D::mfSetTextures(const std::vector<SCGTexture>& Textures, EHWSh
                 break;
             }
 
-            //  Confetti BEGIN: Igor Lobanchikov
             CTexture* tex = nCustomID ? CTexture::GetByID(nCustomID) : CTexture::s_ptexRT_ShadowStub;
-            //  Confetti End: Igor Lobanchikov
             tex->ApplyTexture(nTUnit, eSHClass, nResViewKey);
         }
         break;
@@ -4662,7 +4666,7 @@ ED3DShError CHWShader_D3D::mfFallBack(SHWSInstance*& pInst, int nStatus)
     //  - ShadowGen pass
     //  - Z-prepass
     //  - Shadow-pass
-    if (CParserBin::m_nPlatform & (SF_D3D11 | SF_ORBIS | SF_DURANGO | SF_GL4 | SF_GLES3 | SF_METAL)) // ACCEPTED_USE
+    if (CParserBin::m_nPlatform & (SF_D3D11 | SF_ORBIS | SF_DURANGO | SF_GL4 | SF_GLES3 | SF_METAL))
     {
         //assert(gRenDev->m_cEF.m_nCombinationsProcess >= 0);
         return ED3DShError_CompilingError;
@@ -5310,6 +5314,8 @@ bool CHWShader_D3D::mfSetHS(int nFlags)
         #include "Xenia/D3DHWShader_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DHWShader_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DHWShader_cpp_salem.inl"
     #endif
 #endif
 
@@ -5371,6 +5377,8 @@ bool CHWShader_D3D::mfSetDS(int nFlags)
         #include "Xenia/D3DHWShader_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DHWShader_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DHWShader_cpp_salem.inl"
     #endif
 #endif
 

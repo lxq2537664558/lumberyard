@@ -17,6 +17,7 @@
 #include <MCore/Source/Color.h>
 #include <MCore/Source/StringIdPool.h>
 #include "../StandardPluginsConfig.h"
+#include <QItemSelectionModel>
 #include <QPainter>
 #include <QModelIndex>
 #include <QPixmap>
@@ -148,6 +149,7 @@ namespace EMStudio
         void RemoveAllOutputPorts();
         void RemoveAllConnections();
 
+        bool RemoveConnection(const QModelIndex& modelIndex, bool removeFromMemory = true);
         bool RemoveConnection(const void* connection, bool removeFromMemory = true);
 
         virtual int32 CalcRequiredHeight() const;
@@ -157,7 +159,6 @@ namespace EMStudio
         virtual uint32 CalcMaxOutputPortWidth() const;
 
         bool GetIsInside(const QPoint& globalPoint) const;
-        void SetIsSelected(bool selected);
         bool GetIsSelected() const;
         
         void MoveRelative(const QPoint& deltaMove);
@@ -165,7 +166,7 @@ namespace EMStudio
         virtual void Update(const QRect& visibleRect, const QPoint& mousePos);
         void UpdateRects();
 
-        void RenderConnections(QPainter& painter, QPen* pen, QBrush* brush, const QRect& invMappedVisibleRect, int32 stepSize);
+        void RenderConnections(const QItemSelectionModel& selectionModel, QPainter& painter, QPen* pen, QBrush* brush, const QRect& invMappedVisibleRect, int32 stepSize);
 
         virtual void SetName(const char* name, bool updatePixmap = true);
 
@@ -232,7 +233,6 @@ namespace EMStudio
         QColor                          mHasChildIndicatorColor;
         MCore::Array<NodeConnection*>   mConnections;
         float                           mOpacity;
-        bool                            mIsSelected;
         bool                            mIsVisible;
         static QColor                   mPortHighlightColor;
         static QColor                   mPortHighlightBGColor;

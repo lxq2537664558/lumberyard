@@ -59,7 +59,6 @@ class ICentralInterestManager;
 struct ITacticalPointSystem;
 struct ITargetTrackManager;
 struct Sphere;
-struct IAIActionManager;
 struct ISmartObjectManager;
 struct HidespotQueryContext;
 class IVisionMap;
@@ -895,17 +894,8 @@ struct IAISystem
     virtual INavigation* GetINavigation() = 0;
     virtual IAIRecorder* GetIAIRecorder() = 0;
     virtual struct IMovementSystem* GetMovementSystem() const = 0;
-    virtual AIActionSequence::ISequenceManager* GetSequenceManager() const = 0;
     virtual IClusterDetector* GetClusterDetector() const = 0;
     //Get Subsystems///////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //AI Actions///////////////////////////////////////////////////////////////////////////////////////////////////
-    virtual IAIActionManager* GetAIActionManager() = 0;
-    //AI Actions///////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -1017,8 +1007,6 @@ struct IAISystem
     virtual IAIObject* GetBeacon(unsigned short nGroupID) = 0;
     virtual void UpdateBeacon(unsigned short nGroupID, const Vec3& vPos, IAIObject* pOwner = 0) = 0;
 
-    virtual bool ParseTables(int firstTable, bool parseMovementAbility, IFunctionHandler* pH, AIObjectParams& aiParams, bool& updateAlways) = 0;
-
     // !!! added to resolve merge conflict: to be removed in dev/c2 !!!
     virtual float GetFrameStartTimeSecondsVirtual() const = 0;
     //WTF are these?///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1070,13 +1058,6 @@ public:
     }
 
     // need to force as no_inline, else on some implementations (if cstr and dstr are inlined), we get totaly wrong numbers
-#if defined(AZ_RESTRICTED_PLATFORM)
-    #if defined(AZ_PLATFORM_XENIA)
-        #include "Xenia/IAISystem_h_xenia.inl"
-    #elif defined(AZ_PLATFORM_PROVO)
-        #include "Provo/IAISystem_h_provo.inl"
-    #endif
-	#endif
     NO_INLINE ~CAILightProfileSection()
     {
         IAISystem* pAISystem = gEnv->pAISystem;

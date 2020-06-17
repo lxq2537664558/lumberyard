@@ -30,6 +30,17 @@ namespace GraphCanvas
     {
     }
 
+    void GraphCanvasTreeCategorizer::RegisterCategoryNode(GraphCanvas::GraphCanvasTreeItem* treeItem, const char* subCategory, GraphCanvas::GraphCanvasTreeItem* parentRoot)
+    {
+        CategoryKey key(parentRoot, subCategory);
+        auto rootIter = m_rootMaps.find(key);
+
+        if (rootIter == m_rootMaps.end())
+        {
+            m_rootMaps[key] = treeItem;
+        }        
+    }
+
     GraphCanvas::GraphCanvasTreeItem* GraphCanvasTreeCategorizer::GetCategoryNode(const char* categoryPath, GraphCanvas::GraphCanvasTreeItem* parentRoot)
     {
         AZ_Warning("GraphCanvas", parentRoot, "Null parent root passed into Categorizer.");
@@ -149,26 +160,25 @@ namespace GraphCanvas
         PruneNodes(potentialCategories);
     }
 
-    void GraphCanvasTreeCategorizer::PruneNodes(AZStd::unordered_set< GraphCanvas::GraphCanvasTreeItem*> potentialCategories)
+    void GraphCanvasTreeCategorizer::PruneNodes(AZStd::unordered_set< GraphCanvas::GraphCanvasTreeItem*> potentialPruners)
     {
         AZStd::unordered_set< GraphCanvas::GraphCanvasTreeItem* > deletedRoots;
 
-        while (!potentialCategories.empty())
+        while (!potentialPruners.empty())
         {
-            GraphCanvas::GraphCanvasTreeItem* treeItem = (*potentialCategories.begin());
-            potentialCategories.erase(potentialCategories.begin());
+            GraphCanvas::GraphCanvasTreeItem* treeItem = (*potentialPruners.begin());
+            potentialPruners.erase(potentialPruners.begin());
 
-            GraphCanvas::GraphCanvasTreeItem* parentItem = static_cast<GraphCanvas::GraphCanvasTreeItem*>(treeItem->GetParent());
-
-            treeItem->DetachItem();
-
-            if (parentItem && parentItem->GetChildCount() == 0 && parentItem->AllowPruneOnEmpty())
+            if (treeItem && treeItem->GetChildCount() == 0 && treeItem->AllowPruneOnEmpty())
             {
-                potentialCategories.insert(parentItem);
-            }
+                GraphCanvas::GraphCanvasTreeItem* parentItem = static_cast<GraphCanvas::GraphCanvasTreeItem*>(treeItem->GetParent());
 
-            deletedRoots.insert(treeItem);
-            delete treeItem;
+                treeItem->DetachItem();                
+                potentialPruners.insert(parentItem);
+
+                deletedRoots.insert(treeItem);
+                delete treeItem;
+            }
         }
 
         auto mapIter = m_rootMaps.begin();

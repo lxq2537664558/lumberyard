@@ -11,9 +11,11 @@
 */
 #pragma once
 
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option")
 #include <qgraphicswidget.h>
 #include <qgraphicssceneevent.h>
 #include <QTimer>
+AZ_POP_DISABLE_WARNING
 
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/EntityBus.h>
@@ -171,17 +173,16 @@ namespace GraphCanvas
         ////
 
     protected:
-
-        // VS2013 Fixes
         ConnectionComponent(const ConnectionComponent&) = delete;
         const ConnectionComponent& operator=(const ConnectionComponent&) = delete;
-        ////
         
         void FinalizeMove();
 
         virtual void OnConnectionMoveStart();
         virtual bool OnConnectionMoveCancelled();
         virtual ConnectionMoveResult OnConnectionMoveComplete(const QPointF& scenePos, const QPoint& screenPos);
+
+        virtual bool AllowNodeCreation() const;
 
         void StartMove();
         void StopMove();
@@ -254,7 +255,7 @@ namespace GraphCanvas
             {
                 QGraphicsSceneMouseEvent* mouseEvent = static_cast<QGraphicsSceneMouseEvent*>(event);
 
-                bool chainAddition = mouseEvent->modifiers() & Qt::KeyboardModifier::ShiftModifier;
+                bool chainAddition = (mouseEvent->modifiers() & Qt::KeyboardModifier::ShiftModifier) != 0;
 
                 m_connection.FinalizeMove(mouseEvent->scenePos(), mouseEvent->screenPos(), chainAddition);
                 return true;

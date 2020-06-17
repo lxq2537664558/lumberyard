@@ -28,6 +28,9 @@ namespace PhysX
     namespace Editor
     {
         const AZStd::string CollisionLayersWidget::s_defaultCollisionLayerName = "Default";
+#ifdef TOUCHBENDING_LAYER_BIT
+        const AZStd::string CollisionLayersWidget::s_touchBendCollisionLayerName = "TouchBend";
+#endif
 
         CollisionLayersWidget::CollisionLayersWidget(QWidget* parent)
             : QWidget(parent)
@@ -91,7 +94,7 @@ namespace PhysX
             // Find index of modified layer
             AzToolsFramework::InstanceDataNode* nodeParent = node->GetParent();
             AzToolsFramework::InstanceDataNode::NodeContainer nodeSiblings = nodeParent->GetChildren();
-            AZ::u64 nodeIndex = 0;
+            AZ::u32 nodeIndex = 0;
             AzToolsFramework::InstanceDataNode::Address nodeAddress = node->ComputeAddress();
             for (AzToolsFramework::InstanceDataNode& nodeSibling : nodeSiblings)
             {
@@ -133,18 +136,18 @@ namespace PhysX
 
         void CollisionLayersWidget::SetWidgetParameters()
         {
-            using namespace AzToolsFramework;
-            const ReflectedPropertyEditor::WidgetList& widgets = m_propertyEditor->GetWidgets();
+            const AzToolsFramework::ReflectedPropertyEditor::WidgetList& widgets = m_propertyEditor->GetWidgets();
             for (auto& widgetIter : widgets)
             {
-                InstanceDataNode* dataNode = widgetIter.first;
-                PropertyRowWidget* rowWidget = widgetIter.second;
+                AzToolsFramework::InstanceDataNode* dataNode = widgetIter.first;
+                AzToolsFramework::PropertyRowWidget* rowWidget = widgetIter.second;
                 QWidget* widget = rowWidget->GetChildWidget();
                 if (widget == nullptr)
                 {
                     continue;
                 }
-                PropertyStringLineEditCtrl* lineEditCtrl = static_cast<PropertyStringLineEditCtrl*>(widget); // qobject_cast does not work here
+                AzToolsFramework::PropertyStringLineEditCtrl* lineEditCtrl =
+                    static_cast<AzToolsFramework::PropertyStringLineEditCtrl*>(widget); // qobject_cast does not work here
                 if (lineEditCtrl == nullptr)
                 {
                     continue;
@@ -154,6 +157,12 @@ namespace PhysX
                 {
                     lineEditCtrl->setEnabled(false);
                 }
+#ifdef TOUCHBENDING_LAYER_BIT
+                else if (lineEditCtrl->value() == s_touchBendCollisionLayerName)
+                {
+                        lineEditCtrl->setEnabled(false);
+                }
+#endif
             }
         }
 

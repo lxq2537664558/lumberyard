@@ -23,6 +23,10 @@
         [
             "../Common/UnixLike/AzFramework/IO/LocalFileIO_UnixLike.cpp"
         ],
+        "Network/Platform/AppleTV":
+        [
+            "../Common/Default/AzFramework/Network/AssetProcessorConnection_Default.cpp"
+        ],
         "TargetManagement/Platform/AppleTV":
         [
             "../Common/Default/AzFramework/TargetManagement/TargetManagementComponent_Default.cpp"
@@ -49,6 +53,11 @@
         "Input/Devices/Touch/Platform/AppleTV":
         [
             "../Common/Unimplemented/AzFramework/Input/Devices/Touch/InputDeviceTouch_Unimplemented.cpp"
+        ],
+        "Input/User/Platform/AppleTV":
+        [
+            "AzFramework/Input/User/LocalUserId_Platform.h",
+            "../Common/Default/AzFramework/Input/User/LocalUserId_Default.h"
         ],
         "Input/Devices/VirtualKeyboard/Platform/AppleTV":
         [

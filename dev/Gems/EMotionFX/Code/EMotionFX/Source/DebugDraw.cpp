@@ -11,6 +11,10 @@
 */
 
 #include <EMotionFX/Source/DebugDraw.h>
+#include <EMotionFX/Source/Skeleton.h>
+#include <EMotionFX/Source/ActorInstance.h>
+#include <EMotionFX/Source/Actor.h>
+#include <EMotionFX/Source/Node.h>
 
 namespace EMotionFX
 {
@@ -41,6 +45,15 @@ namespace EMotionFX
     }
 
     //-------------------------------------------------------------------------
+
+    DebugDraw::~DebugDraw()
+    {
+        AZStd::lock_guard<AZStd::recursive_mutex> lock(m_mutex);
+        for (auto& data : m_actorInstanceData)
+        {
+            delete data.second;
+        }
+    }
 
     void DebugDraw::Lock()
     {
@@ -73,7 +86,12 @@ namespace EMotionFX
     void DebugDraw::UnregisterActorInstance(ActorInstance* actorInstance)
     {
         AZStd::scoped_lock<AZStd::recursive_mutex> lock(m_mutex);
-        m_actorInstanceData.erase(actorInstance);
+        const auto it = m_actorInstanceData.find(actorInstance);
+        if (it != m_actorInstanceData.end())
+        {
+            delete it->second;
+            m_actorInstanceData.erase(it);
+        }
     }
 
     DebugDraw::ActorInstanceData* DebugDraw::GetActorInstanceData(ActorInstance* actorInstance)
@@ -90,6 +108,24 @@ namespace EMotionFX
     const DebugDraw::ActorInstanceDataSet& DebugDraw::GetActorInstanceData() const
     {
         return m_actorInstanceData;
+    }
+
+    void DebugDraw::ActorInstanceData::DrawPose(const Pose& pose, const AZ::Color& color, const AZ::Vector3& offset)
+    {
+        const Skeleton* skeleton = m_actorInstance->GetActor()->GetSkeleton();
+
+        const AZ::u32 numNodes = m_actorInstance->GetNumEnabledNodes();
+        for (AZ::u32 i = 0; i < numNodes; ++i)
+        {
+            const AZ::u32 nodeIndex = m_actorInstance->GetEnabledNode(i);
+            const AZ::u32 parentIndex = skeleton->GetNode(nodeIndex)->GetParentIndex();
+            if (parentIndex != MCORE_INVALIDINDEX32)
+            {
+                const AZ::Vector3& startPos = pose.GetWorldSpaceTransform(nodeIndex).mPosition;
+                const AZ::Vector3& endPos = pose.GetWorldSpaceTransform(parentIndex).mPosition;
+                DrawLine(offset + startPos, offset + endPos, color);
+            }
+        }
     }
 
     void DebugDraw::ActorInstanceData::DrawWireframeSphere(const AZ::Vector3& center, float radius, const AZ::Color& color, const AZ::Quaternion& jointRotation, AZ::u32 numSegments, AZ::u32 numRings)

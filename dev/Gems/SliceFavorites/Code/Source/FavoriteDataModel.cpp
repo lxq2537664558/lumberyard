@@ -32,7 +32,9 @@
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 #include <AzToolsFramework/ToolsComponents/TransformComponent.h>
 
+AZ_PUSH_DISABLE_WARNING(4251 4244, "-Wunknown-warning-option") // qevent.h(197): warning C4244: 'return': conversion from 'qreal' to 'int', possible loss of data 
 #include <QDragEnterEvent>
+AZ_POP_DISABLE_WARNING
 #include <QDragLeaveEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -42,12 +44,12 @@
 namespace SliceFavorites
 {
     //  XML file format strings
-    static const char* const RootXMLTag = "SliceFavorites";
-    static const char* const FavoriteDataXMLTag = "FavoriteData";
-    static const char* const NameXMLTag = "FavoriteDataName";
-    static const char* const TypeXMLTag = "FavoriteDataType";
-    static const char* const SubTypeXMLTag = "FavoriteDataSubType";
-    static const char* const AssetIdXMLTag = "FavoriteDataAssetId";
+    static const char RootXMLTag[] = "SliceFavorites";
+    static const char FavoriteDataXMLTag[] = "FavoriteData";
+    static const char NameXMLTag[] = "FavoriteDataName";
+    static const char TypeXMLTag[] = "FavoriteDataType";
+    static const char SubTypeXMLTag[] = "FavoriteDataSubType";
+    static const char AssetIdXMLTag[] = "FavoriteDataAssetId";
 
     static const char* const ManageSliceFavorites = "Slice Favorites";
 
@@ -529,7 +531,7 @@ namespace SliceFavorites
             {
                 if (checkAsset.m_sizeBytes > 0)
                 {
-                    m_favoriteMap.insert(AZStd::make_pair(assetIdString.toUtf8().data(), current));
+                    m_favoriteMap.emplace(current->m_assetId, current);
                 }
             }
 
@@ -657,10 +659,7 @@ namespace SliceFavorites
             return;
         }
 
-        AZStd::string assetIdString;
-        toRemove->m_assetId.ToString(assetIdString);
-
-        auto& foundIt = m_favoriteMap.find(assetIdString);
+        const auto& foundIt = m_favoriteMap.find(toRemove->m_assetId);
         if (foundIt != m_favoriteMap.end())
         {
             m_favoriteMap.erase(foundIt);
@@ -690,10 +689,7 @@ namespace SliceFavorites
             return false;
         }
 
-        AZStd::string assetIdString;
-        product->GetAssetId().ToString(assetIdString);
-
-        auto foundIt = m_favoriteMap.find(assetIdString);
+        auto foundIt = m_favoriteMap.find(product->GetAssetId());
         return (foundIt != m_favoriteMap.end());
     }
 
@@ -733,13 +729,28 @@ namespace SliceFavorites
         newFavorite->m_parent = parentData;
         parentData->m_children.push_back(newFavorite);
 
-        AZStd::string assetIdString;
-        product->GetAssetId().ToString(assetIdString);
-        m_favoriteMap.insert(AZStd::make_pair(assetIdString, newFavorite));
+        m_favoriteMap.emplace(product->GetAssetId(), newFavorite);
 
         UpdateFavorites();
 
         endInsertRows();
+    }
+
+    void FavoriteDataModel::ProcessRemovedAssets()
+    {
+        if (m_removedAssets.empty())
+        {
+            return;
+        }
+
+        for (AZ::Data::AssetId assetId : m_removedAssets)
+        {
+            RemoveFavorite(assetId);
+        }
+
+        m_removedAssets.clear();
+
+        UpdateFavorites();
     }
 
     void FavoriteDataModel::RemoveFavorite(const AzToolsFramework::AssetBrowser::ProductAssetBrowserEntry* product)
@@ -784,7 +795,7 @@ namespace SliceFavorites
     {
         for (auto& favorite : m_favoriteMap)
         {
-            callback((*favorite.second).m_assetId);
+            callback(favorite.first);
         }
     }
 
@@ -985,6 +996,14 @@ namespace SliceFavorites
         {
             parentData = m_rootItem.get();
         }
+        else
+        {
+            // Don't allow drops onto entries that aren't folders
+            if (parentData->m_type != FavoriteData::FavoriteType::DataType_Folder)
+            {
+                return true;
+            }
+        }
 
         if (!parentData)
         {
@@ -1008,6 +1027,15 @@ namespace SliceFavorites
             GetSelectedIndicesFromMimeData(mimeList, data->data(FavoriteData::GetMimeType()));
 
             int rowOffset = 0;
+
+            // Preliminary check to avoid dropping entries on themselves
+            for (FavoriteData* movedChild : mimeList)
+            {
+                if (movedChild == parentData)
+                {
+                    return true;
+                }
+            }
 
             for (FavoriteData* movedChild : mimeList)
             {
@@ -1253,6 +1281,31 @@ namespace SliceFavorites
         return createIndex(favorite->row(), 0, const_cast<FavoriteData*>(favorite));
     }
 
+    bool FavoriteDataModel::IsDescendentOf(QModelIndex index, QModelIndex potentialAncestor)
+    {
+        if (!index.isValid() || !potentialAncestor.isValid())
+        {
+            return false;
+        }
+
+        if (index == potentialAncestor)
+        {
+            return false;
+        }
+
+        QModelIndex parent = index.parent();
+        while (parent.isValid())
+        {
+            if (parent == potentialAncestor)
+            {
+                return true;
+            }
+            parent = parent.parent();
+        }
+
+        return false;
+    }
+
     FavoriteData* FavoriteDataModel::GetFavoriteDataFromModelIndex(const QModelIndex& modelIndex) const
     {
         if (modelIndex.isValid())
@@ -1278,7 +1331,7 @@ namespace SliceFavorites
             sliceFavoritesOptions);
     }
 
-    void FavoriteDataModel::CountFoldersAndFavoritesFromIndices(QModelIndexList& indices, int& numFolders, int& numFavorites)
+    void FavoriteDataModel::CountFoldersAndFavoritesFromIndices(const QModelIndexList& indices, int& numFolders, int& numFavorites)
     {
         numFolders = 0;
         numFavorites = 0;
@@ -1367,6 +1420,16 @@ namespace SliceFavorites
                     {
                         numFavoritesImported += numFavorites;
                         m_rootItem->m_children.push_back(newFavorite);
+
+                        if (newFavorite->m_type == FavoriteData::DataType_Favorite)
+                        {
+                            AZ::Data::AssetInfo checkAsset;
+                            AZ::Data::AssetCatalogRequestBus::BroadcastResult(checkAsset, &AZ::Data::AssetCatalogRequests::GetAssetInfoById, newFavorite->m_assetId);
+                            if (checkAsset.m_sizeBytes > 0) /* Check if the slice asset still exists on disk. */
+                            {
+                                m_favoriteMap.emplace(newFavorite->m_assetId, newFavorite);
+                            }
+                        }
                     }
                 }
             }
@@ -1407,7 +1470,10 @@ namespace SliceFavorites
     {
         if (assetId.IsValid())
         {
-            RemoveFavorite(assetId);
+            // Add the asset to the removed list so that the removal is processed in the main thread.
+            m_removedAssets.push_back(assetId);
+            
+            QMetaObject::invokeMethod(this, "ProcessRemovedAssets", Qt::QueuedConnection);
         }
     }
 
@@ -1430,10 +1496,7 @@ namespace SliceFavorites
 
     FavoriteData* FavoriteDataModel::GetFavoriteDataFromAssetId(const AZ::Data::AssetId& assetId) const
     {
-        AZStd::string assetIdString;
-        assetId.ToString(assetIdString);
-
-        auto& foundIt = m_favoriteMap.find(assetIdString);
+        const auto& foundIt = m_favoriteMap.find(assetId);
         if (foundIt != m_favoriteMap.end())
         {
             return foundIt->second;
@@ -1530,4 +1593,4 @@ namespace SliceFavorites
     }
 }
 
-#include <Source\FavoriteDataModel.moc>
+#include <Source/FavoriteDataModel.moc>

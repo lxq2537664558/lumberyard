@@ -9,8 +9,8 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZCORE_RAPIDJSON_DOCUMENT
-#define AZCORE_RAPIDJSON_DOCUMENT
+
+#pragma once
 
 #include <AzCore/JSON/rapidjson.h>
 
@@ -19,7 +19,8 @@
 #pragma clang diagnostic ignored "-Wunknown-warning-option"
 #endif
 
-// Make you have available rapidjson/include folder. Currently 3rdParty\rapidjson\rapidjson-1.0.2\include
+// Make sure rapidjson/include folder is available. Currently 3rdParty\rapidjson\rapidjson-1.1.0\include
+
 #include <rapidjson/document.h>
 
 #if AZ_TRAIT_JSON_CLANG_IGNORE_UNKNOWN_WARNING && defined(AZ_COMPILER_CLANG)
@@ -32,5 +33,3 @@ inline bool IsValidMember(const rapidjson::Value& val, const char* key, bool (ra
     return val.IsObject() && val.HasMember(key) && (val[key].*func)();
 }
 #define RAPIDJSON_IS_VALID_MEMBER(node, key, isTypeFuncPtr) (IsValidMember(node, key, &rapidjson::Value::isTypeFuncPtr))
-
-#endif // AZCORE_RAPIDJSON_DOCUMENT

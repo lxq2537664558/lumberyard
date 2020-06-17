@@ -20,6 +20,39 @@
 
 namespace PhysXCharacters
 {
+    bool RagdollComponent::VersionConverter(AZ::SerializeContext& context,
+        AZ::SerializeContext::DataElementNode& classElement)
+    {
+        // The element "PhysXRagdoll" was changed from a shared pointer to a unique pointer, but a version converter was
+        // not added at the time.  This means there may be serialized data with either the shared or unique pointer, but
+        // both labelled version 1.  This converter was added later and needs to deal with either eventuality, producing
+        // a valid version 2 in either case.
+        if (classElement.GetVersion() <= 1)
+        {
+            int ragdollElementIndex = classElement.FindElement(AZ_CRC("PhysXRagdoll", 0xe081b8b0));
+
+            if (ragdollElementIndex >= 0)
+            {
+                AZ::SerializeContext::DataElementNode& ragdollElement = classElement.GetSubElement(ragdollElementIndex);
+
+                // If we find a shared pointer, change it to a unique pointer.  If we don't, we already have a unique
+                // pointer and it's fine to do nothing but bump the version number from 1 to 2.
+                AZStd::shared_ptr<Ragdoll> ragdollShared = nullptr;
+                bool isShared = ragdollElement.GetData<AZStd::shared_ptr<Ragdoll>>(ragdollShared);
+                if (isShared)
+                {
+                    // The shared pointer doesn't actually contain any serialized data - it is a runtime only object and
+                    // should probably never have been serialized, but removing it may cause issues with slices.  So
+                    // there is no need to extract any data and it can be replaced with an empty unique pointer.
+                    classElement.RemoveElement(ragdollElementIndex);
+                    classElement.AddElement<AZStd::unique_ptr<Ragdoll>>(context, "PhysXRagdoll");
+                }
+            }
+        }
+
+        return true;
+    }
+
     void RagdollComponent::Reflect(AZ::ReflectContext* context)
     {
         Ragdoll::Reflect(context);
@@ -28,7 +61,7 @@ namespace PhysXCharacters
         if (serializeContext)
         {
             serializeContext->Class<RagdollComponent, AZ::Component>()
-                ->Version(1)
+                ->Version(2, &VersionConverter)
                 ->Field("PhysXRagdoll", &RagdollComponent::m_ragdoll)
                 ->Field("PositionIterations", &RagdollComponent::m_positionIterations)
                 ->Field("VelocityIterations", &RagdollComponent::m_velocityIterations)
@@ -49,11 +82,13 @@ namespace PhysXCharacters
                     ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                     ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &RagdollComponent::m_positionIterations, "Position Iteration Count",
-                        "Lower iteration counts increase performance but may cause more unrealistic behavior")
+                        "A higher iteration count generally improves fidelity at the cost of performance, but note that very high "
+                        "values may lead to severe instability if ragdoll colliders interfere with satisfying joint constraints")
                     ->Attribute(AZ::Edit::Attributes::Min, 1)
                     ->Attribute(AZ::Edit::Attributes::Max, 255)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &RagdollComponent::m_velocityIterations, "Velocity Iteration Count",
-                        "Lower iteration counts increase performance but may cause more unrealistic behavior")
+                        "A higher iteration count generally improves fidelity at the cost of performance, but note that very high "
+                        "values may lead to severe instability if ragdoll colliders interfere with satisfying joint constraints")
                     ->Attribute(AZ::Edit::Attributes::Min, 1)
                     ->Attribute(AZ::Edit::Attributes::Max, 255)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &RagdollComponent::m_enableJointProjection,
@@ -133,6 +168,15 @@ namespace PhysXCharacters
         }
 
         const size_t numNodes = ragdollConfiguration.m_nodes.size();
+
+        if (numNodes == 0)
+        {
+            AZ_Error("PhysX Ragdoll Component", false,
+                "Ragdoll configuration has 0 nodes, ragdoll will not be created for entity \"%s\".",
+                GetEntity()->GetName().c_str());
+            return;
+        }
+
         ParentIndices parentIndices;
         parentIndices.resize(numNodes);
         for (size_t nodeIndex = 0; nodeIndex < numNodes; nodeIndex++)

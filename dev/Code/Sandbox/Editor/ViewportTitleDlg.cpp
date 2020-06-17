@@ -20,7 +20,6 @@
 #include "DisplaySettings.h"
 #include "CustomResolutionDlg.h"
 #include "CustomAspectRatioDlg.h"
-#include "Util/BoostPythonHelpers.h"
 #include "AI/AIManager.h"
 #include <INavigationSystem.h>
 #include "Objects/ObjectLayerManager.h"
@@ -39,7 +38,29 @@
 
 #include "ui_ViewportTitleDlg.h"
 
+#include <AzCore/RTTI/BehaviorContext.h>
+
+
 // CViewportTitleDlg dialog
+
+inline namespace Helpers
+{
+    void ToggleHelpers()
+    {
+        GetIEditor()->GetDisplaySettings()->DisplayHelpers(!GetIEditor()->GetDisplaySettings()->IsDisplayHelpers());
+        GetIEditor()->Notify(eNotify_OnDisplayRenderUpdate);
+
+        if (GetIEditor()->GetDisplaySettings()->IsDisplayHelpers() == false)
+        {
+            GetIEditor()->GetObjectManager()->SendEvent(EVENT_HIDE_HELPER);
+        }
+    }
+
+    bool IsHelpersShown()
+    {
+        return GetIEditor()->GetDisplaySettings()->IsDisplayHelpers();
+    }
+}
 
 const int SEARCH_BY_NAME = 1;
 const int SEARCH_BY_TYPE = 2;
@@ -78,6 +99,8 @@ CViewportTitleDlg::CViewportTitleDlg(QWidget* pParent)
 
     m_pViewPane = NULL;
     GetIEditor()->RegisterNotifyListener(this);
+    GetISystem()->GetISystemEventDispatcher()->RegisterListener(this);
+
 
     LoadCustomPresets("FOVPresets", "FOVPreset", m_customFOVPresets);
     LoadCustomPresets("AspectRatioPresets", "AspectRatioPreset", m_customAspectRatioPresets);
@@ -119,6 +142,7 @@ CViewportTitleDlg::CViewportTitleDlg(QWidget* pParent)
 
 CViewportTitleDlg::~CViewportTitleDlg()
 {
+    GetISystem()->GetISystemEventDispatcher()->RemoveListener(this);
     GetIEditor()->UnregisterNotifyListener(this);
     ICVar*  pDisplayInfo(gEnv->pConsole->GetCVar("r_displayInfo"));
     pDisplayInfo->RemoveOnChangeFunctor(m_displayInfoCallbackIndex);
@@ -255,7 +279,7 @@ void CViewportTitleDlg::OnMaximize()
 //////////////////////////////////////////////////////////////////////////
 void CViewportTitleDlg::OnToggleHelpers()
 {
-    GetIEditor()->ExecuteCommand("general.toggle_helpers");
+    Helpers::ToggleHelpers();
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -559,6 +583,27 @@ void CViewportTitleDlg::OnEditorNotifyEvent(EEditorNotifyEvent event)
     }
 }
 
+void CViewportTitleDlg::OnSystemEvent(ESystemEvent event, UINT_PTR wparam, UINT_PTR lparam)
+{
+    if (event == ESYSTEM_EVENT_RESIZE)
+    {
+        if (m_pViewPane)
+        {
+            const int eventWidth = static_cast<int>(wparam);
+            const int eventHeight = static_cast<int>(lparam);
+            const QWidget* viewport = m_pViewPane->GetViewport();
+
+            // This should eventually be converted to an EBus to make it easy to connect to the correct viewport 
+            // sending the event.  But for now, just detect that we've gotten width/height values that match our 
+            // associated viewport
+            if (viewport && (eventWidth == viewport->width()) && (eventHeight == viewport->height()))
+            {
+                OnViewportSizeChanged(eventWidth, eventHeight);
+            }
+        }
+    }
+}
+
 //////////////////////////////////////////////////////////////////////////
 void CViewportTitleDlg::InputNamesToSearchFromSelection()
 {
@@ -681,7 +726,7 @@ void CViewportTitleDlg::OnSearchTermChange()
     }
 
     // Make sure to lower case all terms because later we lower case all inputs to compare against
-    for (auto term : terms)
+    for (QString& term : terms)
     {
         term = term.toLower();
     }
@@ -1004,11 +1049,23 @@ namespace
     }
 }
 
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyToggleHelpers, general, toggle_helpers,
-    "Toggles the display of helpers.",
-    "general.toggle_helpers()");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyIsHelpersShown, general, is_helpers_shown,
-    "Gets the display state of helpers.",
-    "general.is_helpers_shown()");
+namespace AzToolsFramework
+{
+    void ViewportTitleDlgPythonFuncsHandler::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+        {
+            // this will put these methods into the 'azlmbr.legacy.general' module
+            auto addLegacyGeneral = [](AZ::BehaviorContext::GlobalMethodBuilder methodBuilder)
+            {
+                methodBuilder->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                    ->Attribute(AZ::Script::Attributes::Category, "Legacy/Editor")
+                    ->Attribute(AZ::Script::Attributes::Module, "legacy.general");
+            };
+            addLegacyGeneral(behaviorContext->Method("toggle_helpers", PyToggleHelpers, nullptr, "Toggles the display of helpers."));
+            addLegacyGeneral(behaviorContext->Method("is_helpers_shown", PyIsHelpersShown, nullptr, "Gets the display state of helpers."));
+        }
+    }
+}
 
 #include <ViewportTitleDlg.moc>

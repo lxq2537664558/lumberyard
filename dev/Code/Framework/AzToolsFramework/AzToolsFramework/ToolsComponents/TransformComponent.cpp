@@ -41,6 +41,8 @@ namespace AzToolsFramework
     {
         namespace Internal
         {
+            const AZ::u32 ParentEntityCRC = AZ_CRC("Parent Entity", 0x5b1b276c);
+
             // Decompose a transform into euler angles in degrees, scale (along basis, any shear will be dropped), and translation.
             void DecomposeTransform(const AZ::Transform& transform, AZ::Vector3& translation, AZ::Vector3& rotation, AZ::Vector3& scale)
             {
@@ -60,7 +62,7 @@ namespace AzToolsFramework
                     {
                     // Convert slice-relative transform/root to standard parent-child relationship.
                     const int sliceRootIdx = classElement.FindElement(AZ_CRC("Slice Root", 0x9f115e1f));
-                    const int parentIdx = classElement.FindElement(AZ_CRC("Parent Entity", 0x5b1b276c));
+                    const int parentIdx = classElement.FindElement(ParentEntityCRC);
                     const int editorTransformIdx = classElement.FindElement(AZ_CRC("Transform Data", 0xf0a2bb50));
                     const int cachedTransformIdx = classElement.FindElement(AZ_CRC("Cached World Transform", 0x571fab30));
 
@@ -753,6 +755,11 @@ namespace AzToolsFramework
             return m_editorTransform.m_scale;
         }
 
+        AZ::Vector3 TransformComponent::GetWorldScale()
+        {
+            return GetWorldTM().RetrieveScale();
+        }
+
         const AZ::Transform& TransformComponent::GetParentWorldTM() const
         {
             auto parent = GetParentTransformComponent();
@@ -876,7 +883,7 @@ namespace AzToolsFramework
         EntityIdList TransformComponent::GetChildren()
         {
             EntityIdList children;
-            EBUS_EVENT_ID(GetEntityId(), AZ::TransformHierarchyInformationBus, GatherChildren, children);
+            AZ::TransformHierarchyInformationBus::Event(GetEntityId(), &AZ::TransformHierarchyInformation::GatherChildren, children);
             return children;
         }
 
@@ -885,7 +892,17 @@ namespace AzToolsFramework
             EntityIdList descendants = GetChildren();
             for (size_t i = 0; i < descendants.size(); ++i)
             {
-                EBUS_EVENT_ID(descendants[i], AZ::TransformHierarchyInformationBus, GatherChildren, descendants);
+                AZ::TransformHierarchyInformationBus::Event(descendants[i], &AZ::TransformHierarchyInformation::GatherChildren, descendants);
+            }
+            return descendants;
+        }
+
+        AZStd::vector<AZ::EntityId> TransformComponent::GetEntityAndAllDescendants()
+        {
+            AZStd::vector<AZ::EntityId> descendants = { GetEntityId() };
+            for (size_t i = 0; i < descendants.size(); ++i)
+            {
+                AZ::TransformHierarchyInformationBus::Event(descendants[i], &AZ::TransformHierarchyInformation::GatherChildren, descendants);
             }
             return descendants;
         }
@@ -894,10 +911,15 @@ namespace AzToolsFramework
         {
             children.push_back(GetEntityId());
         }
-
+        
         bool TransformComponent::IsStaticTransform()
         {
             return m_isStatic;
+        }
+
+        void TransformComponent::SetIsStaticTransform(bool isStatic)
+        {
+            m_isStatic = isStatic;
         }
 
         TransformComponent* TransformComponent::GetParentTransformComponent() const
@@ -1077,7 +1099,7 @@ namespace AzToolsFramework
         {
             AzToolsFramework::ToolsApplicationEvents::Bus::Broadcast(
                 &AzToolsFramework::ToolsApplicationEvents::Bus::Events::InvalidatePropertyDisplay,
-                AzToolsFramework::PropertyModificationRefreshLevel::Refresh_EntireTree);
+                AzToolsFramework::PropertyModificationRefreshLevel::Refresh_Values);
 
             if (GetEntity())
             {
@@ -1085,7 +1107,7 @@ namespace AzToolsFramework
                 AZ::TransformNotificationBus::Event(GetEntityId(), &AZ::TransformNotificationBus::Events::OnStaticChanged, m_isStatic);
             }
 
-            return AZ::Edit::PropertyRefreshLevels::AttributesAndValues;
+            return AZ::Edit::PropertyRefreshLevels::ValuesOnly;
         }
 
         void TransformComponent::ModifyEditorTransform(AZ::Vector3& vec, const AZ::Vector3& data, const AZ::Transform& parentInverse)
@@ -1295,6 +1317,11 @@ namespace AzToolsFramework
                     AzToolsFramework::ToolsApplicationEvents::Bus::Broadcast(&AzToolsFramework::ToolsApplicationEvents::InvalidatePropertyDisplay, AzToolsFramework::Refresh_AttributesAndValues);
                 });
             }
+        }
+
+        AZ::u32 TransformComponent::GetParentEntityCRC()
+        {
+            return Internal::ParentEntityCRC;
         }
     }
 } // namespace AzToolsFramework

@@ -12,25 +12,21 @@
 
 #include <PhysX_precompiled.h>
 
+#include <platform_impl.h> // must be included once per DLL so things from CryCommon will function
+
 #include <AzCore/Module/Module.h>
 #include <AzCore/Module/DynamicModuleHandle.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 
 #include <Source/SystemComponent.h>
-#include <Source/TerrainComponent.h>
-#include <Source/RigidBodyComponent.h>
-#include <Source/BaseColliderComponent.h>
-#include <Source/MeshColliderComponent.h>
-#include <Source/BoxColliderComponent.h>
-#include <Source/SphereColliderComponent.h>
-#include <Source/CapsuleColliderComponent.h>
-#include <Source/ForceRegionComponent.h>
+#include <ComponentDescriptors.h>
 
 #if defined(PHYSX_EDITOR)
 #include <Source/EditorSystemComponent.h>
 #include <Source/EditorTerrainComponent.h>
 #include <Source/EditorRigidBodyComponent.h>
 #include <Source/EditorColliderComponent.h>
+#include <Source/EditorShapeColliderComponent.h>
 #include <Source/EditorForceRegionComponent.h>
 #include <Source/Pipeline/MeshExporter.h>
 #include <Source/Pipeline/MeshBehavior.h>
@@ -52,27 +48,22 @@ namespace PhysX
             LoadModules();
 
             SystemComponent::InitializePhysXSDK();
-            m_descriptors.insert(m_descriptors.end(), {
-                    SystemComponent::CreateDescriptor(),
-                    TerrainComponent::CreateDescriptor(),
-                    RigidBodyComponent::CreateDescriptor(),
-                    BaseColliderComponent::CreateDescriptor(),
-                    MeshColliderComponent::CreateDescriptor(),
-                    BoxColliderComponent::CreateDescriptor(),
-                    SphereColliderComponent::CreateDescriptor(),
-                    CapsuleColliderComponent::CreateDescriptor(),
-                    ForceRegionComponent::CreateDescriptor(),
+            AZStd::list<AZ::ComponentDescriptor*> descriptorsToAdd = GetDescriptors();
+            m_descriptors.insert(m_descriptors.end(), descriptorsToAdd.begin(), descriptorsToAdd.end());
 #if defined(PHYSX_EDITOR)
+            m_descriptors.insert(m_descriptors.end(),
+                {
                     EditorSystemComponent::CreateDescriptor(),
                     EditorTerrainComponent::CreateDescriptor(),
                     EditorRigidBodyComponent::CreateDescriptor(),
                     EditorColliderComponent::CreateDescriptor(),
+                    EditorShapeColliderComponent::CreateDescriptor(),
                     EditorForceRegionComponent::CreateDescriptor(),
                     Pipeline::MeshExporter::CreateDescriptor(),
                     Pipeline::MeshBehavior::CreateDescriptor(),
                     Pipeline::CgfMeshAssetBuilderComponent::CreateDescriptor()
-#endif // defined(PHYSX_EDITOR)
                 });
+#endif // defined(PHYSX_EDITOR)
         }
 
         virtual ~Module()
@@ -95,7 +86,7 @@ namespace PhysX
     private:
         void LoadModules()
         {
-            #if defined(PHYSX_EDITOR)
+#if defined(PHYSX_EDITOR) && !defined(SCENE_CORE_STATIC)
             {
                 AZStd::unique_ptr<AZ::DynamicModuleHandle> sceneCoreModule = AZ::DynamicModuleHandle::Create("SceneCore");
                 bool ok = sceneCoreModule->Load(true/*isInitializeFunctionRequired*/);
@@ -103,7 +94,7 @@ namespace PhysX
 
                 m_modules.push_back(AZStd::move(sceneCoreModule));
             }
-            #endif // defined(PHYSX_EDITOR)
+#endif // defined(PHYSX_EDITOR)
 
             // Load PhysX SDK dynamic libraries when running on a non-monolithic build.
             // The PhysX Gem module was linked with the PhysX SDK dynamic libraries, but

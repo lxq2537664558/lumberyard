@@ -14,18 +14,19 @@
 #include "PropertyQTConstants.h"
 
 #include <AzFramework/StringFunc/StringFunc.h>
-#include <AzToolsFramework/UI/UiCore/WidgetHelpers.h>
+#include <AzToolsFramework/UI/UICore/WidgetHelpers.h>
+
+AZ_PUSH_DISABLE_WARNING(4244 4251 4800, "-Wunknown-warning-option") // 4244: conversion from 'int' to 'float', possible loss of data
+                                                                    // 4251: class '...' needs to have dll-interface to be used by clients of class 'QInputEvent'
+                                                                    // 4800: QTextEngine *const ': forcing value to bool 'true' or 'false' (performance warning)
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QWidget>
 #include <QtGui/QFontMetrics>
-AZ_PUSH_DISABLE_WARNING(4244 4251 4800, "-Wunknown-warning-option") // 4244: conversion from 'int' to 'float', possible loss of data
-                                                                    // 4251: 'QInputEvent::modState': class 'QFlags<Qt::KeyboardModifier>' needs to have dll-interface to be used by clients of class 'QInputEvent'
-                                                                    // 4800: QTextEngine *const ': forcing value to bool 'true' or 'false' (performance warning)
 #include <QtGui/QTextLayout>
 #include <QtGui/QPainter>
+#include <QMessageBox>
 AZ_POP_DISABLE_WARNING
 
-#include <QMessageBox>
 
 namespace AzToolsFramework
 {
@@ -301,6 +302,16 @@ namespace AzToolsFramework
             // --------------------- HANDLER discovery:
             // in order to discover this, we need the property type and handler type.
             EBUS_EVENT_RESULT(m_handler, PropertyTypeRegistrationMessages::Bus, ResolvePropertyHandler, m_handlerName, typeUuid);
+
+            
+            if (m_handler)
+            {
+                QString newNameLabel = label();
+                if (m_handler->ModifyNameLabel(m_childWidget, newNameLabel))
+                {
+                    SetNameLabel(newNameLabel.toUtf8().constData());
+                }
+            }
         }
 
         if (m_forbidExpansion)
@@ -517,7 +528,8 @@ namespace AzToolsFramework
                             if (ptrValue)
                             {
                                 auto ptrClassElement = container->GetElement(container->GetDefaultElementNameCrc());
-                                pointeeType = (ptrClassElement && ptrClassElement->m_azRtti) ? ptrClassElement->m_azRtti->GetActualUuid(ptrValue) : genericClassInfo->GetTemplatedTypeId(0);
+                                pointeeType = (ptrClassElement && ptrClassElement->m_azRtti && ptrClassElement->m_azRtti->ProvidesFullRtti()) ? 
+                                    ptrClassElement->m_azRtti->GetActualUuid(ptrValue) : genericClassInfo->GetTemplatedTypeId(0);
                             }
                             else
                             {
@@ -605,17 +617,9 @@ namespace AzToolsFramework
     {
         if (node)
         {
-            if (auto editorData = node->GetElementEditMetadata())
-            {
-                if (auto visibilityAttribute = editorData->FindAttribute(AZ::Edit::Attributes::Visibility))
-                {
-                    AZ::Crc32 visibility;
-                    if (ReadVisibilityAttribute(node->FirstInstance(), visibilityAttribute, visibility))
-                    {
-                        return visibility == AZ::Edit::PropertyVisibility::ShowChildrenOnly;
-                    }
-                }
-            }
+            // Must use ResolveVisibilityAttribute otherwise class elements will be missed
+            AZ::Crc32 visibility = ResolveVisibilityAttribute(*node);
+            return visibility == AZ::Edit::PropertyVisibility::ShowChildrenOnly;
         }
         return false;
     }
@@ -825,6 +829,12 @@ namespace AzToolsFramework
             {
                 setTabOrder(m_dropDownArrow, pfirstTarget);
             }
+        }
+
+        QString newNameLabel = label();
+        if (m_handler->ModifyNameLabel(m_childWidget, newNameLabel))
+        {
+            SetNameLabel(newNameLabel.toUtf8().constData());
         }
 
         QString newToolTip = toolTip();

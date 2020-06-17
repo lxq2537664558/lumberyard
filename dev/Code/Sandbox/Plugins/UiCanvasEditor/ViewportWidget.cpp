@@ -27,6 +27,8 @@
 #include "ViewportElement.h"
 #include "RulerWidget.h"
 #include "CanvasHelpers.h"
+#include "AssetDropHelpers.h"
+#include "QtHelpers.h"
 
 #define UICANVASEDITOR_SETTINGS_VIEWPORTWIDGET_DRAW_ELEMENT_BORDERS_KEY         "ViewportWidget::m_drawElementBordersFlags"
 #define UICANVASEDITOR_SETTINGS_VIEWPORTWIDGET_DRAW_ELEMENT_BORDERS_DEFAULT     ( ViewportWidget::DrawElementBorders_Unselected )
@@ -224,6 +226,8 @@ ViewportWidget::ViewportWidget(EditorWindow* parent)
 
         SetSettings(tweakedSettings);
     }
+
+    setAcceptDrops(true);
 
     SetUseArrowsForNavigation(false);
 
@@ -523,7 +527,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent* ev)
             if (ev->button() == Qt::LeftButton)
             {
                 // Send event to this canvas
-                const AZ::Vector2 viewportPosition(ev->x(), ev->y());
+                const AZ::Vector2 viewportPosition(aznumeric_cast<float>(ev->x()), aznumeric_cast<float>(ev->y()));
                 const AzFramework::InputChannel::Snapshot inputSnapshot(AzFramework::InputDeviceMouse::Button::Left,
                                                                         AzFramework::InputDeviceMouse::Id,
                                                                         AzFramework::InputChannel::State::Began);
@@ -557,7 +561,7 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* ev)
         AZ::EntityId canvasEntityId = m_editorWindow->GetPreviewModeCanvas();
         if (canvasEntityId.IsValid())
         {
-            const AZ::Vector2 viewportPosition(ev->x(), ev->y());
+            const AZ::Vector2 viewportPosition(aznumeric_cast<float>(ev->x()), aznumeric_cast<float>(ev->y()));
             const AzFramework::InputChannelId& channelId = (ev->buttons() & Qt::LeftButton) ?
                                                             AzFramework::InputDeviceMouse::Button::Left :
                                                             AzFramework::InputDeviceMouse::SystemCursorPosition;
@@ -593,7 +597,7 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* ev)
             if (ev->button() == Qt::LeftButton)
             {
                 // Send event to this canvas
-                const AZ::Vector2 viewportPosition(ev->x(), ev->y());
+                const AZ::Vector2 viewportPosition(aznumeric_cast<float>(ev->x()), aznumeric_cast<float>(ev->y()));
                 const AzFramework::InputChannel::Snapshot inputSnapshot(AzFramework::InputDeviceMouse::Button::Left,
                                                                         AzFramework::InputDeviceMouse::Id,
                                                                         AzFramework::InputChannel::State::Ended);
@@ -776,6 +780,46 @@ void ViewportWidget::resizeEvent(QResizeEvent* ev)
     QViewport::resizeEvent(ev);
 }
 
+bool ViewportWidget::AcceptsMimeData(const QMimeData* mimeData)
+{
+    bool canvasLoaded = m_editorWindow->GetCanvas().IsValid();
+    if (!canvasLoaded)
+    {
+        return false;
+    }
+
+    return AssetDropHelpers::DoesMimeDataContainSliceOrComponentAssets(mimeData);
+}
+
+void ViewportWidget::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (AcceptsMimeData(event->mimeData()))
+    {
+        event->accept();
+    }
+    else
+    {
+        event->ignore();
+    }
+}
+
+void ViewportWidget::dropEvent(QDropEvent* event)
+{
+    if (AcceptsMimeData(event->mimeData()))
+    {
+        const AZ::EntityId targetEntityId;
+        const bool onElement = false;
+        const int childIndex = -1;
+        const QPoint pos = event->pos();
+        m_editorWindow->GetHierarchy()->DropMimeDataAssets(event->mimeData(), targetEntityId, onElement, childIndex, &pos);
+        event->accept();
+
+        // Put focus on the viewport widget
+        activateWindow();
+        setFocus();
+    }
+}
+
 void ViewportWidget::OnEntityPickModeStarted()
 {
     m_inObjectPickMode = true;
@@ -833,7 +877,7 @@ void ViewportWidget::RenderEditMode()
         m_viewportInteraction->GetCanvasToViewportScale(),
         m_viewportInteraction->GetCanvasToViewportTranslation());
 
-    AZ::Vector2 viewportSize(size().width(), size().height());
+    AZ::Vector2 viewportSize(aznumeric_cast<float>(size().width()), aznumeric_cast<float>(size().height()));
 
     // clear the stencil buffer before rendering each canvas - required for masking
     // NOTE: the FRT_CLEAR_IMMEDIATE is required since we will not be setting the render target
@@ -966,7 +1010,7 @@ void ViewportWidget::RenderPreviewMode()
     if (canvasEntityId.IsValid())
     {
         // Get the canvas size
-        AZ::Vector2 viewportSize(size().width(), size().height());
+        AZ::Vector2 viewportSize(aznumeric_cast<float>(size().width()), aznumeric_cast<float>(size().height()));
         AZ::Vector2 canvasSize = m_editorWindow->GetPreviewCanvasSize();
         if (canvasSize.GetX() == 0.0f && canvasSize.GetY() == 0.0f)
         {

@@ -26,6 +26,7 @@
 
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/Entity/EditorEntityHelpers.h>
+#include <AzToolsFramework/API/EntityPropertyEditorRequestsBus.h>
 
 #include <LmbrCentral/Shape/BoxShapeComponentBus.h>
 #include <LmbrCentral/Shape/ShapeComponentBus.h>
@@ -136,7 +137,7 @@ namespace CloudsGem
         }
 
         // Determine the number of particles to generate
-        int count = m_fillByVolume ? (dimensions.GetLengthSquaredFloat() / m_totalArea) * particleCount : particleCount / m_numChildrenEntities;
+        int count = m_fillByVolume ? aznumeric_cast<int>((dimensions.GetLengthSquaredFloat() / m_totalArea) * particleCount) : particleCount / m_numChildrenEntities;
         for (int i = 0; i < count; i++)
         {
             auto particle = AZStd::make_shared<CloudParticle>();
@@ -268,7 +269,7 @@ namespace CloudsGem
             case GenerationFlag::GF_ALL:
             case GenerationFlag::GF_SEED:
                 m_generatedParticles.clear();
-                m_seed = flag == GenerationFlag::GF_SEED ? m_seed : AZStd::GetTimeUTCMilliSecond();
+                m_seed = flag == GenerationFlag::GF_SEED ? m_seed : aznumeric_cast<uint32>(AZStd::GetTimeUTCMilliSecond());
                 m_rng = CRndGen(m_seed);
                 AddParticles(entityId, m_spriteCount);
                 break;
@@ -301,11 +302,10 @@ namespace CloudsGem
 
     void CloudGenerator::RequestGeneration(GenerationFlag flag)
     {
-        using Tools = AzToolsFramework::ToolsApplicationRequests;
-        using EntityIdList = AzToolsFramework::EntityIdList;
-
-        EntityIdList selectedEntityIds;
-        Tools::Bus::BroadcastResult(selectedEntityIds, &Tools::GetSelectedEntities);
+        // We need to use GetSelectedAndPinnedEntities as we have to handle the pinned inspector.
+        AzToolsFramework::EntityIdList selectedEntityIds;
+        AzToolsFramework::EntityPropertyEditorRequestBus::Broadcast(
+            &AzToolsFramework::EntityPropertyEditorRequestBus::Events::GetSelectedAndPinnedEntities, selectedEntityIds);
         for (auto entityId : selectedEntityIds)
         {
             EditorCloudComponentRequestBus::Event(entityId, &EditorCloudComponentRequestBus::Events::Generate, flag);

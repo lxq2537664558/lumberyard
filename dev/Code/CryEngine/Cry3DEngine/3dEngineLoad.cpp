@@ -17,10 +17,9 @@
 #include "StdAfx.h"
 
 #include "3dEngine.h"
-#include "terrain.h"
 #include "ObjMan.h"
 #include "VisAreas.h"
-#include "terrain_water.h"
+#include "Ocean.h"
 #include "IParticles.h"
 #include "DecalManager.h"
 #include "Vegetation.h"
@@ -43,9 +42,12 @@
 #include <IMaterialEffects.h>
 #include "ClipVolumeManager.h"
 #include "Environment/OceanEnvironmentBus.h"
+#include <Terrain/Bus/LegacyTerrainBus.h>
 
+#include <I3DEngine.h>
 #include <LoadScreenBus.h>
 #include <StatObjBus.h>
+#include "AzCore/Component/TickBus.h"
 
 //------------------------------------------------------------------------------
 #define LEVEL_DATA_FILE "LevelData.xml"
@@ -76,6 +78,7 @@ inline Vec3 StringToVector(const char* str)
 //////////////////////////////////////////////////////////////////////////
 void C3DEngine::LoadEmptyLevel()
 {
+    CreateOctree(0.0f);
     LoadDefaultAssets();
 }
 
@@ -273,50 +276,59 @@ bool C3DEngine::LevelLoadingInProgress()
     return Cry3DEngineBase::m_bLevelLoadingInProgress;
 }
 
-bool C3DEngine::LoadTerrain(XmlNodeRef pDoc, std::vector<struct IStatObj*>** ppStatObjTable, std::vector<_smart_ptr<IMaterial> >** ppMatTable, int nSID)
+int C3DEngine::GetLegacyTerrainLevelData(AZ::IO::HandleType& fileHandle, STerrainInfo& terrainInfo
+                                         , bool& bSectorPalettes, EEndian& eEndian
+                                         , XmlNodeRef& surfaceTypesXmlNode)
 {
-    LOADING_TIME_PROFILE_SECTION;
+    // Load LevelData.xml File.
+    XmlNodeRef xmlLevelData = GetSystem()->LoadXmlFromFile(GetLevelFilePath(LEVEL_DATA_FILE));
 
-    PrintMessage("===== Loading %s =====", COMPILED_HEIGHT_MAP_FILE_NAME);
-
-    // open file
-    AZ::IO::HandleType fileHandle = GetPak()->FOpen(GetLevelFilePath(COMPILED_HEIGHT_MAP_FILE_NAME), "rbx");
-    if (fileHandle == AZ::IO::InvalidHandle)
+    if (xmlLevelData == nullptr)
     {
-        return 0;
+        AZ_Error("LegacyTerrain", false, "C3DEngine::GetLegacyTerrainLevelData: xml level file '%s' not found (files missing?)", GetLevelFilePath(LEVEL_DATA_FILE)); // files missing ?
+        return false;
     }
 
-    // read header
-    STerrainChunkHeader header;
-    if (!GetPak()->FRead(&header, 1, fileHandle, false))
+    surfaceTypesXmlNode = xmlLevelData->findChild("SurfaceTypes");
+    return GetLegacyTerrainDataFromCompiledOctreeFile(fileHandle, terrainInfo, bSectorPalettes, eEndian);
+}
+
+int C3DEngine::GetLegacyTerrainLevelData(uint8*& octreeData, STerrainInfo& terrainInfo
+                                         , bool& bSectorPalettes, EEndian& eEndian)
+{
+    return GetLegacyTerrainDataFromOctreeBuffer(octreeData, terrainInfo, bSectorPalettes, eEndian);
+}
+
+bool C3DEngine::LoadCompiledOctreeForEditor()
+{
+    // Load LevelData.xml File.
+    XmlNodeRef xmlLevelData = GetSystem()->LoadXmlFromFile(GetLevelFilePath(LEVEL_DATA_FILE));
+
+    if (xmlLevelData == 0)
     {
-        GetPak()->FClose(fileHandle);
-        return 0;
+        Error("C3DEngine::LoadLevel: xml file not found (files missing?)"); // files missing ?
+        return false;
     }
 
-    SwapEndian(header, (header.nFlags & SERIALIZATION_FLAG_BIG_ENDIAN) ? eBigEndian : eLittleEndian);
+    std::vector<struct IStatObj*>* pStatObjTable = NULL;
+    std::vector<_smart_ptr<IMaterial> >* pMatTable = NULL;
 
-    if (header.nChunkSize)
+    int nSID = 0;
+
+    XmlNodeRef nodeRef = xmlLevelData->findChild("SurfaceTypes");
+
+    LoadCollisionClasses(xmlLevelData->findChild("CollisionClasses"));
+
+    if (!LoadOctree(nodeRef, &pStatObjTable, &pMatTable, nSID))
     {
-        if (!m_pTerrain)
-        {
-            m_pTerrain = (CTerrain*)CreateTerrain(header.TerrainInfo);
-        }
-
-        m_pTerrain->LoadSurfaceTypesFromXML(pDoc);
-
-        if (!m_pTerrain->Load(fileHandle, header.nChunkSize - sizeof(STerrainChunkHeader), &header, ppStatObjTable, ppMatTable))
-        {
-            delete m_pTerrain;
-            m_pTerrain = NULL;
-        }
+        Error("Octree file (%s) not found or file version error, please try to re-export the level", COMPILED_OCTREE_FILE_NAME);
+        return false;
     }
 
-    assert(GetPak()->FEof(fileHandle));
+    SAFE_DELETE(pStatObjTable);
+    SAFE_DELETE(pMatTable);
 
-    GetPak()->FClose(fileHandle);
-
-    return m_pTerrain != NULL;
+    return true;
 }
 
 bool C3DEngine::LoadVisAreas(std::vector<struct IStatObj*>** ppStatObjTable, std::vector<_smart_ptr<IMaterial> >** ppMatTable)
@@ -370,6 +382,9 @@ void C3DEngine::UnloadLevel()
     GetRenderer()->EnableLevelUnloading(true);
 
     GetISystem()->GetISystemEventDispatcher()->OnSystemEvent(ESYSTEM_EVENT_LEVEL_UNLOAD, 0, 0);
+    // Run any events that were queued against the system tick bus before we start tearing down systems and deleting things
+    // This should prevent any stale events from running when the next level is loaded
+    AZ::SystemTickBus::ExecuteQueuedEvents();
 
     GetRenderer()->EnableLevelUnloading(false);
 
@@ -408,9 +423,6 @@ void C3DEngine::UnloadLevel()
         CryComment("done");
     }
 
-    //SAFE_DELETE(m_pObjManager);
-    // delete terrain
-
     // delete decal manager
     if (m_pDecalManager)
     {
@@ -419,15 +431,16 @@ void C3DEngine::UnloadLevel()
         CryComment("done");
     }
 
-    if (m_pTerrain)
+    if (m_pOcean)
     {
-        CryComment("Deleting Terrain");
-        SAFE_DELETE(m_pTerrain);
+        CryComment("Deleting Ocean");
+        SAFE_DELETE(m_pOcean);
         CryComment("done");
     }
 
     // delete outdoor objects
     CryComment("Deleting Octree");
+    DestroyOctree();
     SAFE_DELETE(m_pObjectsTree);
     m_pObjectsTree = nullptr;
 
@@ -576,7 +589,6 @@ void C3DEngine::UnloadLevel()
     SAFE_DELETE(m_pTimeOfDay);
     CLightEntity::StaticReset();
     CVisArea::StaticReset();
-    CRoadRenderNode::FreeStaticMemoryUsage();
     CFogVolumeRenderNode::StaticReset();
     CRopeRenderNode::StaticReset();
 
@@ -760,15 +772,13 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
 
     LoadDefaultAssets();
 
-    //  Confetti BEGIN: Igor Lobanchikov
     if (m_pSkyLightManager)
     {
         m_pSkyLightManager->InitSkyDomeMesh();
-        // Igor: set default render parameters.
+        // set default render parameters.
         // for some reason this is not done later???
         m_pSkyLightManager->UpdateRenderParams();
-    }
-    //  Confetti End: Igor Lobanchikov
+    }    
 
     // Load LevelData.xml File.
     XmlNodeRef xmlLevelData = GetSystem()->LoadXmlFromFile(GetLevelFilePath(LEVEL_DATA_FILE));
@@ -854,10 +864,9 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
     }
 #endif
 
-    if (!LoadTerrain(nodeRef, &pStatObjTable, &pMatTable, nSID))
+    if (!LoadOctree(nodeRef, &pStatObjTable, &pMatTable, nSID))
     {
-        Error("Terrain file (%s) not found or file version error, please try to re-export the level", COMPILED_HEIGHT_MAP_FILE_NAME);
-        return false;
+        Warning("Octree file (%s) not found or file version error, please try to re-export the level", COMPILED_OCTREE_FILE_NAME);
     }
 
     // load indoors
@@ -900,16 +909,16 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
     //Update loading screen and important tick functions
     SYNCHRONOUS_LOADING_TICK();
 
-    if (!m_bShowTerrainSurface)
+    if (!IsTerrainActive())
     {
-        gEnv->pPhysicalWorld->SetHeightfieldData(NULL);
+        gEnv->pPhysicalWorld->SetHeightfieldData(nullptr);
     }
 
     // init water if not initialized already (if no mission was found)
-    if (m_pTerrain && !m_pTerrain->GetOcean())
+    if (!GetOcean())
     {
         PrintMessage("===== Creating Ocean =====");
-        m_pTerrain->InitTerrainWater(m_pTerrainWaterMat);
+        CreateOcean(m_pTerrainWaterMat, COcean::GetWaterLevelInfo());
     }
 
     PrintMessage("===== Load level physics data =====");
@@ -940,12 +949,6 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
 void C3DEngine::LoadPhysicsData()
 {
     CPhysCallbacks::Init();
-
-    if (gEnv->pScriptSystem)
-    {
-        // Load explosion shapes.
-        gEnv->pScriptSystem->ExecuteFile("scripts/physics.lua", /*bRaiseError=*/ false, /*bForceReload=*/ true);
-    }
 }
 
 static void OnReleaseGeom(IGeometry* pGeom)
@@ -1027,25 +1030,13 @@ void C3DEngine::FreeFoliages()
 
 void C3DEngine::LoadTerrainSurfacesFromXML(XmlNodeRef pDoc, bool bUpdateTerrain, int nSID)
 {
-    if (!m_pTerrain)
-    {
-        return;
-    }
-
-    m_pTerrain->LoadSurfaceTypesFromXML(pDoc);
-    m_pTerrain->UpdateSurfaceTypes();
-    m_pTerrain->InitHeightfieldPhysics();
+    AZ_Warning("LegacyTerrain", false, "%s is deprecated. Use LegacyTerrain::LegacyTerrainDataRequests::LoadTerrainSurfacesFromXML instead");
+    LegacyTerrain::LegacyTerrainDataRequestBus::Broadcast(&LegacyTerrain::LegacyTerrainDataRequests::LoadTerrainSurfacesFromXML, pDoc);
 }
 
 void C3DEngine::LoadMissionDataFromXMLNode(const char* szMissionName)
 {
     LOADING_TIME_PROFILE_SECTION;
-
-    if (!m_pTerrain)
-    {
-        Warning("Calling C3DEngine::LoadMissionDataFromXMLNode while level is not loaded");
-        return;
-    }
 
     GetRenderer()->MakeMainContextActive();
 
@@ -1175,10 +1166,12 @@ void C3DEngine::LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID)
     m_volFogGlobalDensityMultiplierLDR = (float)max(atof(GetXMLAttribText(pInputNode, "Fog", "LDRGlobalDensMult", "1.0")), 0.0);
 
     float fTerrainDetailMaterialsViewDistRatio = (float)atof(GetXMLAttribText(pInputNode, "Terrain", "DetailLayersViewDistRatio", "1.0"));
-    if (m_fTerrainDetailMaterialsViewDistRatio != fTerrainDetailMaterialsViewDistRatio && GetTerrain())
+
+    if (m_fTerrainDetailMaterialsViewDistRatio != fTerrainDetailMaterialsViewDistRatio)
     {
-        GetTerrain()->ResetTerrainVertBuffers();
+        LegacyTerrain::LegacyTerrainDataRequestBus::Broadcast(&LegacyTerrain::LegacyTerrainDataRequests::ResetTerrainVertBuffers);
     }
+
     m_fTerrainDetailMaterialsViewDistRatio = fTerrainDetailMaterialsViewDistRatio;
 
     // SkyBox
@@ -1202,12 +1195,8 @@ void C3DEngine::LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID)
         char szTerrainWaterMatName[256];
         cry_strcpy(szTerrainWaterMatName, GetXMLAttribText(pInputNode, "Ocean", "Material", "EngineAssets/Materials/Water/Ocean_default"));
         m_pTerrainWaterMat = szTerrainWaterMatName[0] ? GetMatMan()->LoadMaterial(szTerrainWaterMatName, false) : nullptr;
-
-        if (m_pTerrain)
-        {
-            m_pTerrain->InitTerrainWater(m_pTerrainWaterMat);
-        }
     }
+    CreateOcean(m_pTerrainWaterMat, COcean::GetWaterLevelInfo());
 
     m_oceanWindDirection = (float) atof(GetXMLAttribText(pInputNode, "OceanAnimation", "WindDirection", "1.0"));
     m_oceanWindSpeed = (float) atof(GetXMLAttribText(pInputNode, "OceanAnimation", "WindSpeed", "4.0"));
@@ -1267,12 +1256,6 @@ void C3DEngine::LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID)
 
         pTimeOfDay->SetEnvironmentSettings(envTODInfo);
         pTimeOfDay->Update(true, true);
-    }
-
-
-    {
-        const char* pText = GetXMLAttribText(pInputNode, "EnvState", "ShowTerrainSurface", "true");
-        m_bShowTerrainSurface = !strcmp(pText, "true") || !strcmp(pText, "1");
     }
 
     {
@@ -1547,8 +1530,6 @@ void C3DEngine::PostLoadLevel()
         PrecreateDecals();
     }
 
-    CompleteObjectsGeometry();
-
     gEnv->pSystem->SetSystemGlobalState(ESYSTEM_GLOBAL_STATE_LEVEL_LOAD_START_TEXTURES);
 
     GetRenderer()->PostLevelLoading();
@@ -1613,3 +1594,7 @@ IStatObj* C3DEngine::LoadStatObj(TSerialize ser)
     }
     return pStatObj;
 }
+
+
+
+

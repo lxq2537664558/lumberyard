@@ -71,14 +71,27 @@ namespace PhysX
         /// @return Pointer to the created mesh.
         virtual physx::PxTriangleMesh* CreateTriangleMeshFromCooked(const void* cookedMeshData, AZ::u32 bufferSize) = 0;
 
-        /// Creates a new convex mesh.
+        // LUMBERYARD_DEPRECATED(LY-109437)
+        //! @deprecated Deprecated, CookConvexMeshToFile has been moved to Physics::System::CookConvexMeshToFile
+        /// Creates a new convex mesh to a file.
         /// @param filePath Path to the output file
         /// @param vertices Pointer to beginning of vertex data.
         /// @param vertexCount Number of vertices in mesh.
         /// @return Result of cooking.
         virtual bool CookConvexMeshToFile(const AZStd::string& filePath, const AZ::Vector3* vertices, AZ::u32 vertexCount) = 0;
 
-        /// Creates a new triangular mesh.
+        // LUMBERYARD_DEPRECATED(LY-109437)
+        //! @deprecated Deprecated, CookConvexMeshToMemory has been moved to Physics::System::CookConvexMeshToMemory
+        /// Cooks a convex mesh to a memory buffer.
+        /// @param vertices Pointer to beginning of vertex data.
+        /// @param vertexCount Number of vertices in mesh.
+        /// @param result The resulting memory buffer.
+        /// @return Result of cooking.
+        virtual bool CookConvexMeshToMemory(const AZ::Vector3* vertices, AZ::u32 vertexCount, AZStd::vector<AZ::u8>& result) = 0;
+
+        // LUMBERYARD_DEPRECATED(LY-109437)
+        //! @deprecated Deprecated, CookTriangleMeshToFile has been moved to Physics::System::CookTriangleMeshToFile
+        /// Creates a new triangular to a file.
         /// @param filePath Path to the output file
         /// @param vertices Pointer to beginning of vertex data.
         /// @param vertexCount Number of vertices in mesh.
@@ -88,6 +101,20 @@ namespace PhysX
         virtual bool CookTriangleMeshToFile(const AZStd::string& filePath, const AZ::Vector3* vertices, AZ::u32 vertexCount,
             const AZ::u32* indices, AZ::u32 indexCount) = 0;
 
+        // LUMBERYARD_DEPRECATED(LY-109437)
+        //! @deprecated Deprecated, CookConvexMeshToMemory has been moved to Physics::System::CookConvexMeshToMemory
+        /// Cook a triangular mesh to a memory buffer.
+        /// @param vertices Pointer to beginning of vertex data.
+        /// @param vertexCount Number of vertices in mesh.
+        /// @param indices Pointer to beginning of index data.
+        /// @param indexCount Number of indices in mesh.
+        /// @param result The resulting memory buffer.
+        /// @return Result of cooking.
+        virtual bool CookTriangleMeshToMemory(const AZ::Vector3* vertices, AZ::u32 vertexCount,
+            const AZ::u32* indices, AZ::u32 indexCount, AZStd::vector<AZ::u8>& result) = 0;
+
+        // LUMBERYARD_DEPRECATED(LY-109437)
+        //! @deprecated Deprecated, AddColliderComponentToEntity has been moved to Physics::System::AddColliderComponentToEntity
         /// Adds an appropriate collider component to the entity based on the provided shape configuration.
         /// @param entity Entity where the component should be added to.
         /// @param colliderConfiguration Configuration of the collider.

@@ -20,6 +20,7 @@
     ],
 
     "attributes"    : {
+        "game_platform"         : "appletv",
         "is_apple"              : true,
         "default_folder_name"   : "BinAppleTV",
         "default_launcher_name" : "AppleTVLauncher",
@@ -77,7 +78,10 @@
             "GameController"
         ],
         "CFLAGS, CXXFLAGS": [
-            "-Wno-shorten-64-to-32"
+            "-Wno-shorten-64-to-32",
+            "-ffast-math",          # Allow aggressive, lossy floating-point optimizations,
+            "-fno-rtti",            # Disable RTTI,
+            "-fno-exceptions"       # Disable Exceptions
         ],
         "LIB": [
             "pthread"

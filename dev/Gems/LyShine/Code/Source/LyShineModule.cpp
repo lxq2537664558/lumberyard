@@ -15,6 +15,7 @@
 
 #include "LyShineModule.h"
 #include "LyShineSystemComponent.h"
+#include "LyShineLoadScreen.h"
 
 #include "UiCanvasComponent.h"
 #include "UiElementComponent.h"
@@ -53,6 +54,10 @@
 #include "World/UiCanvasAssetRefComponent.h"
 #include "World/UiCanvasProxyRefComponent.h"
 #include "World/UiCanvasOnMeshComponent.h"
+
+#if defined (LYSHINE_EDITOR)
+#   include "Pipeline/LyShineBuilder/LyShineBuilderComponent.h"
+#endif // LYSHINE_EDITOR
 
 namespace LyShine
 {
@@ -98,6 +103,13 @@ namespace LyShine
                 UiRadioButtonComponent::CreateDescriptor(),
                 UiRadioButtonGroupComponent::CreateDescriptor(),
                 UiParticleEmitterComponent::CreateDescriptor(),
+    #if defined(LYSHINE_EDITOR)
+                // Builder
+                LyShineBuilder::LyShineBuilderComponent::CreateDescriptor(),
+    #endif
+    #if AZ_LOADSCREENCOMPONENT_ENABLED
+                LyShineLoadScreenComponent::CreateDescriptor(),
+    #endif
             });
 
         // This is so the metrics system knows which component LyShine is registering
@@ -109,8 +121,11 @@ namespace LyShine
      */
     AZ::ComponentTypeList LyShineModule::GetRequiredSystemComponents() const
     {
-        return AZ::ComponentTypeList {
+        return AZ::ComponentTypeList{
                    azrtti_typeid<LyShineSystemComponent>(),
+    #if AZ_LOADSCREENCOMPONENT_ENABLED
+                   azrtti_typeid<LyShineLoadScreenComponent>(),
+    #endif
         };
     }
 }

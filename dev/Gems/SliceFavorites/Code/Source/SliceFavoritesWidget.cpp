@@ -22,7 +22,9 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QtCore/QPropertyAnimation>
-#include <QtCore/qtimer>
+#include <QtCore/QTimer>
+#include <AzToolsFramework/AssetBrowser/AssetSelectionModel.h>
+#include <AzToolsFramework/AssetEditor/AssetEditorBus.h>
 
 #include <Source/ui_SliceFavoritesWidget.h>
 
@@ -102,9 +104,33 @@ namespace SliceFavorites
 
             if (result == QMessageBox::Ok)
             {
+                // Only delete the highest-level items from the current selection
+                // Their children will be automatically removed
+                AZStd::vector<QModelIndex> toDelete;
                 for (const auto& selectedIndex : currentSelection.indexes())
                 {
-                    m_dataModel->RemoveFavorite(selectedIndex);
+                    bool child = false;
+                    for (const auto& potentialAncestor : currentSelection.indexes())
+                    {
+                        if (m_dataModel->IsDescendentOf(selectedIndex, potentialAncestor))
+                        {
+                            child = true;
+                            break;
+                        }
+                    }   
+
+                    if (!child)
+                    {
+                        toDelete.push_back(selectedIndex);
+                    }
+                }
+
+                for (const auto& selectedIndex : toDelete)
+                {
+                    if (selectedIndex.isValid())
+                    {
+                        m_dataModel->RemoveFavorite(selectedIndex);
+                    }
                 }
             }
         }
@@ -176,7 +202,23 @@ namespace SliceFavorites
 
         contextMenu->addSeparator();
 
-        contextMenu->addAction("Import slice favorites", contextMenu, [this]()
+        contextMenu->addAction("Import slice...", contextMenu, [this]()
+        {
+            AssetSelectionModel selection = AssetSelectionModel::AssetTypeSelection("Slice");
+            AzToolsFramework::EditorRequests::Bus::Broadcast(&AzToolsFramework::EditorRequests::BrowseForAssets, selection);
+            if (selection.IsValid())
+            {
+                auto product = azrtti_cast<const ProductAssetBrowserEntry*>(selection.GetResult());
+                if (product)
+                {
+                    m_dataModel->AddFavorite(product);
+                }
+            }
+        });
+
+        contextMenu->addSeparator();
+
+        contextMenu->addAction("Import slice favorites...", contextMenu, [this]()
         {
             QString fileName = QFileDialog::getOpenFileName(this, "Import Favorites From...", QString(), tr("XML (*.xml)"), nullptr, QFileDialog::DontUseNativeDialog);
             if (fileName.length() > 0)
@@ -187,7 +229,7 @@ namespace SliceFavorites
             }
         });
 
-        QAction* exportAction = contextMenu->addAction("Export slice favorites", contextMenu, [this]()
+        QAction* exportAction = contextMenu->addAction("Export slice favorites...", contextMenu, [this]()
         {
             QString fileName = QFileDialog::getSaveFileName(nullptr, QString("Export Favorites To..."), "SliceFavorites.xml", QString("XML (*.xml)"));
             if (fileName.length() > 0)

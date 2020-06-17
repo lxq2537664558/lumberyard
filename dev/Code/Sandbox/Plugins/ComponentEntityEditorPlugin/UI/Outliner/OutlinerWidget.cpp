@@ -9,7 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "stdafx.h"
+#include "ComponentEntityEditorPlugin_precompiled.h"
 
 #include "OutlinerListModel.hxx"
 #include "OutlinerSortFilterProxyModel.hxx"
@@ -253,7 +253,6 @@ OutlinerWidget::OutlinerWidget(QWidget* pParent, Qt::WindowFlags flags)
 
     m_listModel->Initialize();
 
-    AzToolsFramework::EditorMetricsEventsBus::Handler::BusConnect();
     AzToolsFramework::EditorPickModeNotificationBus::Handler::BusConnect(AzToolsFramework::GetEntityContextId());
     EntityHighlightMessages::Bus::Handler::BusConnect();
     OutlinerModelNotificationBus::Handler::BusConnect();
@@ -268,7 +267,6 @@ OutlinerWidget::~OutlinerWidget()
 {
     AzToolsFramework::ComponentModeFramework::EditorComponentModeNotificationBus::Handler::BusDisconnect();
     AzToolsFramework::EditorEntityInfoNotificationBus::Handler::BusDisconnect();
-    AzToolsFramework::EditorMetricsEventsBus::Handler::BusDisconnect();
     AzToolsFramework::EditorPickModeNotificationBus::Handler::BusDisconnect();
     EntityHighlightMessages::Bus::Handler::BusDisconnect();
     OutlinerModelNotificationBus::Handler::BusDisconnect();
@@ -288,17 +286,6 @@ OutlinerWidget::~OutlinerWidget()
 //  Currently, the first behavior is implemented.
 void OutlinerWidget::OnSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
 {
-    if (selected.size() != 1)
-    {
-        AZ::EntityId id(AZ::EntityId::InvalidEntityId);
-        MainWindow::instance()->SetSelectedEntity(id);
-    }
-    else
-    {
-        AZ::EntityId entityId(GetEntityIdFromIndex(selected.indexes().at(0)));
-        MainWindow::instance()->SetSelectedEntity(entityId);
-    }
-
     if (m_selectionChangeInProgress || !m_enableSelectionUpdates)
     {
         return;
@@ -476,21 +463,21 @@ void OutlinerWidget::UpdateSelection()
 
             AzToolsFramework::EntityIdList selectedEntities;
             AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(selectedEntities, &AzToolsFramework::ToolsApplicationRequests::Bus::Events::GetSelectedEntities);
-
+            // it is expected that BuildSelectionFrom Entities results in the actual row-and-column selection.
             m_gui->m_objectTree->selectionModel()->select(
-                BuildSelectionFromEntities(selectedEntities), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+                BuildSelectionFromEntities(selectedEntities), QItemSelectionModel::ClearAndSelect);
         }
         else
         {
             {
                 AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzToolsFramework, "OutlinerWidget::ModelEntitySelectionChanged:Deselect");
                 m_gui->m_objectTree->selectionModel()->select(
-                    BuildSelectionFromEntities(m_entitiesToDeselect), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
+                    BuildSelectionFromEntities(m_entitiesToDeselect), QItemSelectionModel::Deselect);
             }
             {
                 AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzToolsFramework, "OutlinerWidget::ModelEntitySelectionChanged:Select");
                 m_gui->m_objectTree->selectionModel()->select(
-                    BuildSelectionFromEntities(m_entitiesToSelect), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                    BuildSelectionFromEntities(m_entitiesToSelect), QItemSelectionModel::Select);
             }
         }
 
@@ -508,18 +495,21 @@ void OutlinerWidget::UpdateSelection()
     }
 }
 
-    template <class EntityIdCollection>
-    QItemSelection OutlinerWidget::BuildSelectionFromEntities(const EntityIdCollection& entityIds)
+template <class EntityIdCollection>
+QItemSelection OutlinerWidget::BuildSelectionFromEntities(const EntityIdCollection& entityIds)
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzToolsFramework);
     QItemSelection selection;
 
     for (const auto& entityId : entityIds)
     {
-        const QModelIndex proxyIndex = GetIndexFromEntityId(entityId);
-        if (proxyIndex.isValid())
+        const QModelIndex startOfRow = GetIndexFromEntityId(entityId);
+        
+        if (startOfRow.isValid())
         {
-            selection.select(proxyIndex, proxyIndex);
+            // we select from start of row to end of row (ie, the last column), not just the first cell
+            const QModelIndex endOfRow = m_proxyModel->index(startOfRow.row(), m_proxyModel->columnCount() - 1, startOfRow.parent());
+            selection.select(startOfRow, endOfRow);
         }
     }
 
@@ -528,6 +518,8 @@ void OutlinerWidget::UpdateSelection()
 
 void OutlinerWidget::OnOpenTreeContextMenu(const QPoint& pos)
 {
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
+
     bool isDocumentOpen = false;
     EBUS_EVENT_RESULT(isDocumentOpen, AzToolsFramework::EditorRequests::Bus, IsLevelDocumentOpen);
     if (!isDocumentOpen)
@@ -607,6 +599,30 @@ void OutlinerWidget::OnOpenTreeContextMenu(const QPoint& pos)
             m_actionGoToEntitiesInViewport->setToolTip(QObject::tr("Moves the viewports to the bounding box for the selection."));
         }
         contextMenu->addAction(m_actionGoToEntitiesInViewport);        
+    }
+
+    // Register actions related to slice root selection in Outlinear list.
+    {
+        contextMenu->addSeparator();
+
+        QMenu* selectSliceRootMenu = new QMenu(contextMenu);
+        contextMenu->addMenu(selectSliceRootMenu);
+
+        selectSliceRootMenu->setTitle(QObject::tr("Select slice root"));
+        selectSliceRootMenu->setToolTip(QObject::tr("Selects a slice root in the Outliner list."));
+
+        selectSliceRootMenu->addAction(m_actionToSelectTopSliceRoot);
+        selectSliceRootMenu->addAction(m_actionToSelectSliceRootAboveSelection);
+        selectSliceRootMenu->addAction(m_actionToSelectSliceRootBelowSelection);
+        selectSliceRootMenu->addAction(m_actionToSelectBottomSliceRoot);
+
+        {
+            bool entitySelected = !m_selectedEntityIds.empty();
+            m_actionToSelectSliceRootAboveSelection->setEnabled(entitySelected);
+            m_actionToSelectSliceRootBelowSelection->setEnabled(entitySelected);
+        }
+        
+        contextMenu->addSeparator();
     }
 
     contextMenu->exec(m_gui->m_objectTree->mapToGlobal(pos));
@@ -876,6 +892,143 @@ void OutlinerWidget::GoToEntitiesInViewport()
     AzToolsFramework::EditorRequestBus::Broadcast(&AzToolsFramework::EditorRequestBus::Events::GoToSelectedEntitiesInViewports);
 }
 
+void OutlinerWidget::DoSelectSliceRootNextToSelection(bool isTraversalUpwards)
+{
+    // Navigation triggered
+    AzToolsFramework::EditorMetricsEventsBusAction editorMetricsEventsBusActionWrapper(
+        qApp->activePopupWidget() ?
+        AzToolsFramework::EditorMetricsEventsBusTraits::NavigationTrigger::RightClickMenu :
+        AzToolsFramework::EditorMetricsEventsBusTraits::NavigationTrigger::Shortcut);
+
+    const auto treeView = m_gui->m_objectTree;
+
+    QModelIndex currentIdx = treeView->currentIndex();
+    if (!currentIdx.isValid())
+    {
+        return;
+    }
+
+    AZ::EntityId currentEntityId;
+    bool currentIdxSelected = false;
+    currentEntityId = GetEntityIdFromIndex(currentIdx);
+
+    AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+        currentIdxSelected, &AzToolsFramework::ToolsApplicationRequests::IsSelected, currentEntityId);
+
+    if (!currentIdxSelected)
+    {
+        return;
+    }
+
+    AZStd::function<QModelIndex(QModelIndex)> getNextIdxFunction =
+        AZStd::bind(isTraversalUpwards ? &QTreeView::indexAbove : &QTreeView::indexBelow, treeView, AZStd::placeholders::_1);
+    QModelIndex nextIdx = getNextIdxFunction(currentIdx);
+    bool foundSliceRoot = false;
+
+    while (nextIdx.isValid() && !foundSliceRoot)
+    {
+        currentIdx = nextIdx;
+        currentEntityId = GetEntityIdFromIndex(currentIdx);
+
+        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+            foundSliceRoot, &AzToolsFramework::ToolsApplicationRequests::IsSliceRootEntity, currentEntityId);
+
+        nextIdx = getNextIdxFunction(currentIdx);
+    }
+
+    if (foundSliceRoot)
+    {
+        SetIndexAsCurrentAndSelected(currentIdx);
+    }
+}
+
+void OutlinerWidget::DoSelectSliceRootAboveSelection()
+{
+    DoSelectSliceRootNextToSelection(true);
+}
+
+
+void OutlinerWidget::DoSelectSliceRootBelowSelection()
+{
+    DoSelectSliceRootNextToSelection(false);
+}
+
+void OutlinerWidget::DoSelectEdgeSliceRoot(bool shouldSelectTopMostSlice)
+{
+    // Navigation triggered
+    AzToolsFramework::EditorMetricsEventsBusAction editorMetricsEventsBusActionWrapper(
+        qApp->activePopupWidget() ?
+        AzToolsFramework::EditorMetricsEventsBusTraits::NavigationTrigger::RightClickMenu :
+        AzToolsFramework::EditorMetricsEventsBusTraits::NavigationTrigger::Shortcut);
+
+    const auto treeView = m_gui->m_objectTree;
+    const auto itemModel = treeView->model();
+    if (itemModel->rowCount() == 0)
+    {
+        return;
+    }
+
+    QModelIndex currentIdx;
+    AZStd::function<QModelIndex(QModelIndex)> getNextIdxFunction;
+    if (shouldSelectTopMostSlice)
+    {
+        currentIdx = itemModel->index(0, OutlinerListModel::ColumnName);
+
+        getNextIdxFunction =
+            AZStd::bind(&QTreeView::indexBelow, treeView, AZStd::placeholders::_1);
+    }
+    else
+    {
+        currentIdx = itemModel->index(itemModel->rowCount() - 1, OutlinerListModel::ColumnName);
+        while (itemModel->rowCount(currentIdx) > 0 && treeView->isExpanded(currentIdx))
+        {
+            currentIdx = itemModel->index(itemModel->rowCount(currentIdx) - 1, OutlinerListModel::ColumnName, currentIdx);
+        }
+
+        getNextIdxFunction =
+            AZStd::bind(&QTreeView::indexAbove, treeView, AZStd::placeholders::_1);
+    }
+
+    QModelIndex nextIdx = currentIdx;
+    bool foundSliceRoot = false;
+    AZ::EntityId currentEntityId;
+    do
+    {
+        currentIdx = nextIdx;
+        currentEntityId = GetEntityIdFromIndex(currentIdx);
+
+        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+            foundSliceRoot, &AzToolsFramework::ToolsApplicationRequests::IsSliceRootEntity, currentEntityId);
+        nextIdx = getNextIdxFunction(currentIdx);
+    } while (nextIdx.isValid() && !foundSliceRoot);
+
+    if (foundSliceRoot)
+    {
+        SetIndexAsCurrentAndSelected(currentIdx);
+    }
+}
+
+
+void OutlinerWidget::DoSelectTopSliceRoot()
+{
+    DoSelectEdgeSliceRoot(true);
+}
+
+void OutlinerWidget::DoSelectBottomSliceRoot()
+{
+    DoSelectEdgeSliceRoot(false);
+}
+
+void OutlinerWidget::SetIndexAsCurrentAndSelected(const QModelIndex& index)
+{
+    m_gui->m_objectTree->setCurrentIndex(index);
+
+    AZ::EntityId entityId = GetEntityIdFromIndex(index);
+
+    AzToolsFramework::ToolsApplicationRequestBus::Broadcast(
+        &AzToolsFramework::ToolsApplicationRequests::SetSelectedEntities, AzToolsFramework::EntityIdList{ entityId });
+}
+
 void OutlinerWidget::SetupActions()
 {
     m_actionToShowSlice = new QAction(tr("Show Slice"), this);
@@ -926,6 +1079,33 @@ void OutlinerWidget::SetupActions()
     connect(m_actionGoToEntitiesInViewport, &QAction::triggered, this, &OutlinerWidget::GoToEntitiesInViewport);
     addAction(m_actionGoToEntitiesInViewport);
 
+    m_actionToSelectSliceRootAboveSelection = new QAction(tr("Up"), this);
+    m_actionToSelectSliceRootAboveSelection->setToolTip(tr("Select the first slice root above the selection in the Outliner list."));
+    m_actionToSelectSliceRootAboveSelection->setShortcut(QKeySequence("Ctrl+Up"));
+    m_actionToSelectSliceRootAboveSelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(m_actionToSelectSliceRootAboveSelection, &QAction::triggered, this, &OutlinerWidget::DoSelectSliceRootAboveSelection);
+    addAction(m_actionToSelectSliceRootAboveSelection);
+
+    m_actionToSelectSliceRootBelowSelection = new QAction(tr("Down"), this);
+    m_actionToSelectSliceRootBelowSelection->setToolTip(tr("Select the first slice root below the selection in the Outliner list."));
+    m_actionToSelectSliceRootBelowSelection->setShortcut(QKeySequence("Ctrl+Down"));
+    m_actionToSelectSliceRootBelowSelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(m_actionToSelectSliceRootBelowSelection, &QAction::triggered, this, &OutlinerWidget::DoSelectSliceRootBelowSelection);
+    addAction(m_actionToSelectSliceRootBelowSelection);
+
+    m_actionToSelectTopSliceRoot = new QAction(tr("Top"), this);
+    m_actionToSelectTopSliceRoot->setToolTip(tr("Select the slice root at the top of the Outliner list."));
+    m_actionToSelectTopSliceRoot->setShortcut(QKeySequence("Ctrl+Home"));
+    m_actionToSelectTopSliceRoot->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(m_actionToSelectTopSliceRoot, &QAction::triggered, this, &OutlinerWidget::DoSelectTopSliceRoot);
+    addAction(m_actionToSelectTopSliceRoot);
+
+    m_actionToSelectBottomSliceRoot = new QAction(tr("Bottom"), this);
+    m_actionToSelectBottomSliceRoot->setToolTip(tr("Select the slice root at the bottom of the Outliner list."));
+    m_actionToSelectBottomSliceRoot->setShortcut(QKeySequence("Ctrl+End"));
+    m_actionToSelectBottomSliceRoot->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(m_actionToSelectBottomSliceRoot, &QAction::triggered, this, &OutlinerWidget::DoSelectBottomSliceRoot);
+    addAction(m_actionToSelectBottomSliceRoot);
 }
 
 void OutlinerWidget::SelectSliceRoot()
@@ -1021,7 +1201,7 @@ void OutlinerWidget::OnDropEvent()
     m_listModel->SetDropOperationInProgress(true);
 }
 
-void OutlinerWidget::EntityCreated(const AZ::EntityId& entityId)
+void OutlinerWidget::OnEditorEntityCreated(const AZ::EntityId& entityId)
 {
     QueueContentUpdateSort(entityId);
     QueueScrollToNewContent(entityId);
@@ -1096,7 +1276,7 @@ QModelIndex OutlinerWidget::GetIndexFromEntityId(const AZ::EntityId& entityId) c
 {
     if (entityId.IsValid())
     {
-        QModelIndex modelIndex = m_listModel->GetIndexFromEntity(entityId);
+        QModelIndex modelIndex = m_listModel->GetIndexFromEntity(entityId, 0);
         if (modelIndex.isValid())
         {
             return m_proxyModel->mapFromSource(modelIndex);

@@ -40,6 +40,7 @@
 #include <MCore/Source/IDGenerator.h>
 #include <MCore/Source/Attribute.h>
 #include <MCore/Source/AttributeFactory.h>
+#include <MCore/Source/LogManager.h>
 #include <MCore/Source/Stream.h>
 #include <MCore/Source/Compare.h>
 #include <MCore/Source/Random.h>
@@ -133,13 +134,18 @@ namespace EMotionFX
             }
         }
 
-        // Initialize trigger actions
-        for (AnimGraphTriggerAction* action : m_actionSetup.GetActions())
-        {
-            action->InitAfterLoading(animGraph);
-        }
+        InitTriggerActions();
 
         return result;
+    }
+
+
+    void AnimGraphNode::InitTriggerActions()
+    {
+        for (AnimGraphTriggerAction* action : m_actionSetup.GetActions())
+        {
+            action->InitAfterLoading(mAnimGraph);
+        }
     }
 
 
@@ -907,6 +913,16 @@ namespace EMotionFX
         SetCurrentPlayTime(animGraphInstance, normalizedTime * duration);
     }
 
+    AZStd::tuple<float, float, float> AnimGraphNode::SyncPlaySpeeds(float playSpeedA, float durationA, float playSpeedB, float durationB, float weight)
+    {
+        const float timeRatio = (durationB > MCore::Math::epsilon) ? durationA / durationB : 0.0f;
+        const float timeRatio2 = (durationA > MCore::Math::epsilon) ? durationB / durationA : 0.0f;
+        const float factorA = AZ::Lerp(1.0f, timeRatio, weight);
+        const float factorB = AZ::Lerp(timeRatio2, 1.0f, weight);
+        const float interpolatedSpeed = AZ::Lerp(playSpeedA, playSpeedB, weight);
+
+        return AZStd::make_tuple(interpolatedSpeed, factorA, factorB);
+    }
 
     // sync blend the play speed of two nodes
     void AnimGraphNode::SyncPlaySpeeds(AnimGraphInstance* animGraphInstance, AnimGraphNode* masterNode, float weight, bool modifyMasterSpeed)
@@ -914,13 +930,13 @@ namespace EMotionFX
         AnimGraphNodeData* uniqueDataA = masterNode->FindUniqueNodeData(animGraphInstance);
         AnimGraphNodeData* uniqueDataB = FindUniqueNodeData(animGraphInstance);
 
-        const float durationA   = uniqueDataA->GetDuration();
-        const float durationB   = uniqueDataB->GetDuration();
-        const float timeRatio   = (durationB > MCore::Math::epsilon) ? durationA / durationB : 0.0f;
-        const float timeRatio2  = (durationA > MCore::Math::epsilon) ? durationB / durationA : 0.0f;
-        const float factorA     = MCore::LinearInterpolate<float>(1.0f, timeRatio, weight);
-        const float factorB     = MCore::LinearInterpolate<float>(timeRatio2, 1.0f, weight);
-        const float interpolatedSpeed   = MCore::LinearInterpolate<float>(uniqueDataA->GetPlaySpeed(), uniqueDataB->GetPlaySpeed(), weight);
+        float factorA;
+        float factorB;
+        float interpolatedSpeed;
+        AZStd::tie(interpolatedSpeed, factorA, factorB) = SyncPlaySpeeds(
+            uniqueDataA->GetPlaySpeed(), uniqueDataA->GetDuration(),
+            uniqueDataB->GetPlaySpeed(), uniqueDataB->GetDuration(),
+            weight);
 
         if (modifyMasterSpeed)
         {
@@ -944,15 +960,19 @@ namespace EMotionFX
         float servantPlaySpeed, const AnimGraphSyncTrack* servantSyncTrack, uint32 servantSyncTrackIndex, float servantDuration,
         ESyncMode syncMode, float weight, float* outMasterFactor, float* outServantFactor, float* outPlaySpeed)
     {
-        *outPlaySpeed = AZ::Lerp(masterPlaySpeed, servantPlaySpeed, weight);
-
         // exit if we don't want to sync or we have no master node to sync to
         if (syncMode == SYNCMODE_DISABLED)
         {
             *outMasterFactor = 1.0f;
             *outServantFactor = 1.0f;
+
+            // Use the master/source state playspeed when transitioning, do not blend playspeeds if syncing is disabled.
+            *outPlaySpeed = masterPlaySpeed;
             return;
         }
+
+        // Blend playspeeds only if syncing is enabled.
+        *outPlaySpeed = AZ::Lerp(masterPlaySpeed, servantPlaySpeed, weight);
 
         // if one of the tracks is empty, sync the full clip
         if (syncMode == SYNCMODE_TRACKBASED)
@@ -1600,7 +1620,7 @@ namespace EMotionFX
         // top down update all incoming connections
         for (BlendTreeConnection* connection : mConnections)
         {
-            connection->GetSourceNode()->TopDownUpdate(animGraphInstance, timePassedInSeconds);
+            connection->GetSourceNode()->PerformTopDownUpdate(animGraphInstance, timePassedInSeconds);
         }
     }
 
@@ -1722,8 +1742,6 @@ namespace EMotionFX
         }
     }
 
-
-
     // Process events and motion extraction delta.
     void AnimGraphNode::PostUpdate(AnimGraphInstance* animGraphInstance, float timePassedInSeconds)
     {
@@ -1798,8 +1816,6 @@ namespace EMotionFX
             }
         }
     }
-
-
 
     // recursively set object data flag
     void AnimGraphNode::RecursiveSetUniqueDataFlag(AnimGraphInstance* animGraphInstance, uint32 flag, bool enabled)
@@ -2123,9 +2139,9 @@ namespace EMotionFX
     // free all poses from all incoming nodes
     void AnimGraphNode::FreeIncomingPoses(AnimGraphInstance* animGraphInstance)
     {
-        for (Port& inputPort : mInputPorts)
+        for (const Port& inputPort : mInputPorts)
         {
-            BlendTreeConnection* connection = inputPort.mConnection;
+            const BlendTreeConnection* connection = inputPort.mConnection;
             if (connection)
             {
                 AnimGraphNode* sourceNode = connection->GetSourceNode();
@@ -2138,9 +2154,9 @@ namespace EMotionFX
     // free all poses from all incoming nodes
     void AnimGraphNode::FreeIncomingRefDatas(AnimGraphInstance* animGraphInstance)
     {
-        for (Port& port : mInputPorts)
+        for (const Port& port : mInputPorts)
         {
-            BlendTreeConnection* connection = port.mConnection;
+            const BlendTreeConnection* connection = port.mConnection;
             if (connection)
             {
                 AnimGraphNode* sourceNode = connection->GetSourceNode();
@@ -2179,10 +2195,10 @@ namespace EMotionFX
         }
 
         // free it
-        const uint32 threadIndex = animGraphInstance->GetActorInstance()->GetThreadIndex();
-        AnimGraphRefCountedDataPool& pool = GetEMotionFX().GetThreadData(threadIndex)->GetRefCountedDataPool();
         if (uniqueData->GetRefCountedData())
         {
+            const uint32 threadIndex = animGraphInstance->GetActorInstance()->GetThreadIndex();
+            AnimGraphRefCountedDataPool& pool = GetEMotionFX().GetThreadData(threadIndex)->GetRefCountedDataPool();
             pool.Free(uniqueData->GetRefCountedData());
             uniqueData->SetRefCountedData(nullptr);
         }
@@ -2198,10 +2214,10 @@ namespace EMotionFX
             return;
         }
 
-        TopDownUpdate(animGraphInstance, timePassedInSeconds);
-
         // mark as done
         animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_TOPDOWNUPDATE_READY);
+
+        TopDownUpdate(animGraphInstance, timePassedInSeconds);
     }
 
 
@@ -2214,14 +2230,14 @@ namespace EMotionFX
             return;
         }
 
+        // mark as done
+        animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_POSTUPDATE_READY);
+
         // perform the actual post update
         PostUpdate(animGraphInstance, timePassedInSeconds);
 
         // free the incoming refs
         FreeIncomingRefDatas(animGraphInstance);
-
-        // mark as done
-        animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_POSTUPDATE_READY);
     }
 
 
@@ -2234,15 +2250,15 @@ namespace EMotionFX
             return;
         }
 
+        // mark as done
+        animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_UPDATE_READY);
+
         // increase ref count for incoming nodes
         IncreaseInputRefCounts(animGraphInstance);
         IncreaseInputRefDataRefCounts(animGraphInstance);
 
         // perform the actual node update
         Update(animGraphInstance, timePassedInSeconds);
-
-        // mark as output
-        animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_UPDATE_READY);
     }
 
 
@@ -2255,24 +2271,24 @@ namespace EMotionFX
             return;
         }
 
+        // mark as done
+        animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_OUTPUT_READY);
+
         // perform the output
         Output(animGraphInstance);
 
         // now decrease ref counts of all input nodes as we do not need the poses of this input node anymore for this node
         // once the pose ref count of a node reaches zero it will automatically release the poses back to the pool so they can be reused again by others
         FreeIncomingPoses(animGraphInstance);
-
-        // mark as output
-        animGraphInstance->EnableObjectFlags(mObjectIndex, AnimGraphInstance::OBJECTFLAGS_OUTPUT_READY);
     }
 
 
     // increase input ref counts
     void AnimGraphNode::IncreaseInputRefDataRefCounts(AnimGraphInstance* animGraphInstance)
     {
-        for (Port& port : mInputPorts)
+        for (const Port& port : mInputPorts)
         {
-            BlendTreeConnection* connection = port.mConnection;
+            const BlendTreeConnection* connection = port.mConnection;
             if (connection)
             {
                 AnimGraphNode* sourceNode = connection->GetSourceNode();
@@ -2285,9 +2301,9 @@ namespace EMotionFX
     // increase input ref counts
     void AnimGraphNode::IncreaseInputRefCounts(AnimGraphInstance* animGraphInstance)
     {
-        for (Port& port : mInputPorts)
+        for (const Port& port : mInputPorts)
         {
-            BlendTreeConnection* connection = port.mConnection;
+            const BlendTreeConnection* connection = port.mConnection;
             if (connection)
             {
                 AnimGraphNode* sourceNode = connection->GetSourceNode();

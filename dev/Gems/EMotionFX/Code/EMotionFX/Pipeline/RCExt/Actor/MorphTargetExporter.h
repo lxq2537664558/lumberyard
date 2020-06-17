@@ -50,14 +50,7 @@ namespace EMotionFX
             AZ::SceneAPI::Events::ProcessingResult ProcessMorphTargets(ActorMorphBuilderContext& context);
         protected:
             void BuildMorphTargetMesh(EMotionFX::Actor* actor, EMotionFX::Node* emfxNode,
-                const AZStd::shared_ptr<const AZ::SceneAPI::DataTypes::IBlendShapeData>& morphTargetData, const AZ::Transform& globalTransform, const AZ::Transform& globalTransformN, CoordinateSystemConverter& coordinateSystemConverter,
-                bool optimizeTriangleList);
-
-    #if defined(AZ_COMPILER_MSVC) && AZ_COMPILER_MSVC <= 1800
-            // Workaround for VS2013 - Delete the copy constructor and make it private
-            // https://connect.microsoft.com/VisualStudio/feedback/details/800328/std-is-copy-constructible-is-broken
-            MorphTargetExporter(const MorphTargetExporter&) = delete;
-    #endif
+                const AZStd::shared_ptr<const AZ::SceneAPI::DataTypes::IBlendShapeData>& morphTargetData, const AZ::Transform& globalTransform, const AZ::Transform& globalTransformN, CoordinateSystemConverter& coordinateSystemConverter);
         };
     }
 } // namespace EMotionFX

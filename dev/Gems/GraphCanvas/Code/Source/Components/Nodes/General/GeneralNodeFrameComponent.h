@@ -11,7 +11,9 @@
 */
 #pragma once
 
+AZ_PUSH_DISABLE_WARNING(4251 4800 4244, "-Wunknown-warning-option")
 #include <QGraphicsWidget>
+AZ_POP_DISABLE_WARNING
 
 #include <Components/Nodes/NodeFrameGraphicsWidget.h>
 #include <GraphCanvas/Components/Nodes/NodeBus.h>
@@ -76,11 +78,8 @@ namespace GraphCanvas
 
     private:
 
-        // Fix for VS2013
         GeneralNodeFrameComponent(const GeneralNodeFrameComponent&) = delete;
         const GeneralNodeFrameComponent& operator=(const GeneralNodeFrameComponent&) = delete;
-        ////
-
         bool                            m_shouldDeleteFrame;
         GeneralNodeFrameGraphicsWidget* m_frameWidget;
     };

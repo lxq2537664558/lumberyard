@@ -27,6 +27,8 @@
 #include <AzFramework/API/ApplicationAPI.h>
 #include <AzFramework/API/ApplicationAPI_Platform.h>
 #include <AzFramework/Input/Devices/Keyboard/InputDeviceKeyboard.h>
+#include <AzCore/Debug/Trace.h>
+#include <AzFramework/Logging/MissingAssetLogger.h>
 
 
 #if defined(AZ_RESTRICTED_PLATFORM)
@@ -58,7 +60,7 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     {
         pSystem = static_cast<CSystem*>(gEnv->pSystem);
     }
-    if (pSystem && !pSystem->m_bQuit)
+    if (pSystem && !pSystem->IsQuitting())
     {
         LRESULT result;
         bool bAny = false;
@@ -114,6 +116,8 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
 
@@ -129,7 +133,6 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 #include <IInput.h>
 #include <ILog.h>
 #include <IAudioSystem.h>
-#include "NullImplementation/NULLAudioSystems.h"
 #include <ICryAnimation.h>
 #include <IScriptSystem.h>
 #include <IProcess.h>
@@ -170,7 +173,6 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 #include "ThreadProfiler.h"
 #include "IDiskProfiler.h"
 #include "SystemEventDispatcher.h"
-#include "IHardwareMouse.h"
 #include "ServerThrottle.h"
 #include "ILocalMemoryUsage.h"
 #include "ResourceManager.h"
@@ -186,7 +188,6 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 #include "zlib.h"
 #include "RemoteConsole/RemoteConsole.h"
 #include "BootProfiler.h"
-#include "NullImplementation/NULLAudioSystems.h"
 
 #include <PNoise3.h>
 #include <StringUtils.h>
@@ -360,9 +361,6 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
 #ifdef WIN32
     m_hInst = NULL;
     m_hWnd = NULL;
-#if _MSC_VER < 1000
-    int sbh = _set_sbh_threshold(1016);
-#endif
 #endif
 
     //////////////////////////////////////////////////////////////////////////
@@ -444,6 +442,8 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
     m_sys_min_step = 0;
@@ -485,7 +485,6 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_pCpu = NULL;
     m_sys_game_folder = NULL;
 
-    m_bQuit = false;
     m_bInitializedSuccessfully = false;
     m_bShaderCacheGenMode = false;
     m_bRelaunch = false;
@@ -495,6 +494,7 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_bPreviewMode = false;
     m_bIgnoreUpdates = false;
     m_bNoCrashDialog = false;
+    m_bNoErrorReportWindow = false;
 
 #ifndef _RELEASE
     m_checkpointLoadCount = 0;
@@ -560,6 +560,7 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     {
         m_initedSysAllocator = true;
         AZ::AllocatorInstance<AZ::SystemAllocator>::Create();
+        AZ::Debug::Trace::Instance().Init();
     }
 
     m_UpdateTimesIdx = 0U;
@@ -576,12 +577,15 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
 #endif
 
     m_ConfigPlatform = CONFIG_INVALID_PLATFORM;
+
+    AzFramework::Terrain::TerrainDataNotificationBus::Handler::BusConnect();
 }
 
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////
 CSystem::~CSystem()
 {
+    AzFramework::Terrain::TerrainDataNotificationBus::Handler::BusDisconnect();
     ShutDown();
 
 #if AZ_LEGACY_CRYSYSTEM_TRAIT_USE_MESSAGE_HANDLER
@@ -610,6 +614,7 @@ CSystem::~CSystem()
     AZCoreLogSink::Disconnect();
     if (m_initedSysAllocator)
     {
+        AZ::Debug::Trace::Instance().Destroy();
         AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
     }
     if (m_initedOSAllocator)
@@ -810,7 +815,6 @@ void CSystem::ShutDown()
 
     SAFE_DELETE(m_env.pResourceCompilerHelper);
 
-    SAFE_RELEASE(m_env.pHardwareMouse);
     SAFE_RELEASE(m_env.pMovieSystem);
     SAFE_DELETE(m_env.pServiceNetwork);
     SAFE_RELEASE(m_env.pAISystem);
@@ -891,6 +895,8 @@ void CSystem::ShutDown()
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
 
@@ -939,7 +945,7 @@ void CSystem::ShutDown()
 
     // Audio System Shutdown!
     // Shut down audio as late as possible but before the streaming system and console get released!
-    Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::Release);
+    Audio::Gem::AudioSystemGemRequestBus::Broadcast(&Audio::Gem::AudioSystemGemRequestBus::Events::Release);
 
     // Shut down the streaming system and console as late as possible and after audio!
     SAFE_DELETE(m_pStreamEngine);
@@ -973,7 +979,7 @@ void CSystem::Quit()
 {
     CryLogAlways("CSystem::Quit invoked from thread %" PRI_THREADID " (main is %" PRI_THREADID ")", GetCurrentThreadId(), gEnv->mMainThreadId);
     
-    m_bQuit = true;
+    AzFramework::ApplicationRequests::Bus::Broadcast(&AzFramework::ApplicationRequests::ExitMainLoop);
 
     // If this was set from anywhere but the main thread, bail and let the main thread handle shutdown
     if (GetCurrentThreadId() != gEnv->mMainThreadId)
@@ -995,6 +1001,8 @@ void CSystem::Quit()
         GetIRenderer()->RestoreGamma();
     }
 
+    SAFE_RELEASE(m_env.pNetwork);
+
     /*
     * TODO: This call to _exit, _Exit, TerminateProcess etc. needs to
     * eventually be removed. This causes an extremely early exit before we 
@@ -1012,6 +1020,8 @@ void CSystem::Quit()
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -1033,7 +1043,9 @@ void CSystem::Quit()
 /////////////////////////////////////////////////////////////////////////////////
 bool CSystem::IsQuitting() const
 {
-    return m_bQuit;
+    bool wasExitMainLoopRequested = false;
+    AzFramework::ApplicationRequests::Bus::BroadcastResult(wasExitMainLoopRequested, &AzFramework::ApplicationRequests::WasExitMainLoopRequested);
+    return wasExitMainLoopRequested;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1106,6 +1118,8 @@ public:
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
         while (true)
@@ -1286,6 +1300,8 @@ void CSystem::CreatePhysicsThread()
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
 
@@ -1310,6 +1326,21 @@ void CSystem::KillPhysicsThread()
         m_PhysThread = 0;
     }
 }
+
+///////////////////////////////////////////////////////////////////////////
+// AzFramework::Terrain::TerrainDataNotificationBus START
+void CSystem::OnTerrainDataCreateBegin()
+{
+    KillPhysicsThread();
+}
+
+void CSystem::OnTerrainDataDestroyBegin()
+{
+    OnTerrainDataCreateBegin();
+}
+
+// AzFramework::Terrain::TerrainDataNotificationBus END
+///////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////
 void CSystem::TelemetryStreamFileChanged(ICVar* pCVar)
@@ -1403,6 +1434,11 @@ void CSystem::SleepIfInactive()
 {
     // ProcessSleep()
     if (m_bDedicatedServer || m_bEditor || gEnv->bMultiplayer)
+    {
+        return;
+    }
+
+    if (gEnv->pRenderer->GetRenderType() == ERenderType::eRT_Other)
     {
         return;
     }
@@ -1575,7 +1611,7 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
         m_env.pLog->Update();
     }
 
-#if !defined(RELEASE) || defined(RELEASE_LOGGING)
+#ifdef USE_REMOTE_CONSOLE
     GetIRemoteConsole()->Update();
 #endif
 
@@ -1677,6 +1713,8 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
     #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
     #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+    #include "Salem/System_cpp_salem.inl"
     #endif
 #else
     float y = static_cast<float>(viewportHeight) - 30.0f;
@@ -1863,6 +1901,12 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
     {
         FRAME_PROFILER("SysUpdate:Console", this, PROFILE_SYSTEM);
         m_env.pConsole->Update();
+    }
+
+    if (IsQuitting())
+    {
+        Quit();
+        return false;
     }
 
 #ifndef EXCLUDE_UPDATE_ON_CONSOLE
@@ -2142,7 +2186,7 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
         UpdateMovieSystem(updateFlags, fMovieFrameTime, true);
     }
 
-    return !m_bQuit;
+    return !IsQuitting();
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -2235,32 +2279,8 @@ bool CSystem::UpdatePostTickBus(int updateFlags, int nPauseMode)
         m_pDownloadManager->Update();
     }
 #endif //DOWNLOAD_MANAGER
-#if AZ_LEGACY_CRYSYSTEM_TRAIT_SIMULATE_TASK
-    if (m_sys_SimulateTask->GetIVal() > 0)
-    {
-        // have a chance to win longest Pi calculation content
-        int64 delay = m_sys_SimulateTask->GetIVal();
-        int64 start = CryGetTicks();
-        double a = 1.0, b = 1.0 / sqrt(2.0), t = 1.0 / 4.0, p = 1.0, an, bn, tn, pn, Pi = 0.0;
-        while (CryGetTicks() - start < delay)
-        {
-            // do something
-            an = (a + b) / 2.0;
-            bn = sqrt(a * b);
-            tn = t - p * (a - an) * (a - an);
-            pn = 2 * p;
 
-            a = an;
-            b = bn;
-            t = tn;
-            p = pn;
-
-            Pi = (a + b) * (a + b) / 4 / t;
-        }
-        //CryLog("Task calculate PI = %f ", Pi); // Thats funny , but it works :-)
-    }
-#endif //AZ_LEGACY_CRYSYSTEM_TRAIT_SIMULATE_TASK
-       //Now update frame statistics
+    //Now update frame statistics
     CTimeValue cur_time = gEnv->pTimer->GetAsyncTime();
 
     CTimeValue a_second(g_cvars.sys_update_profile_time);
@@ -2339,13 +2359,13 @@ bool CSystem::UpdatePostTickBus(int updateFlags, int nPauseMode)
         }
     }
 
-    return !m_bQuit;
+    return !IsQuitting();
 }
 
 
 bool CSystem::UpdateLoadtime()
 {
-    return !m_bQuit;
+    return !IsQuitting();
 }
 
 void CSystem::DoWorkDuringOcclusionChecks()
@@ -2504,8 +2524,6 @@ inline const char* ValidatorModuleToString(EValidatorModule module)
         return "Network";
     case VALIDATOR_MODULE_PHYSICS:
         return "Physics";
-    case VALIDATOR_MODULE_FLOWGRAPH:
-        return "FlowGraph";
     case VALIDATOR_MODULE_ONLINE:
         return "Online";
     case VALIDATOR_MODULE_FEATURETESTS:
@@ -2719,6 +2737,8 @@ void CSystem::debug_GetCallStackRaw(void** callstack, uint32& callstackLength)
         #include "Xenia/System_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/System_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/System_cpp_salem.inl"
     #endif
 #endif
 
@@ -3136,6 +3156,39 @@ void CSystem::OnLocalizationFolderCVarChanged(ICVar* const pLocalizationFolder)
     }
 }
 
+// Catch changes to assert verbosity and update the global used to track it
+void CSystem::SetAssertLevel(int _assertlevel)
+{
+    AZ::EnvironmentVariable<int> assertVerbosityLevel = AZ::Environment::FindVariable<int>("assertVerbosityLevel");
+    if (assertVerbosityLevel)
+    {
+        assertVerbosityLevel.Set(_assertlevel);
+    }
+}
+
+void CSystem::OnAssertLevelCvarChanged(ICVar* pArgs)
+{
+    SetAssertLevel(pArgs->GetIVal());
+}
+
+void CSystem::SetLogLevel(int _loglevel)
+{
+    AZ::EnvironmentVariable<int> logVerbosityLevel = AZ::Environment::FindVariable<int>("sys_LogLevel");
+    if (logVerbosityLevel != nullptr)
+    {
+        logVerbosityLevel.Set(_loglevel);
+    }
+}
+
+void CSystem::OnLogLevelCvarChanged(ICVar* pArgs)
+{
+    if (pArgs)
+    {
+        SetLogLevel(pArgs->GetIVal());
+    }
+}
+
+
 void CSystem::OnSystemEvent(ESystemEvent event, UINT_PTR wparam, UINT_PTR lparam)
 {
     switch (event)
@@ -3260,7 +3313,7 @@ bool CSystem::HandleMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, 
             cause the render thread to deadlock and the main
             thread to spin in SRenderThread::WaitFlushFinishedCond.
         */
-        m_bQuit = true;
+        AzFramework::ApplicationRequests::Bus::Broadcast(&AzFramework::ApplicationRequests::ExitMainLoop);
         return false;
     case WM_MOVE:
         GetISystemEventDispatcher()->OnSystemEvent(ESYSTEM_EVENT_MOVE, x, y);

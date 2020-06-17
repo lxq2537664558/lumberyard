@@ -18,16 +18,18 @@
 
 #include <AzCore/std/containers/unordered_set.h>
 #include <AzCore/Debug/Profiler.h>
+#include <AzFramework/Components/DeprecatedComponentsBus.h>
 #include <AzToolsFramework/API/EntityCompositionRequestBus.h>
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/Entity/EditorEntityHelpers.h>
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 
+AZ_PUSH_DISABLE_WARNING(4244 4251, "-Wunknown-warning-option") // 4244: conversion from 'int' to 'float', possible loss of data
+                                                               // 4251: class '...' needs to have dll-interface to be used by clients of class '...'
 #include <QAction>
-AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
+#include <QAbstractItemView>
 #include <QHBoxLayout>
-AZ_POP_DISABLE_WARNING
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QPushButton>
@@ -37,8 +39,6 @@ AZ_POP_DISABLE_WARNING
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
-AZ_PUSH_DISABLE_WARNING(4244 4251, "-Wunknown-warning-option") // 4244: conversion from 'int' to 'float', possible loss of data
-                                                               // 4251: 'QInputEvent::modState': class 'QFlags<Qt::KeyboardModifier>' needs to have dll-interface to be used by clients of class 'QInputEvent'
 #include <QKeyEvent>
 AZ_POP_DISABLE_WARNING
 
@@ -84,6 +84,7 @@ namespace AzToolsFramework
         m_componentTree = new QTreeView(this);
         m_componentTree->setObjectName("Tree");
         m_componentTree->setModel(m_componentModel);
+        m_componentTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
         outerLayout->addWidget(m_componentTree);
 
         //hide header for dropdown-style, single-column, tree
@@ -135,12 +136,15 @@ namespace AzToolsFramework
         AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzToolsFramework);
         m_componentModel->clear();
 
-        bool applyFilter = !m_searchRegExp.isEmpty();
+        bool applyRegExFilter = !m_searchRegExp.isEmpty();
 
         // Gather all components that match our filter and group by category.
         ComponentPaletteUtil::ComponentDataTable componentDataTable;
         ComponentPaletteUtil::ComponentIconTable componentIconTable;
         ComponentPaletteUtil::BuildComponentTables(m_serializeContext, m_componentFilter, m_serviceFilter, componentDataTable, componentIconTable);
+
+        AzFramework::Components::DeprecatedComponentsList deprecatedList;
+        AzFramework::Components::DeprecatedComponentsRequestBus::Broadcast(&AzFramework::Components::DeprecatedComponentsRequestBus::Events::EnumerateDeprecatedComponents, deprecatedList);
 
         AZ::Entity::ComponentArrayType componentsOnEntity;
 
@@ -208,16 +212,25 @@ namespace AzToolsFramework
                 auto componentClass = componentPair.second;
                 const QString& componentName = componentPair.first;
                 const QString& componentIconName = componentIconTable[componentClass];
-                if (!applyFilter || componentName.contains(m_searchRegExp))
+                auto deprecatedInfo = deprecatedList.find(componentClass->m_typeId);
+                bool componentIsDeprecated = deprecatedInfo != deprecatedList.end();
+                if ((!applyRegExFilter || componentName.contains(m_searchRegExp)) && (!componentIsDeprecated || !deprecatedInfo->second.m_hideComponent))
                 {
                     //count the number of components on selected entities that match this type
                     auto componentCount = AZStd::count_if(allComponentsOnSelectedEntities.begin(), allComponentsOnSelectedEntities.end(), [componentClass](const AZ::Component* component) {
-                        return componentClass->m_typeId == component->RTTI_GetType();
+                        return componentClass->m_typeId == component->GetUnderlyingComponentType();
                     });
 
-                    //generate the display name for the component, appending a count if this component exists
-                    bool displayCount = componentCount > 0;
-                    const QString& displayName = displayCount ? (componentName + tr(" (%1)").arg(componentCount)) : componentName;
+                    //generate the display name for the component
+                    QString displayName = componentName;
+                    if (componentCount) //<append count if count > 0
+                    {
+                        displayName += QObject::tr(" (%1)").arg(componentCount);
+                    }
+                    if (componentIsDeprecated) //< append deprecation strings
+                    {
+                        displayName += deprecatedInfo->second.m_deprecationString.c_str();
+                    }
 
                     auto componentItem = new QStandardItem(QIcon(componentIconName), displayName);
                     componentItem->setToolTip(componentClass->m_editData->m_description);

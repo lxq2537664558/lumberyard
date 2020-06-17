@@ -33,6 +33,7 @@
 #include <QElapsedTimer>
 #include <QMutexLocker>
 #include <AzCore/Math/Crc.h>
+#include "PathDependencyManager.h"
 
 namespace AssetProcessor
 {
@@ -89,7 +90,7 @@ namespace AssetProcessor
         SaveRegistry_Impl();
     }
 
-    void AssetCatalog::OnAssetMessage(QString platform, AzFramework::AssetSystem::AssetNotificationMessage message)
+    void AssetCatalog::OnAssetMessage(AzFramework::AssetSystem::AssetNotificationMessage message)
     {
         using namespace AzFramework::AssetSystem;
         if (message.m_type == AssetNotificationMessage::AssetChanged)
@@ -100,52 +101,58 @@ namespace AssetProcessor
             assetInfo.m_assetType = message.m_assetType;
             assetInfo.m_relativePath = message.m_data.c_str();
             assetInfo.m_sizeBytes = message.m_sizeBytes;
+            QString assetPlatform{ QString::fromUtf8(message.m_platform.c_str()) };
 
             AZ_Assert(assetInfo.m_assetId.IsValid(), "AssetID is not valid!!!");
             AZ_Assert(!assetInfo.m_relativePath.empty(), "Product path is empty");
+            AZ_Assert(!assetPlatform.isEmpty(), "Product platform is empty");
 
             m_catalogIsDirty = true;
             {
                 QMutexLocker locker(&m_registriesMutex);
-                m_registries[platform].RegisterAsset(assetInfo.m_assetId, assetInfo);
+                m_registries[message.m_platform.c_str()].RegisterAsset(assetInfo.m_assetId, assetInfo);
                 for (const AZ::Data::AssetId& mapping : message.m_legacyAssetIds)
                 {
                     if (mapping != assetInfo.m_assetId)
                     {
-                        m_registries[platform].RegisterLegacyAssetMapping(mapping, assetInfo.m_assetId);
+                        m_registries[assetPlatform].RegisterLegacyAssetMapping(mapping, assetInfo.m_assetId);
                     }
                 }
 
-                m_registries[platform].SetAssetDependencies(message.m_assetId, message.m_dependencies);
+                m_registries[assetPlatform].SetAssetDependencies(message.m_assetId, message.m_dependencies);
             }
 
             if (m_registryBuiltOnce)
             {
-                Q_EMIT SendAssetMessage(platform, message);
+                Q_EMIT SendAssetMessage(message);
             }
         }
         else if (message.m_type == AssetNotificationMessage::AssetRemoved)
         {
             QMutexLocker locker(&m_registriesMutex);
-            auto found = m_registries[platform].m_assetIdToInfo.find(message.m_assetId);
 
-            if (found != m_registries[platform].m_assetIdToInfo.end())
+            QString assetPlatform{ QString::fromUtf8(message.m_platform.c_str()) };
+            AZ_Assert(!assetPlatform.isEmpty(), "Product platform is empty");
+
+            auto found = m_registries[assetPlatform].m_assetIdToInfo.find(message.m_assetId);
+
+            if (found != m_registries[assetPlatform].m_assetIdToInfo.end())
             {
                 m_catalogIsDirty = true;
 
-                m_registries[platform].UnregisterAsset(message.m_assetId);
+                m_registries[assetPlatform].UnregisterAsset(message.m_assetId);
 
                 for (const AZ::Data::AssetId& mapping : message.m_legacyAssetIds)
                 {
                     if (mapping != message.m_assetId)
                     {
-                        m_registries[platform].UnregisterLegacyAssetMapping(mapping);
+                        m_registries[assetPlatform].UnregisterLegacyAssetMapping(mapping);
                     }
                 }
 
                 if (m_registryBuiltOnce)
                 {
-                    Q_EMIT SendAssetMessage(platform, message);
+                    Q_EMIT SendAssetMessage(message);
                 }
             }
         }
@@ -250,11 +257,57 @@ namespace AssetProcessor
 
     void AssetCatalog::RequestReady(NetworkRequestID requestId, BaseAssetProcessorMessage* message, QString platform, bool fencingFailed)
     {
-        AZ_UNUSED(message);
-        AZ_UNUSED(platform);
         AZ_UNUSED(fencingFailed);
-        int registrySaveVersion = SaveRegistry();
-        m_queuedSaveCatalogRequest.insert(registrySaveVersion, requestId);
+
+        if (message->GetMessageType() == AzFramework::AssetSystem::GetUnresolvedDependencyCountsRequest::MessageType())
+        {
+            auto* request = azrtti_cast<AzFramework::AssetSystem::GetUnresolvedDependencyCountsRequest*>(message);
+
+            if (!request)
+            {
+                AZ_TracePrintf(AssetProcessor::DebugChannel, "Invalid Message Type: Message is not of type %d.  Incoming message type is %d.\n", AzFramework::AssetSystem::GetUnresolvedDependencyCountsRequest::MessageType(), message->GetMessageType());
+                return;
+            }
+
+            AzFramework::AssetSystem::GetUnresolvedDependencyCountsResponse response;
+
+            {
+                QMutexLocker locker(&m_registriesMutex);
+
+                const auto& productDependencies = m_registries[platform].GetAssetDependencies(request->m_assetId);
+
+                for (const AZ::Data::ProductDependency& productDependency : productDependencies)
+                {
+                    if (m_registries[platform].m_assetIdToInfo.find(productDependency.m_assetId)
+                        == m_registries[platform].m_assetIdToInfo.end())
+                    {
+                        ++response.m_unresolvedAssetIdReferences;
+                    }
+                }
+            }
+            
+            {
+                AZStd::lock_guard<AZStd::mutex> lock(m_databaseMutex);
+
+                m_db->QueryProductDependencyBySourceGuidSubId(request->m_assetId.m_guid, request->m_assetId.m_subId, platform.toUtf8().constData(), [&response](const AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntry& entry)
+                    {
+                        if (!entry.m_unresolvedPath.empty() && entry.m_unresolvedPath.find('*') == entry.m_unresolvedPath.npos
+                            && !entry.m_unresolvedPath.starts_with(ExcludedDependenciesSymbol))
+                        {
+                            ++response.m_unresolvedPathReferences;
+                        }
+
+                        return true;
+                    });
+            }
+
+            AssetProcessor::ConnectionBus::Event(requestId.first, &AssetProcessor::ConnectionBusTraits::SendResponse, requestId.second, response);
+        }
+        else
+        {
+            int registrySaveVersion = SaveRegistry();
+            m_queuedSaveCatalogRequest.insert(registrySaveVersion, requestId);
+        }
     }
 
     void AssetCatalog::RegistrySaveComplete(int assetCatalogVersion, bool allCatalogsSaved)
@@ -361,13 +414,60 @@ namespace AssetProcessor
 
             m_db->QueryProductDependenciesTable([this, &platform](AZ::Data::AssetId& assetId, AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntry& entry)
             {
-                m_registries[platform].RegisterAssetDependency(assetId, AZ::Data::ProductDependency{ AZ::Data::AssetId(entry.m_dependencySourceGuid, entry.m_dependencySubID), entry.m_dependencyFlags });
+                if (AzFramework::StringFunc::Equal(entry.m_platform.c_str(), platform.toUtf8().data()))
+                {
+                    m_registries[platform].RegisterAssetDependency(assetId, AZ::Data::ProductDependency{ AZ::Data::AssetId(entry.m_dependencySourceGuid, entry.m_dependencySubID), entry.m_dependencyFlags });
+                }
 
                 return true;
             });
 
             AZ_TracePrintf("Catalog", "Read %u assets from database for %s in %fs\n", currentRegistry.m_assetIdToInfo.size(), platform.toUtf8().constData(), timer.elapsed() / 1000.0f);
         }
+    }
+
+    void AssetCatalog::OnDependencyResolved(const AZ::Data::AssetId& assetId, const AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntry& entry)
+    {
+        QString platform(entry.m_platform.c_str());
+        if (!m_platforms.contains(platform))
+        {
+            return;
+        }
+
+        AzFramework::AssetSystem::AssetNotificationMessage message;
+        message.m_type = AzFramework::AssetSystem::AssetNotificationMessage::NotificationType::AssetChanged;
+
+        // Get the existing data from registry.
+        AZ::Data::AssetInfo assetInfo = GetAssetInfoById(assetId);
+        message.m_data = assetInfo.m_relativePath;
+        message.m_sizeBytes = assetInfo.m_sizeBytes;
+        message.m_assetId = assetId;
+        message.m_assetType = assetInfo.m_assetType;
+        message.m_platform = entry.m_platform.c_str();
+
+        // Get legacyIds from registry to put in message.
+        AZStd::unordered_map<AZ::Data::AssetId, AZ::Data::AssetId> legacyIds;
+
+        // Add the new dependency entry and get the list of all dependencies for the message.
+        AZ::Data::ProductDependency newDependency{ AZ::Data::AssetId(entry.m_dependencySourceGuid, entry.m_dependencySubID), entry.m_dependencyFlags };
+        {
+            QMutexLocker locker(&m_registriesMutex);
+            m_registries[platform].RegisterAssetDependency(assetId, newDependency);
+            message.m_dependencies = AZStd::move(m_registries[platform].GetAssetDependencies(assetId));
+            legacyIds = m_registries[platform].GetLegacyMappingSubsetFromRealIds(AZStd::vector<AZ::Data::AssetId>{ assetId });
+        }
+
+        for (auto& legacyId : legacyIds)
+        {
+            message.m_legacyAssetIds.emplace_back(legacyId.first);
+        }
+
+        if (m_registryBuiltOnce)
+        {
+            Q_EMIT SendAssetMessage(message);
+        }
+
+        m_catalogIsDirty = true;
     }
 
     void AssetCatalog::OnSourceQueued(AZ::Uuid sourceUuid, AZ::Uuid legacyUuid, QString rootPath, QString relativeFilePath)
@@ -690,7 +790,7 @@ namespace AssetProcessor
         return false;
     }
 
-    int AssetCatalog::GetPendingAssetsForPlatform(const char* platform)
+    int AssetCatalog::GetPendingAssetsForPlatform(const char* /*platform*/)
     {
         AZ_Assert(false, "Call to unsupported Asset Processor function GetPendingAssetsForPlatform on AssetCatalog");
         return -1;
@@ -974,7 +1074,7 @@ namespace AssetProcessor
         }
     }
 
-    void AssetCatalog::UnregisterSourceAssetType(const AZ::Data::AssetType& assetType)
+    void AssetCatalog::UnregisterSourceAssetType(const AZ::Data::AssetType& /*assetType*/)
     {
         // For now, this does nothing, because it would just needlessly complicate things for no gain.
         // Unregister is only called when a builder is shut down, which really is only supposed to happen when AssetCatalog is being shutdown
@@ -1168,7 +1268,16 @@ namespace AssetProcessor
                     const AssetProcessor::ScanFolderInfo* info = m_platformConfig->GetScanFolderByPath(watchFolder.c_str());
                     if ((info)&&(!info->GetOutputPrefix().isEmpty()))
                     {
-                        assetInfo.m_relativePath = sourceNameStr.substr(static_cast<int>(info->GetOutputPrefix().length()) + 1);
+                        const int prefixLength = static_cast<int>(info->GetOutputPrefix().length()) + 1;
+                        AZ_Assert(sourceNameStr.length() > prefixLength, "Source name [%s] was invalid compared to the output prefix.", sourceNameStr.c_str() != nullptr ? sourceNameStr.c_str() : "");
+                        if (sourceNameStr.length() > prefixLength)
+                        {
+                            assetInfo.m_relativePath = sourceNameStr.substr(prefixLength);
+                        }
+                        else
+                        {
+                            assetInfo.m_relativePath.swap(sourceNameStr);
+                        }
                     }
                     else
                     {

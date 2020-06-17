@@ -17,7 +17,8 @@ namespace Physics
 {
     namespace ReflectionUtils
     {
-        CollisionNotificationBusBehaviorHandler::CollisionNotificationBusBehaviorHandler() {
+        CollisionNotificationBusBehaviorHandler::CollisionNotificationBusBehaviorHandler()
+        {
             m_events.resize(FN_MAX);
             SetEvent(&CollisionNotificationBusBehaviorHandler::OnCollisionBeginDummy, "OnCollisionBegin");
             SetEvent(&CollisionNotificationBusBehaviorHandler::OnCollisionPersistDummy, "OnCollisionPersist");
@@ -56,6 +57,8 @@ namespace Physics
                     ;
 
                 behaviorContext->EBus<Physics::CollisionNotificationBus>("CollisionNotificationBus")
+                    ->Attribute(AZ::Script::Attributes::Module, "physics")
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                     ->Handler<CollisionNotificationBusBehaviorHandler>()
                     ;
             }
@@ -117,6 +120,23 @@ namespace Physics
         void CollisionNotificationBusBehaviorHandler::OnCollisionEnd(const CollisionEvent& collisionEvent)
         {
             Call(FN_OnCollisionEnd, collisionEvent.m_body2->GetEntityId());
+        }
+
+        void WorldNotificationBusBehaviorHandler::Reflect(AZ::ReflectContext* context)
+        {
+            if (AZ::BehaviorContext* behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+            {
+                behaviorContext->EBus<WorldNotificationBus>("WorldNotificationBus")
+                    ->Handler<WorldNotificationBusBehaviorHandler>()
+                    ;
+            }
+        }
+
+        int WorldNotificationBusBehaviorHandler::GetPhysicsTickOrder()
+        {
+            int order = WorldNotifications::Scripting;
+            CallResult(order, FN_GetPhysicsTickOrder);
+            return order;
         }
     }
 }

@@ -47,6 +47,7 @@
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
 #undef AZ_RESTRICTED_SECTION
 #define CRYSIMPLESERVER_CPP_SECTION_1 1
+#define CRYSIMPLESERVER_CPP_SECTION_2 2
 #endif
 
 #if defined(AZ_PLATFORM_MAC)
@@ -66,7 +67,7 @@
     #define EXTENSION ""
 #endif
 
-volatile AtomicCountType CCrySimpleServer::ms_ExceptionCount    = 0;
+AZStd::atomic_long CCrySimpleServer::ms_ExceptionCount    = {0};
 
 const static std::string SHADER_PROFILER            =   "NVShaderPerf" EXTENSION;
 
@@ -80,7 +81,7 @@ const static std::string SHADER_PATH_CACHE          =   "Cache";
 static const bool autoDeleteJobWhenDone = true;
 static const int sleepTimeWhenWaiting = 10;
 
-static AtomicCountType g_ConnectionCount = 0;
+static AZStd::atomic_long g_ConnectionCount = {0};
 
 SEnviropment* SEnviropment::m_instance=nullptr;
 
@@ -109,8 +110,8 @@ SEnviropment& SEnviropment::Instance()
 
 // Shader Compilers ID
 // NOTE: Values must be in sync with CShaderSrv::GetShaderCompilerName() function in the engine side.
-const char* SEnviropment::m_Orbis_DXC = "Orbis_DXC"; // ACCEPTED_USE
-const char* SEnviropment::m_Durango_FXC = "Durango_FXC"; // ACCEPTED_USE
+const char* SEnviropment::m_Orbis_DXC = "Orbis_DXC";
+const char* SEnviropment::m_Durango_FXC = "Durango_FXC";
 const char* SEnviropment::m_D3D11_FXC = "D3D11_FXC";
 const char* SEnviropment::m_GLSL_HLSLcc = "GLSL_HLSLcc";
 const char* SEnviropment::m_METAL_HLSLcc = "METAL_HLSLcc";
@@ -121,17 +122,19 @@ void SEnviropment::InitializePlatformAttributes()
 {
     // Initialize valid Plaforms
     // NOTE: Values must be in sync with CShaderSrv::GetPlatformName() function in the engine side.
-    m_Platforms.insert("Orbis"); // ACCEPTED_USE
-    m_Platforms.insert("Durango"); // ACCEPTED_USE
+    m_Platforms.insert("Orbis");
+    m_Platforms.insert("Durango");
+    m_Platforms.insert("Nx");
     m_Platforms.insert("PC");
     m_Platforms.insert("Mac");
     m_Platforms.insert("iOS");
     m_Platforms.insert("Android");
+    m_Platforms.insert("Linux");
 
     // Initialize valid Shader Languages
     // NOTE: Values must be in sync with GetShaderLanguageName() function in the engine side.
-    m_ShaderLanguages.insert("Orbis"); // ACCEPTED_USE
-    m_ShaderLanguages.insert("Durango"); // ACCEPTED_USE
+    m_ShaderLanguages.insert("Orbis");
+    m_ShaderLanguages.insert("Durango");
     m_ShaderLanguages.insert("D3D11");
     m_ShaderLanguages.insert("METAL");
     m_ShaderLanguages.insert("GL4");
@@ -144,8 +147,21 @@ void SEnviropment::InitializePlatformAttributes()
     
     // Initialize valid Shader Compilers ID and Executables.
     // Intentionally put a space after the executable name so that attackers can't try to change the executable name that we are going to run.
-    m_ShaderCompilersMap[m_Orbis_DXC] = "ORBIS/V030/DXOrbisShaderCompiler.exe "; // ACCEPTED_USE
-    m_ShaderCompilersMap[m_Durango_FXC] = "Durango/FXC.exe "; // ACCEPTED_USE
+#if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
+#if defined(TOOLS_SUPPORT_XENIA)
+#define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_2
+#include "Xenia/CrySimpleServer_cpp_xenia.inl"
+#endif
+#if defined(TOOLS_SUPPORT_PROVO)
+#define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_2
+#include "Provo/CrySimpleServer_cpp_provo.inl"
+#endif
+#if defined(TOOLS_SUPPORT_SALEM)
+#define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_2
+#include "Salem/CrySimpleServer_cpp_salem.inl"
+#endif
+#endif
+
     m_ShaderCompilersMap[m_D3D11_FXC] = "PCD3D11/v006/fxc.exe ";
     m_ShaderCompilersMap[m_GLSL_HLSLcc] = "PCGL/V006/HLSLcc ";
     m_ShaderCompilersMap[m_METAL_HLSLcc] = "PCGMETAL/HLSLcc/HLSLcc ";
@@ -371,11 +387,15 @@ void CompileJob::Process()
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
     #if defined(TOOLS_SUPPORT_XENIA)
         #define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_1
-        #include "Xenia/CrySimpleJobCompile_cpp_xenia.inl"
+        #include "Xenia/CrySimpleServer_cpp_xenia.inl"
     #endif
     #if defined(TOOLS_SUPPORT_PROVO)
         #define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_1
-        #include "Provo/CrySimpleJobCompile_cpp_provo.inl"
+        #include "Provo/CrySimpleServer_cpp_provo.inl"
+    #endif
+    #if defined(TOOLS_SUPPORT_SALEM)
+        #define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_1
+        #include "Salem/CrySimpleServer_cpp_salem.inl"
     #endif
 #endif
 
@@ -467,7 +487,7 @@ void CompileJob::Process()
 
         m_pThreadData->Socket()->Send(Vec, State, Version);
     }
-    InterlockedDecrement(&g_ConnectionCount);
+    --g_ConnectionCount;
 }
 
 
@@ -528,7 +548,7 @@ void TickThread()
             t0 = t1;
             const int maxStringSize = 512;
             char str[maxStringSize] = { 0 };
-            azsnprintf(str, maxStringSize, "Amazon Shader Compiler Server (%ld compile tasks | %d open sockets | %d exceptions)",
+            azsnprintf(str, maxStringSize, "Amazon Shader Compiler Server (%ld compile tasks | %ld open sockets | %ld exceptions)",
                 CCrySimpleJobCompile::GlobalCompileTasks(), CCrySimpleSock::GetOpenSockets() + CSMTPMailer::GetOpenSockets(),
                 CCrySimpleServer::GetExceptionCount());
 #if defined(AZ_PLATFORM_WINDOWS)
@@ -622,7 +642,7 @@ CCrySimpleServer::CCrySimpleServer()
 
         // Increase connection count and start new job.
         // NOTE: CompileJob will be auto deleted when done, deleting thread data and client socket as well.
-        InterlockedIncrement(&g_ConnectionCount);
+        ++g_ConnectionCount;
         CompileJob* compileJob = new CompileJob();
         compileJob->SetThreadData(pData);
         compileJob->Start();
@@ -798,5 +818,5 @@ void CCrySimpleServer::Init()
 
 void CCrySimpleServer::IncrementExceptionCount()
 {
-    InterlockedIncrement(&ms_ExceptionCount);
+    ++ms_ExceptionCount;
 }

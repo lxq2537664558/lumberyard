@@ -397,6 +397,49 @@ namespace UnitTest
         AZ_TEST_ASSERT(!Vector2(infinity, infinity).IsFinite());
     }
 
+    TEST(MATH_Vector2, Angle_Test)
+    {
+        using Vec2CalcFunc = float(Vector2::*)(const Vector2&) const;
+        auto angleTest = [](Vec2CalcFunc func, const Vector2& self, const Vector2& other, const float target)
+        {
+            const float epsilon = 0.01f;
+            float value = (self.*func)(other);
+            AZ_TEST_ASSERT(IsClose(value, target, epsilon));
+        };
+
+        const Vec2CalcFunc angleFuncs[2] = { &Vector2::Angle, &Vector2::AngleSafe };
+        for (Vec2CalcFunc angleFunc : angleFuncs)
+        {
+            angleTest(angleFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 0.0f, 1.0f }, AZ::Constants::HalfPi);
+            angleTest(angleFunc, Vector2{ 42.0f, 0.0f }, Vector2{ 0.0f, 23.0f }, AZ::Constants::HalfPi);
+            angleTest(angleFunc, Vector2{ 1.0f, 0.0f }, Vector2{ -1.0f, 0.0f }, AZ::Constants::Pi);
+            angleTest(angleFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 1.0f, 1.0f }, AZ::Constants::QuarterPi);
+            angleTest(angleFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 1.0f, 0.0f }, 0.f);
+            angleTest(angleFunc, Vector2{ 1.0f, 1.0f }, Vector2{ -1.0f, -1.0f }, AZ::Constants::Pi);
+        }
+
+        const Vec2CalcFunc angleDegFuncs[2] = { &Vector2::AngleDeg, &Vector2::AngleSafeDeg };
+        for (Vec2CalcFunc angleDegFunc : angleDegFuncs)
+        {
+            angleTest(angleDegFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 0.0f, 1.0f }, 90.f);
+            angleTest(angleDegFunc, Vector2{ 42.0f, 0.0f }, Vector2{ 0.0f, 23.0f }, 90.f);
+            angleTest(angleDegFunc, Vector2{ 1.0f, 0.0f }, Vector2{ -1.0f, 0.0f }, 180.f);
+            angleTest(angleDegFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 1.0f, 1.0f }, 45.f);
+            angleTest(angleDegFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 1.0f, 0.0f }, 0.f);
+            angleTest(angleDegFunc, Vector2{ 1.0f, 1.0f }, Vector2{ -1.0f, -1.0f }, 180.f);
+        }
+
+        const Vec2CalcFunc angleSafeFuncs[2] = { &Vector2::AngleSafe, &Vector2::AngleSafeDeg };
+        for (Vec2CalcFunc angleSafeFunc : angleSafeFuncs)
+        {
+            angleTest(angleSafeFunc, Vector2{ 0.0f, 0.0f }, Vector2{ 0.0f, 1.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector2{ 0.0f, 0.0f }, Vector2{ 0.0f, 0.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector2{ 1.0f, 0.0f }, Vector2{ 0.0f, 0.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector2{ 0.0f, 0.0f }, Vector2{ 0.0f, 323432.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector2{ 323432.0f, 0.0f }, Vector2{ 0.0f, 0.0f }, 0.f);
+        }
+    }
+
     TEST(MATH_Vector3, Test)
     {
         //constructors
@@ -696,6 +739,49 @@ namespace UnitTest
         //v1.SwapEndian();
         //v1.SwapEndian();
         //AZ_TEST_ASSERT(v1==Vector3(1.0f,2.0f,3.0f));
+    }
+
+    TEST(MATH_Vector3, Angle_Test)
+    {
+        using Vec3CalcFunc = VectorFloat(Vector3::*)(const Vector3&) const;
+        auto angleTest = [](Vec3CalcFunc func, const Vector3& self, const Vector3& other, const VectorFloat target)
+        {
+            const float epsilon = 0.01f;
+            VectorFloat value = (self.*func)(other);
+            AZ_TEST_ASSERT(IsClose(value, target, epsilon));
+        };
+
+        const Vec3CalcFunc angleFuncs[2] = { &Vector3::Angle, &Vector3::AngleSafe };
+        for (Vec3CalcFunc angleFunc : angleFuncs)
+        {
+            angleTest(angleFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 1.0f, 0.0f }, AZ::Constants::HalfPi);
+            angleTest(angleFunc, Vector3{ 42.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 23.0f, 0.0f }, AZ::Constants::HalfPi);
+            angleTest(angleFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ -1.0f, 0.0f, 0.0f }, AZ::Constants::Pi);
+            angleTest(angleFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 1.0f, 1.0f, 0.0f }, AZ::Constants::QuarterPi);
+            angleTest(angleFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 1.0f, 0.0f, 0.0f }, 0.f);
+            angleTest(angleFunc, Vector3{ 1.0f, 1.0f, 0.0f }, Vector3{ -1.0f, -1.0f, 0.0f }, AZ::Constants::Pi);
+        }
+
+        const Vec3CalcFunc angleDegFuncs[2] = { &Vector3::AngleDeg, &Vector3::AngleSafeDeg };
+        for (Vec3CalcFunc angleDegFunc : angleDegFuncs)
+        {
+            angleTest(angleDegFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 1.0f, 0.0f }, 90.f);
+            angleTest(angleDegFunc, Vector3{ 42.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 23.0f, 0.0f }, 90.f);
+            angleTest(angleDegFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ -1.0f, 0.0f, 0.0f }, 180.f);
+            angleTest(angleDegFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 1.0f, 1.0f, 0.0f }, 45.f);
+            angleTest(angleDegFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 1.0f, 0.0f, 0.0f }, 0.f);
+            angleTest(angleDegFunc, Vector3{ 1.0f, 1.0f, 0.0f }, Vector3{ -1.0f, -1.0f, 0.0f }, 180.f);
+        }
+
+        const Vec3CalcFunc angleSafeFuncs[2] = { &Vector3::AngleSafe, &Vector3::AngleSafeDeg };
+        for (Vec3CalcFunc angleSafeFunc : angleSafeFuncs)
+        {
+            angleTest(angleSafeFunc, Vector3{ 0.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 1.0f, 0.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector3{ 0.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector3{ 1.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector3{ 0.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 323432.0f, 0.0f }, 0.f);
+            angleTest(angleSafeFunc, Vector3{ 323432.0f, 0.0f, 0.0f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.f);
+        }
     }
 
     TEST(MATH_Vector3, CompareTest)
@@ -1923,6 +2009,58 @@ namespace UnitTest
         // make sure a point inside the box returns zero, even if that point isn't the center.
         AZ_TEST_ASSERT(aabb.GetDistance(Vector3(0.5f, 0.0f, 0.0f)).IsClose(0.0f));
 
+        //GetDistanceSq
+        aabb.Set(Vector3(-1.0f), Vector3(1.0f));
+        AZ_TEST_ASSERT(aabb.GetDistanceSq(Vector3(0.0f, 3.0f, 0.0f)).IsClose(4.0f));
+        // make sure a point inside the box returns zero, even if that point isn't the center.
+        AZ_TEST_ASSERT(aabb.GetDistanceSq(Vector3(0.0f, 0.5f, 0.0f)).IsClose(0.0f));
+
+        //GetMaxDistance
+        aabb.Set(Vector3(-1.0f), Vector3(1.0f));
+        // The max distance for all of the following should be the square root of (4^2 + 3^2 + 2^2)
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 3.0f,  2.0f,  1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 3.0f,  2.0f, -1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 3.0f, -2.0f,  1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 3.0f, -2.0f, -1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-3.0f,  2.0f,  1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-3.0f,  2.0f, -1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-3.0f, -2.0f,  1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-3.0f, -2.0f, -1.0f)).IsClose(std::sqrtf(16.0f + 9.0f + 4.0f)));
+        // make sure points inside the box return a correct max distance as well - sqrt of (1.5^2 + 1.5^2 + 1.5^2)
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 0.5f,  0.5f,  0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 0.5f,  0.5f, -0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 0.5f, -0.5f,  0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3( 0.5f, -0.5f, -0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-0.5f,  0.5f,  0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-0.5f,  0.5f, -0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-0.5f, -0.5f,  0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(-0.5f, -0.5f, -0.5f)).IsClose(std::sqrtf(2.25f + 2.25f + 2.25f)));
+        // make sure the center returns our minimal max distance (1^2 + 1^2 + 1^2)
+        AZ_TEST_ASSERT(aabb.GetMaxDistance(Vector3(0.0f, 0.0f, 0.0f)).IsClose(std::sqrtf(1.0f + 1.0f + 1.0f)));
+
+        //GetMaxDistanceSq
+        aabb.Set(Vector3(-1.0f), Vector3(1.0f));
+        // The max distance for all of the following should be (4^2 + 3^2 + 2^2)
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 3.0f,  2.0f,  1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 3.0f,  2.0f, -1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 3.0f, -2.0f,  1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 3.0f, -2.0f, -1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-3.0f,  2.0f,  1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-3.0f,  2.0f, -1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-3.0f, -2.0f,  1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-3.0f, -2.0f, -1.0f)).IsClose(16.0f + 9.0f + 4.0f));
+        // make sure points inside the box return a correct max distance as well: (1.5^2 + 1.5^2 + 1.5^2)
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 0.5f,  0.5f,  0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 0.5f,  0.5f, -0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 0.5f, -0.5f,  0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3( 0.5f, -0.5f, -0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-0.5f,  0.5f,  0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-0.5f,  0.5f, -0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-0.5f, -0.5f,  0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(-0.5f, -0.5f, -0.5f)).IsClose(2.25f + 2.25f + 2.25f));
+        // make sure the center returns our minimal max distance (1^2 + 1^2 + 1^2)
+        AZ_TEST_ASSERT(aabb.GetMaxDistanceSq(Vector3(0.0f, 0.0f, 0.0f)).IsClose(1.0f + 1.0f + 1.0f));
+
         //GetClamped
         aabb.Set(Vector3(0.0f), Vector3(2.0f));
         aabb2.Set(Vector3(1.0f), Vector3(4.0f));
@@ -2222,6 +2360,16 @@ namespace UnitTest
         const float infinity = std::numeric_limits<float>::infinity();
         pl.Set(infinity, infinity, infinity, infinity);
         AZ_TEST_ASSERT(!pl.IsFinite());
+    }
+
+    TEST(MATH_Plane, CreateFromVectorCoefficients_IsEquivalentToCreateFromCoefficients)
+    {
+        Plane planeFromCoefficients = Plane::CreateFromCoefficients(1.0, 2.0, 3.0, 4.0);
+
+        Vector4 coefficients(1.0, 2.0, 3.0, 4.0);
+        Plane planeFromVectorCoefficients = Plane::CreateFromVectorCoefficients(coefficients);
+
+        EXPECT_EQ(planeFromVectorCoefficients, planeFromCoefficients);
     }
 
     TEST(MATH_Intersection, ClosestSegmentSegment)
@@ -3952,14 +4100,40 @@ namespace UnitTest
 
                 {
                     SplineAddress splineAddress = bezierSpline.GetAddressByFraction(1.0f);
-                    EXPECT_TRUE(splineAddress.m_segmentIndex == 3);
-                    EXPECT_TRUE(splineAddress.m_segmentFraction == 1.0f);
+                    EXPECT_EQ(3, splineAddress.m_segmentIndex);
+                    EXPECT_FLOAT_EQ(1.0f, splineAddress.m_segmentFraction);
+                }
+
+                {
+                    SplineAddress splineAddress = bezierSpline.GetAddressByFraction(0.6f);
+                    EXPECT_EQ(2, splineAddress.m_segmentIndex);
+                    EXPECT_FLOAT_EQ(0.4f, splineAddress.m_segmentFraction);
                 }
 
                 {
                     SplineAddress splineAddress = bezierSpline.GetAddressByFraction(0.5f);
-                    EXPECT_TRUE(splineAddress.m_segmentIndex == 2);
-                    EXPECT_FLOAT_EQ(0.0f, splineAddress.m_segmentFraction);
+                    // Due to /fp:fast differences in VS2019, the number of segments the Spline Address
+                    // returns either be 1 or 2.
+                    // To workaround this issue, the segment fraction is used to determine if the spline address is near
+                    // the end of the second segment
+                    EXPECT_GE(splineAddress.m_segmentIndex, 1);
+                    EXPECT_LE(splineAddress.m_segmentIndex, 2);
+
+                    // The following performs a check to validate spline address is "near" two segments
+                    // in length
+                    switch (splineAddress.m_segmentIndex)
+                    {
+                    case 1:
+                        // When the segment index is 1, the percentage along segment index 1 should be close to 100%
+                        EXPECT_FLOAT_EQ(1.0f, splineAddress.m_segmentFraction);
+                        break;
+                    case 2:
+                        // When the segment index is 2, the percentage along segment index 2 should be close to 0%
+                        EXPECT_FLOAT_EQ(0.0f, splineAddress.m_segmentFraction);
+                        break;
+                    default:
+                        ADD_FAILURE() << "The four vertex Bezier Spline that has been split in half should be close to two segments in length";
+                    }
                 }
             }
         }
@@ -5944,8 +6118,7 @@ namespace UnitTest
         // Float
         const float epsilonF = std::numeric_limits<float>::epsilon();
         const float doesntMatterF = std::numeric_limits<float>::signaling_NaN();
-        // volatile keyword required here to prevent spurious vs2013 compile error about division by 0
-        volatile float lowerF = 2.3f, upperF = 2.3f;
+        float lowerF = 2.3f, upperF = 2.3f;
         EXPECT_EQ(0.0f, AZ::LerpInverse(lowerF, upperF, doesntMatterF));
         EXPECT_EQ(0.0f, AZ::LerpInverse(0.0f, 0.5f * epsilonF, doesntMatterF));
         EXPECT_EQ(0.0f, AZ::LerpInverse(0.0f, 5.0f * epsilonF, 0.0f));
@@ -5956,8 +6129,7 @@ namespace UnitTest
         // Double
         const double epsilonD = std::numeric_limits<double>::epsilon();
         const double doesntMatterD = std::numeric_limits<double>::signaling_NaN();
-        // volatile keyword required here to prevent spurious vs2013 compile error about division by 0
-        volatile double lowerD = 2.3, upperD = 2.3;
+        double lowerD = 2.3, upperD = 2.3;
         EXPECT_EQ(0.0, AZ::LerpInverse(lowerD, upperD, doesntMatterD));
         EXPECT_EQ(0.0, AZ::LerpInverse(0.0, 0.5 * epsilonD, doesntMatterD));
         EXPECT_EQ(0.0, AZ::LerpInverse(0.0, 5.0 * epsilonD, 0.0));

@@ -72,17 +72,20 @@ namespace DynamicContent
         m_fileWatcherProxyModel(new QSortFilterProxyModel(this)),
         m_packagesProxyModel(new QSortFilterProxyModel(this))
     {
-
-        EBUS_EVENT_RESULT(m_requestId, PythonWorkerRequests::Bus, AllocateRequestId);
+        auto pythonWorkerRequestsInterface = AZ::Interface<PythonWorkerRequestsInterface>::Get();
+        if (pythonWorkerRequestsInterface)
+        {
+            m_requestId = pythonWorkerRequestsInterface->AllocateRequestId();
+        }
 
         m_manifestStatus.reset(new ManifestInfo);
 
         setupUi(this);
-        PythonWorkerEvents::Bus::Handler::BusConnect();
+        AZ::Interface<PythonWorkerEventsInterface>::Register(this);
         SetupUI();
 
         m_platformMap = PlatformMap();
-        QList<QString> platformCheckList = QList<QString>() << "xboxone" << "ps4"; // ACCEPTED_USE
+        QList<QString> platformCheckList = QList<QString>() << "xenia" << "provo";
         for (auto platform : platformCheckList)
         {
             CheckPlatformLicense(platform);
@@ -95,7 +98,7 @@ namespace DynamicContent
 
     QDynamicContentEditorMainWindow::~QDynamicContentEditorMainWindow()
     {
-        PythonWorkerEvents::Bus::Handler::BusDisconnect();
+        AZ::Interface<PythonWorkerEventsInterface>::Unregister(this);
         auto metricId = LyMetrics_CreateEvent(DCM_METRIC_EVENT_NAME);
         LyMetrics_AddAttribute(metricId, DCM_OPERATION_ATTRIBUTE_NAME, "close");
         LyMetrics_SubmitEvent(metricId);
@@ -112,8 +115,8 @@ namespace DynamicContent
         if (pathList.size() >= 2)
         {
             pathList[pathList.size() - 2] = platform;
-            QString ps4FullPath = pathList.join("/"); // ACCEPTED_USE
-            if (!QDir(ps4FullPath).exists()) // ACCEPTED_USE
+            QString provoFullPath = pathList.join("/");
+            if (!QDir(provoFullPath).exists())
             {
                 m_platformMap[platform].LicenseExists = false;
                 QLabel* platformLabel = findChild<QLabel *>(platform);
@@ -272,7 +275,7 @@ namespace DynamicContent
             }
             else if (key == COMMAND_SIGNAL_DONE_UPLOADING)
             {
-                m_packagesModel->stopS3StatusAnimation(value.toString()); // ACCEPTED_USE
+                m_packagesModel->stopS3StatusAnimation(value.toString());
                 return true;
             }
             else if (key == COMMAND_CHECK_EXISTING_KEYS)
@@ -389,7 +392,11 @@ namespace DynamicContent
 
     void QDynamicContentEditorMainWindow::PythonExecute(const char* command, const QVariantMap& args)
     {
-        EBUS_EVENT(PythonWorkerRequests::Bus, ExecuteAsync, m_requestId, command, args);
+        auto pythonWorkerRequestsInterface = AZ::Interface<PythonWorkerRequestsInterface>::Get();
+        if (pythonWorkerRequestsInterface)
+        {
+            pythonWorkerRequestsInterface->ExecuteAsync(m_requestId, command, args);
+        }
     }
 
 
@@ -1368,7 +1375,7 @@ namespace DynamicContent
         args[ARGS_SECTION] = KEY_FILES_SECTION;
 
         m_isLoading = true;
-        status->showMessage("Retriving file info from " + filePath);
+        status->showMessage("Retrieving file info from " + filePath);
 
         PythonExecute(COMMAND_SHOW_MANIFESTS, args);
         PythonExecute(COMMAND_GET_BUCKET_STATUS, args);

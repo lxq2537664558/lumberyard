@@ -27,6 +27,7 @@
 #include "TextureHelpers.h"
 #include <AzCore/IO/SystemFile.h> // for AZ_MAX_PATH_LEN
 #include "StereoTexture.h"
+#include <AzCore/Debug/AssetTracking.h>
 #include <AzCore/std/string/conversions.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 
@@ -99,6 +100,8 @@ CTexture* CTexture::s_ptexSceneSpecular;
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
 CTexture* CTexture::s_ptexAmbientLookup;
@@ -129,9 +132,7 @@ CTexture* CTexture::s_ptexRainSSOcclusion[2];
 CTexture* CTexture::s_ptexRainDropsRT[2];
 
 CTexture* CTexture::s_ptexRT_ShadowPool;
-//  Confetti BEGIN: Igor Lobanchikov
 CTexture* CTexture::s_ptexRT_ShadowStub;
-//  Confetti End: Igor Lobanchikov
 CTexture* CTexture::s_ptexCloudsLM;
 
 CTexture* CTexture::s_ptexSceneTarget = NULL;
@@ -425,6 +426,8 @@ CTexture* CTexture::GetByNameCRC(CCryNameTSCRC Name)
 
 CTexture* CTexture::NewTexture(const char* name, uint32 nFlags, ETEX_Format eTFDst, bool& bFound)
 {
+    AZ_ASSET_NAMED_SCOPE("CTexture::NewTexture: %s", name);
+
     CTexture* pTex = NULL;
     AZStd::string normalizedFile;
     AZStd::string fileExtension;
@@ -607,6 +610,8 @@ CTexture* CTexture::CreateTextureArray(const char* name, ETEX_Type eType, uint32
 
 CTexture* CTexture::CreateRenderTarget(const char* name, uint32 nWidth, uint32 nHeight, const ColorF& cClear, ETEX_Type eTT, uint32 nFlags, ETEX_Format eTF, int nCustomID)
 {
+    AZ_ASSET_NAMED_SCOPE("CTexture::CreateRenderTarget: %s", name);
+
     CTexture* pTex = CreateTextureObject(name, nWidth, nHeight, 1, eTT, nFlags | FT_USAGE_RENDERTARGET, eTF, nCustomID);
     pTex->m_nWidth = nWidth;
     pTex->m_nHeight = nHeight;
@@ -620,6 +625,38 @@ CTexture* CTexture::CreateRenderTarget(const char* name, uint32 nWidth, uint32 n
     pTex->PostCreate();
 
     return pTex;
+}
+
+// Create2DTextureWithMips is similar to Create2DTexture, but it also propagates the mip argument correctly.
+// The original Create2DTexture function force sets mips to 1.
+// This has been separated from Create2DTexture to ensure that we preserve backwards compatibility.
+bool CTexture::Create2DTextureWithMips(int nWidth, int nHeight, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst)
+{
+    if (nMips <= 0)
+    {
+        nMips = CTexture::CalcNumMips(nWidth, nHeight);
+    }
+    m_eTFSrc = eTFSrc;
+    m_nMips = nMips;
+
+    STexData td;
+    td.m_eTF = eTFSrc;
+    td.m_nDepth = 1;
+    td.m_nWidth = nWidth;
+    td.m_nHeight = nHeight;
+    // Propagate mips correctly.  (Create2DTexture always sets this to 1)
+    td.m_nMips = nMips; 
+    td.m_pData[0] = pData;
+
+    bool bRes = CreateTexture(td);
+    if (!bRes)
+    {
+        m_nFlags |= FT_FAILED;
+    }
+
+    PostCreate();
+
+    return bRes;
 }
 
 bool CTexture::Create2DTexture(int nWidth, int nHeight, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst)
@@ -789,6 +826,7 @@ bool CTexture::Reload()
 CTexture* CTexture::ForName(const char* name, uint32 nFlags, ETEX_Format eTFDst)
 {
     SLICE_AND_SLEEP();
+    AZ_ASSET_NAMED_SCOPE("CTexture::ForName: %s", name);
 
     bool bFound = false;
 
@@ -1221,7 +1259,7 @@ bool CTexture::Load(CImageFile* pImage)
     {
         m_nFlags |= FT_SPLITTED;
     }
-    if (pImage->mfGet_Flags() & FIM_X360_NOT_PRETILED) // ACCEPTED_USE
+    if (pImage->mfGet_Flags() & FIM_X360_NOT_PRETILED)
     {
         m_nFlags |= FT_TEX_WAS_NOT_PRE_TILED;
     }
@@ -1272,7 +1310,7 @@ bool CTexture::Load(CImageFile* pImage)
     td.m_pFilePath = pImage->mfGet_filename();
 
     // base range after normalization, fe. [0,1] for 8bit images, or [0,2^15] for RGBE/HDR data
-    if ((td.m_eTF == eTF_R9G9B9E5) || (td.m_eTF == eTF_BC6UH) || (td.m_eTF == eTF_BC6UH))
+    if ((td.m_eTF == eTF_R9G9B9E5) || (td.m_eTF == eTF_BC6UH) || (td.m_eTF == eTF_BC6SH))
     {
         td.m_cMinColor /= td.m_cMaxColor.a;
         td.m_cMaxColor /= td.m_cMaxColor.a;
@@ -1545,6 +1583,8 @@ uint32 CTexture::TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, u
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
 
@@ -1554,6 +1594,8 @@ uint32 CTexture::TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, u
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
 
@@ -1562,10 +1604,8 @@ uint32 CTexture::TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, u
     }
     else
     {
-        //  Confetti BEGIN: Igor Lobanchikov
         const Vec2i BlockDim = GetBlockDim(eTF);
         const int nBytesPerBlock = CImageExtensionHelper::BytesPerBlock(eTF);
-        //  Confetti End: Igor Lobanchikov
         uint32 nSize = 0;
 
         while ((nWidth || nHeight || nDepth) && nMips)
@@ -1574,9 +1614,7 @@ uint32 CTexture::TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, u
             nHeight = max(1U, nHeight);
             nDepth = max(1U, nDepth);
 
-            //  Confetti BEGIN: Igor Lobanchikov
             nSize += ((nWidth + BlockDim.x - 1) / BlockDim.x) * ((nHeight + BlockDim.y - 1) / BlockDim.y) * nDepth * nBytesPerBlock;
-            //  Confetti End: Igor Lobanchikov
 
             nWidth  >>= 1;
             nHeight >>= 1;
@@ -1599,11 +1637,9 @@ bool CTexture::IsInPlaceFormat(const ETEX_Format fmt)
     case eTF_R8:
     case eTF_R8S:
     case eTF_R16:
-    //  Confetti BEGIN: Igor Lobanchikov
     case eTF_R16U:
     case eTF_R16G16U:
     case eTF_R10G10B10A2UI:
-    //  Confetti End: Igor Lobanchikov
     case eTF_R16F:
     case eTF_R32F:
     case eTF_R8G8:
@@ -1639,7 +1675,6 @@ bool CTexture::IsInPlaceFormat(const ETEX_Format fmt)
 
     case eTF_B8G8R8A8:
     case eTF_B8G8R8X8:
-        //  Confetti BEGIN: Igor Lobanchikov
 #ifdef CRY_USE_METAL
     case eTF_PVRTC2:
     case eTF_PVRTC4:
@@ -1660,7 +1695,6 @@ bool CTexture::IsInPlaceFormat(const ETEX_Format fmt)
     case eTF_ASTC_12x10:
     case eTF_ASTC_12x12:
 #endif
-        //  Confetti End: Igor Lobanchikov
         return true;
     default:
         return false;
@@ -2790,9 +2824,7 @@ void CTexture::ReleaseSystemTextures()
     SAFE_RELEASE_FORCE(s_ptexSkyDomeRayleigh);
     SAFE_RELEASE_FORCE(s_ptexSkyDomeMoon);
     SAFE_RELEASE_FORCE(s_ptexRT_ShadowPool);
-    //  Confetti BEGIN: Igor Lobanchikov
     SAFE_RELEASE_FORCE(s_ptexRT_ShadowStub);
-    //  Confetti End: Igor Lobanchikov
 
     SAFE_RELEASE_FORCE(s_ptexSceneNormalsMapMS);
     SAFE_RELEASE_FORCE(s_ptexSceneDiffuseAccMapMS);
@@ -2864,12 +2896,12 @@ void CTexture::LoadDefaultSystemTextures()
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
         s_ptexRT_ShadowPool = CTexture::CreateTextureObject("$RT_ShadowPool", 0, 0, 1, eTT_2D, FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_USAGE_DEPTHSTENCIL, eTF_Unknown);
-        //  Confetti BEGIN: Igor Lobanchikov
         s_ptexRT_ShadowStub = CTexture::CreateTextureObject("$RT_ShadowStub", 0, 0, 1, eTT_2D, FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_USAGE_DEPTHSTENCIL, eTF_Unknown);
-        //  Confetti End: Igor Lobanchikov
 
         s_ptexDepthBufferQuarter = CTexture::CreateTextureObject("$DepthBufferQuarter", 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_USAGE_DEPTHSTENCIL, eTF_Unknown);
 
@@ -2922,13 +2954,23 @@ void CTexture::LoadDefaultSystemTextures()
             s_ptexSceneNormalsMap = CTexture::CreateTextureObject("$SceneNormalsMap", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8, TO_SCENE_NORMALMAP);
             s_ptexSceneNormalsBent = CTexture::CreateTextureObject("$SceneNormalsBent", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
             s_ptexSceneDiffuse = CTexture::CreateTextureObject("$SceneDiffuse", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
-            s_ptexSceneSpecular = CTexture::CreateTextureObject("$SceneSpecular", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
+            ETEX_Format rtTextureFormat = eTF_R8G8B8A8;
+            
+            // Slimming GBuffer requires only one channel for specular due to packing of RGB values into YPbPr and
+            // specular components into less channels, thus saving bandwidth by not including G,B,A channels (75% saving)
+            if(CRenderer::CV_r_SlimGBuffer == 1)
+            {
+                rtTextureFormat = eTF_R8;
+            }
+            s_ptexSceneSpecular = CTexture::CreateTextureObject("$SceneSpecular", 0, 0, 1, eTT_2D, nRTFlags, rtTextureFormat);
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_5
     #if defined(AZ_PLATFORM_XENIA)
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
             
@@ -3012,6 +3054,8 @@ void CTexture::LoadDefaultSystemTextures()
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
 
@@ -3079,6 +3123,8 @@ void CTexture::LoadDefaultSystemTextures()
         #include "Xenia/Texture_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/Texture_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/Texture_cpp_salem.inl"
     #endif
 #endif
     }
@@ -3408,4 +3454,45 @@ void CTexture::ApplyForID(int id, int nTUnit, int nTState, int nTexMaterialSlot,
     {
         CTextureManager::Instance()->GetWhiteTexture()->Apply(nTUnit, nTState, nTexMaterialSlot, nSUnit);
     }
+}
+
+CTexAnim::CTexAnim()
+{
+    m_nRefCount = 1;
+    m_Rand = 0;
+    m_NumAnimTexs = 0;
+    m_bLoop = false;
+    m_Time = 0.0f;
+}
+
+CTexAnim::~CTexAnim()
+{
+    for (uint32 i = 0; i < m_TexPics.Num(); i++)
+    {
+        ITexture* pTex = (ITexture*)m_TexPics[i];
+        SAFE_RELEASE(pTex);
+    }
+    m_TexPics.Free();
+}
+
+void CTexAnim::AddRef()
+{   
+    CryInterlockedIncrement(&m_nRefCount);
+}
+
+void CTexAnim::Release()
+{
+    long refCnt = CryInterlockedDecrement(&m_nRefCount);
+    if (refCnt > 0)
+    {
+        return;
+    }
+    delete this;
+}
+
+int CTexAnim::Size() const
+{
+    int nSize = sizeof(CTexAnim);
+    nSize += m_TexPics.GetMemoryUsage();
+    return nSize;
 }

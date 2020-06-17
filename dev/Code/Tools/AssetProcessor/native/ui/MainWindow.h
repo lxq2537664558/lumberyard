@@ -18,6 +18,7 @@
 #include <QPointer>
 #include "native/assetprocessor.h"
 #include <AzQtComponents/Components/FilteredSearchWidget.h>
+#include <QElapsedTimer>
 
 namespace Ui {
     class MainWindow;
@@ -26,10 +27,14 @@ class GUIApplicationManager;
 class QListWidgetItem;
 class QFileSystemWatcher;
 class QSettings;
+
 namespace AssetProcessor
 {
+    class AssetTreeFilterModel;
     class JobSortFilterProxyModel;
     class JobsModel;
+    class ProductAssetTreeModel;
+    class SourceAssetTreeModel;
 }
 
 class MainWindow
@@ -38,8 +43,31 @@ class MainWindow
     Q_OBJECT
 
 public:
+
+    // Tracks which asset tab the asset page is on.
+    enum class AssetTabIndex
+    {
+        Source = 0,
+        Product = 1
+    };
+
+    // This order is actually driven by the layout in the UI file.
+    // If the order is changed in the UI file, it should be changed here, too.
+    enum class DialogStackIndex
+    {
+        Jobs,
+        Assets,
+        Logs,
+        Shaders,
+        Connections,
+        Tools
+    };
+
     struct Config
     {
+        // These default values are used if the values can't be read from AssetProcessorConfig.ini,
+        // and the call to defaultConfig fails.
+
         // Asset Status
         int jobStatusColumnWidth = -1;
         int jobSourceColumnWidth = -1;
@@ -76,6 +104,8 @@ public Q_SLOTS:
     void OnRescanButtonClicked();
     void HighlightAsset(QString assetPath);
 
+    void OnAssetTabChange(int index);
+
 protected Q_SLOTS:
     void ApplyConfig();
 
@@ -98,6 +128,10 @@ private:
     AssetProcessor::JobSortFilterProxyModel* m_jobSortFilterProxy;
     LogSortFilterProxy* m_logSortFilterProxy;
     AssetProcessor::JobsModel* m_jobsModel;
+    AssetProcessor::SourceAssetTreeModel* m_sourceModel = nullptr;
+    AssetProcessor::ProductAssetTreeModel* m_productModel = nullptr;
+    AssetProcessor::AssetTreeFilterModel* m_sourceAssetTreeFilterModel = nullptr;
+    AssetProcessor::AssetTreeFilterModel* m_productAssetTreeFilterModel = nullptr;
     QPointer<AssetProcessor::LogPanel> m_loggingPanel;
     int m_processJobsCount = 0;
     int m_createJobCount = 0;
@@ -138,5 +172,25 @@ private:
     void ShowJobViewContextMenu(const QPoint& pos);
     void ShowLogLineContextMenu(const QPoint& pos);
     void ShowJobLogContextMenu(const QPoint& pos);
+
+    void ResetTimers();
+    void CheckStartAnalysisTimers();
+    void CheckEndAnalysisTimer();
+    void CheckStartProcessTimers();
+    void CheckEndProcessTimer();
+    QString FormatStringTime(qint64 timeMs) const;
+
+    void SetupAssetSelectionCaching();
+
+    QElapsedTimer m_scanTimer;
+    QElapsedTimer m_analysisTimer;
+    QElapsedTimer m_processTimer;
+
+    qint64 m_scanTime{ 0 };
+    qint64 m_analysisTime{ 0 };
+    qint64 m_processTime{ 0 };
+
+    AZStd::string m_cachedSourceAssetSelection;
+    AZStd::string m_cachedProductAssetSelection;
 };
 

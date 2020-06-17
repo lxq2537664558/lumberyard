@@ -49,7 +49,6 @@
 #include <ILog.h> // <> required for Interfuscator
 #include "CryVersion.h"
 #include "smartptr.h"
-#include <IMemory.h> // <> required for Interfuscator
 #include <ISystemScheduler.h> // <> required for Interfuscator
 #include <memory> // shared_ptr
 #include <IFilePathManager.h>
@@ -109,7 +108,6 @@ namespace DRS {
 struct IMaterialEffects;
 struct IParticleManager;
 class IOpticsManager;
-struct IHardwareMouse;
 class ICrySizer;
 struct ITestSystem;
 class IXMLBinarySerializer;
@@ -216,7 +214,7 @@ enum ESystemConfigSpec
     CONFIG_HIGH_SPEC = 3,
     CONFIG_VERYHIGH_SPEC = 4,
 
-    END_CONFIG_SPEC_ENUM, // MUST BE LSAT VALUE. USED FOR ERROR CHECKING.
+    END_CONFIG_SPEC_ENUM, // MUST BE LAST VALUE. USED FOR ERROR CHECKING.
 };
 
 // Description:
@@ -229,9 +227,10 @@ enum ESystemConfigPlatform
     CONFIG_OSX_METAL = 3,
     CONFIG_ANDROID = 4,
     CONFIG_IOS = 5,
-    CONFIG_XBONE = 6,
-    CONFIG_PS4 = 7,
+    CONFIG_XENIA = 6,
+    CONFIG_PROVO = 7,
     CONFIG_APPLETV = 8,
+    CONFIG_SALEM = 9,
 
     END_CONFIG_PLATFORM_ENUM, // MUST BE LSAT VALUE. USED FOR ERROR CHECKING.
 };
@@ -483,6 +482,8 @@ enum ESystemEvent
         #include "Xenia/ISystem_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/ISystem_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/ISystem_h_salem.inl"
     #endif
 #endif
 
@@ -492,6 +493,8 @@ enum ESystemEvent
         #include "Xenia/ISystem_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/ISystem_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/ISystem_h_salem.inl"
     #endif
 #endif
     ESYSTEM_EVENT_STREAMING_INSTALL_ERROR,
@@ -503,10 +506,6 @@ enum ESystemEvent
     // Description:
     //      Sent when a new audio implementation is loaded
     ESYSTEM_EVENT_AUDIO_IMPLEMENTATION_LOADED,
-
-    // Description:
-    //      Sent when optional modules (like gems) should register their flow nodes
-    ESYSTEM_EVENT_FLOW_SYSTEM_REGISTER_EXTERNAL_NODES,
 
     ESYSTEM_EVENT_USER = 0x1000,
 
@@ -654,6 +653,8 @@ struct ICVarsWhitelist
         #include "Xenia/ISystem_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/ISystem_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/ISystem_h_salem.inl"
     #endif
 #endif
 
@@ -681,7 +682,7 @@ struct SSystemInitParams
     bool remoteResourceCompiler;
     bool connectToRemote;
     bool waitForConnection; // if true, wait for the remote connection to be established before proceeding to system init.
-    char assetsPlatform[64]; // what flavor of assets to load.  ("pc" / "es3" / "ps4" / "ios" / "xboxone").  Corresponds to those in rc.ini and asset processor ini // ACCEPTED_USE
+    char assetsPlatform[64]; // what flavor of assets to load.  Corresponds to those in rc.ini and asset processor ini
     char gameFolderName[256]; // just the name.  Not the full path.
     char gameDLLName[256]; // just the name.  Not the full path.  ("ExampleGame") - does not include extension
     char branchToken[12]; // information written by the assetprocessor which help determine whether the game/editor are running from the same branch or not
@@ -938,7 +939,6 @@ struct SSystemGlobalEnvironment
     // **************************************************************************************
     IScriptSystem*             pScriptSystem;
     IPhysicalWorld*            pPhysicalWorld;
-    IFlowSystem*               pFlowSystem;
     IInput*                    pInput;
     IStatoscope*        pStatoscope;
     ICryPak*                   pCryPak;
@@ -964,7 +964,6 @@ struct SSystemGlobalEnvironment
     INameTable*                pNameTable;
     IVisualLog*                pVisualLog;
     IRenderer*                 pRenderer;
-    IHardwareMouse*            pHardwareMouse;
     IMaterialEffects*          pMaterialEffects;
     ISoftCodeMgr*                            pSoftCodeMgr;
     IOverloadSceneManager*       pOverloadSceneManager;
@@ -983,6 +982,8 @@ struct SSystemGlobalEnvironment
         #include "Xenia/ISystem_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/ISystem_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/ISystem_h_salem.inl"
     #endif
 #endif
 
@@ -1394,9 +1395,7 @@ struct ISystem
     virtual ICryPerfHUD* GetPerfHUD() = 0;
     virtual IPlatformOS* GetPlatformOS() = 0;
     virtual INotificationNetwork* GetINotificationNetwork() = 0;
-    virtual IHardwareMouse* GetIHardwareMouse() = 0;
     virtual IDialogSystem* GetIDialogSystem() = 0;
-    virtual IFlowSystem* GetIFlowSystem() = 0;
     virtual IViewSystem* GetIViewSystem() = 0;
     virtual ILevelSystem* GetILevelSystem() = 0;
     virtual IBudgetingSystem* GetIBudgetingSystem() = 0;
@@ -1454,7 +1453,6 @@ struct ISystem
     // Summary:
     //   Game is created after System init, so has to be set explicitly.
     virtual void                        SetIGame(IGame* pGame) = 0;
-    virtual void            SetIFlowSystem(IFlowSystem* pFlowSystem) = 0;
     virtual void SetIDialogSystem(IDialogSystem* pDialogSystem) = 0;
     virtual void SetIMaterialEffects(IMaterialEffects* pMaterialEffects) = 0;
     virtual void SetIParticleManager(IParticleManager* pParticleManager) = 0;
@@ -1692,7 +1690,7 @@ struct ISystem
     virtual bool UnregisterErrorObserver(IErrorObserver* errorObserver) = 0;
 
     // Summary:
-    //  Called after the processing of the assert message box(Windows or Xbox). // ACCEPTED_USE
+    //  Called after the processing of the assert message box on some platforms.
     //  It will be called even when asserts are disabled by the console variables.
     virtual void OnAssert(const char* condition, const char* message, const char* fileName, unsigned int fileLineNumber) = 0;
 
@@ -1831,14 +1829,6 @@ struct ISystem
     // Summary:
     //      Unregister an IWindowMessageHandler that was previously registered using RegisterWindowMessageHandler
     virtual void UnregisterWindowMessageHandler(IWindowMessageHandler* pHandler) = 0;
-
-    // Deprecated, use AzFramework::ApplicationRequests::PumpSystemEventLoopUntilEmpty instead
-    AZ_DEPRECATED(virtual int PumpWindowMessage(bool bAll, WIN_HWND hWnd = 0),
-        "PumpWindowMessage has been deprecated, use AzFramework::ApplicationRequests::PumpSystemEventLoopUntilEmpty instead.")
-    {
-        // AzFramework::ApplicationRequests::Bus::Broadcast(&AzFramework::ApplicationRequests::PumpSystemEventLoopUntilEmpty);
-        return 0;
-    }
 
     // Create an instance of a Local File IO object (which reads directly off the local filesystem, instead of,
     // for example, reading from the network or a pack or USB or such.
@@ -2092,6 +2082,8 @@ inline void CryWarning(EValidatorModule module, EValidatorSeverity severity, con
         #include "Xenia/ISystem_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/ISystem_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/ISystem_h_salem.inl"
     #endif
 #endif
 #if defined(_RELEASE) && defined(IS_CONSOLE_PLATFORM)
@@ -2238,7 +2230,7 @@ namespace Detail
 
 #else
 
-# define DeclareConstIntCVar(name, defaultValue) int name
+# define DeclareConstIntCVar(name, defaultValue) int name { defaultValue }
 # define DeclareStaticConstIntCVar(name, defaultValue) static int name
 # define DefineConstIntCVarName(strname, name, defaultValue, flags, help) \
     (gEnv->pConsole == 0 ? 0 : gEnv->pConsole->Register(strname, &name, defaultValue, flags | CONST_CVAR_FLAGS, CVARHELP(help)))

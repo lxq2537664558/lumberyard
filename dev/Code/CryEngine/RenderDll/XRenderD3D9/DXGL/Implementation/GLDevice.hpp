@@ -19,11 +19,24 @@
 #ifndef __GLDEVICE__
 #define __GLDEVICE__
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define GLDEVICE_HPP_SECTION_1 1
+#define GLDEVICE_HPP_SECTION_2 2
+#endif
+
 #include "GLCommon.hpp"
 #include "GLContext.hpp"
 
 #include <AzFramework/API/ApplicationAPI.h>
 #include <AzCore/std/containers/map.h>
+
+// EGL Windows are pointers on some platforms and integers on other platforms, so we can't globally use nullptr
+#if defined(AZ_PLATFORM_LINUX)
+    #define EGL_NULL_VALUE 0
+#else
+    #define EGL_NULL_VALUE nullptr
+#endif
 
 namespace NCryOpenGL
 {
@@ -50,7 +63,7 @@ namespace NCryOpenGL
         eF_DebugOutput,
         eF_DualSourceBlending,
         eF_IndependentBlending,
-		eF_CopyImage,
+        eF_CopyImage,
         eF_NUM // Must be last one
     };
 
@@ -138,7 +151,19 @@ namespace NCryOpenGL
         uint32 m_uWidth;
         uint32 m_uHeight;
         uint32 m_uFrequency;
-#if defined(WIN32)
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GLDEVICE_HPP_SECTION_1
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/GLDevice_hpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/GLDevice_hpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/GLDevice_hpp_salem.inl"
+    #endif
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#elif defined(WIN32)
         uint32 m_uBitsPerPixel;
 #elif defined(ANDROID)
         int32_t m_nativeFormat;
@@ -159,6 +184,17 @@ namespace NCryOpenGL
     typedef AZStd::shared_ptr<EGLNativePlatform> TNativeDisplay;
 #else
     typedef TWindowContext TNativeDisplay;
+#endif
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GLDEVICE_HPP_SECTION_2
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/GLDevice_hpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/GLDevice_hpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/GLDevice_hpp_salem.inl"
+    #endif
 #endif
 
 #if defined(DXGL_USE_EGL)
@@ -183,6 +219,10 @@ namespace NCryOpenGL
     protected:
         bool CreateSurface();
         bool DestroySurface();
+
+#if defined(AZ_PLATFORM_LINUX)
+        bool CreateX11Window();
+#endif
 
         EGLDisplay m_display;
         EGLSurface m_surface;

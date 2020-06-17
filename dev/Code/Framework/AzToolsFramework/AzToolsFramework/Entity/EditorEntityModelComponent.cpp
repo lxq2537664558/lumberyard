@@ -14,6 +14,8 @@
 
 #include <AzToolsFramework/Entity/EditorEntityModel.h>
 
+#include <AzCore/RTTI/BehaviorContext.h>
+
 namespace AzToolsFramework
 {
     namespace Components
@@ -26,6 +28,43 @@ namespace AzToolsFramework
             if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
             {
                 serializeContext->Class<EditorEntityModelComponent, AZ::Component>(); // Empty class
+            }
+
+            if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+            {
+                behaviorContext->EBus<EditorEntityInfoRequestBus>("EditorEntityInfoRequestBus")
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                    ->Attribute(AZ::Script::Attributes::Category, "Entity")
+                    ->Attribute(AZ::Script::Attributes::Module, "editor")
+                    ->Event("GetParent", &EditorEntityInfoRequests::GetParent)
+                    ->Event("GetChildren", &EditorEntityInfoRequests::GetChildren)
+                    ->Event("GetChild", &EditorEntityInfoRequests::GetChild)
+                    ->Event("GetChildCount", &EditorEntityInfoRequests::GetChildCount)
+                    ->Event("GetChildIndex", &EditorEntityInfoRequests::GetChildIndex)
+                    ->Event("GetName", &EditorEntityInfoRequests::GetName)
+                    ->Event("IsLocked", &EditorEntityInfoRequests::IsLocked)
+                    ->Event("IsVisible", &EditorEntityInfoRequests::IsVisible)
+                    ->Event("IsHidden", &EditorEntityInfoRequests::IsHidden)
+                    ->Event("GetStartStatus", &EditorEntityInfoRequests::GetStartStatus)
+                    ;
+
+                behaviorContext->EBus<EditorEntityAPIBus>("EditorEntityAPIBus")
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                    ->Attribute(AZ::Script::Attributes::Category, "Entity")
+                    ->Attribute(AZ::Script::Attributes::Module, "editor")
+                    ->Event("SetName", &EditorEntityAPIRequests::SetName)
+                    ->Event("SetParent", &EditorEntityAPIRequests::SetParent)
+                    ->Event("SetLockState", &EditorEntityAPIRequests::SetLockState)
+                    ->Event("SetVisibilityState", &EditorEntityAPIRequests::SetVisibilityState)
+                    ->Event("SetStartStatus", &EditorEntityAPIRequests::SetStartStatus)
+                    ;
+
+                behaviorContext->EnumProperty<static_cast<int>(EditorEntityStartStatus::StartActive)>("EditorEntityStartStatus_StartActive")
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation);
+                behaviorContext->EnumProperty<static_cast<int>(EditorEntityStartStatus::StartInactive)>("EditorEntityStartStatus_StartInactive")
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation);
+                behaviorContext->EnumProperty<static_cast<int>(EditorEntityStartStatus::EditorOnly)>("EditorEntityStartStatus_EditorOnly")
+                    ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation);
             }
         }
 

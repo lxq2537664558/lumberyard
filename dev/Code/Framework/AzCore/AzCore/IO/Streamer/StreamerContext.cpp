@@ -73,6 +73,7 @@ namespace AZ
 
         bool StreamerContext::FinalizeCompletedRequests(AZStd::vector<FileRequest*>& completedRequestLinks)
         {
+            bool hasCompletedRequests = false;
             while (true)
             {
                 AZStd::queue<FileRequest*> completed;
@@ -82,9 +83,10 @@ namespace AZ
                 }
                 if (completed.empty())
                 {
-                    return false;
+                    return hasCompletedRequests;
                 }
 
+                hasCompletedRequests = true;
                 while (!completed.empty())
                 {
                     FileRequest* top = completed.front();
@@ -120,22 +122,27 @@ namespace AZ
                     completed.pop();
                 }
             }
-            return true;
+            return hasCompletedRequests;
         }
 
         void StreamerContext::WakeUpMainStreamThread()
         {
+            AZStd::unique_lock<AZStd::mutex> lock(m_threadSleepLock);
+            m_threadWakeUpQueued.store(true, AZStd::memory_order_release);
             m_threadSleepCondition.notify_one(); 
         }
 
-        AZStd::mutex& StreamerContext::GetThreadSleepLock()
+        void StreamerContext::SuspendMainStreamThread()
         {
-            return m_threadSleepLock;
-        }
-
-        AZStd::condition_variable& StreamerContext::GetThreadSleepCondition()
-        {
-            return m_threadSleepCondition;
+            auto predicate = [this]() -> bool
+            {
+                // Don't go to sleep if there's a wake up call queued
+                return m_threadWakeUpQueued.load(AZStd::memory_order_acquire);
+            };
+            
+            AZStd::unique_lock<AZStd::mutex> lock(m_threadSleepLock);
+            m_threadSleepCondition.wait(lock, predicate);
+            m_threadWakeUpQueued.store(false, AZStd::memory_order_release);
         }
 
         FileRequest* StreamerContext::GetNewRequest(AZStd::vector<FileRequest*>& recycleBin, FileRequest::Usage usage)
@@ -150,7 +157,7 @@ namespace AZ
                 }
                 else
                 {
-                    // Create a few request up front so the engine initialization doesn't
+                    // Create a few requests up front so the engine initialization doesn't
                     // constantly create new instances and resizes the recycle bin.
                     recycleBin.reserve(s_initialRecycleBinSize);
                     for (size_t i = 0; i < s_initialRecycleBinSize; ++i)
@@ -161,6 +168,8 @@ namespace AZ
             }
 
             FileRequest* result = recycleBin.back();
+            AZ_Assert(result->m_usage == usage, "FileRequest ended up in the wrong recycle bin.");
+            AZ_Assert(result->m_operation == FileRequest::Operation::None, "FileRequest wasn't properly reset.");
             recycleBin.pop_back();
             return result;
         }

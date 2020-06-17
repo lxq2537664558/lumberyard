@@ -41,6 +41,8 @@
         #include "Xenia/RemoteCompiler_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/RemoteCompiler_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/RemoteCompiler_cpp_salem.inl"
     #endif
 #endif
 
@@ -354,12 +356,12 @@ namespace NRemoteCompiler
         EShaderLanguage shaderLanguage = GetShaderLanguage();
         switch (shaderLanguage)
         {
-        case eSL_Orbis: // ACCEPTED_USE
-            shaderCompiler = eSC_Orbis_DXC; // ACCEPTED_USE
+        case eSL_Orbis:
+            shaderCompiler = eSC_Orbis_DXC;
             break;
 
-        case eSL_Durango: // ACCEPTED_USE
-            shaderCompiler = eSC_Durango_FXC; // ACCEPTED_USE
+        case eSL_Durango:
+            shaderCompiler = eSC_Durango_FXC;
             break;
 
         case eSL_D3D11:
@@ -387,8 +389,8 @@ namespace NRemoteCompiler
         static const char *shaderCompilerNames[eSC_MAX] =
         {
             "Unknown",
-            "Orbis_DXC", // ACCEPTED_USE
-            "Durango_FXC", // ACCEPTED_USE
+            "Orbis_DXC",
+            "Durango_FXC",
             "D3D11_FXC",
             "GLSL_HLSLcc",
             "METAL_HLSLcc",
@@ -433,6 +435,9 @@ namespace NRemoteCompiler
         case AZ::PLATFORM_APPLE_TV:
             platformName = "iOS";
             break;
+        case AZ::PLATFORM_LINUX_64:
+            platformName = "Linux";
+            break;
         default:
             AZ_Assert(false, "Unknown shader platform");
             break;
@@ -449,7 +454,7 @@ namespace NRemoteCompiler
         switch (shaderCompiler)
         {
         // ----------------------------------------
-        case eSC_Orbis_DXC: // ACCEPTED_USE
+        case eSC_Orbis_DXC:
         {
             flags = "%s %s \"%s\" \"%s\"";
 
@@ -459,6 +464,8 @@ namespace NRemoteCompiler
                     #include "Xenia/RemoteCompiler_cpp_xenia.inl"
                 #elif defined(AZ_PLATFORM_PROVO)
                     #include "Provo/RemoteCompiler_cpp_provo.inl"
+                #elif defined(AZ_PLATFORM_SALEM)
+                    #include "Salem/RemoteCompiler_cpp_salem.inl"
                 #endif
             #endif
 
@@ -468,6 +475,8 @@ namespace NRemoteCompiler
                     #include "Xenia/RemoteCompiler_cpp_xenia.inl"
                 #elif defined(AZ_PLATFORM_PROVO)
                     #include "Provo/RemoteCompiler_cpp_provo.inl"
+                #elif defined(AZ_PLATFORM_SALEM)
+                    #include "Salem/RemoteCompiler_cpp_salem.inl"
                 #endif
             #endif
 
@@ -475,14 +484,22 @@ namespace NRemoteCompiler
                 #define AZ_RESTRICTED_SECTION REMOTECOMPILER_CPP_SECTION_2
                 #include "Provo/RemoteCompiler_cpp_provo.inl"
             #endif
+            #if defined(TOOLS_SUPPORT_XENIA)
+                #define AZ_RESTRICTED_SECTION REMOTECOMPILER_CPP_SECTION_2
+                #include "Xenia/RemoteCompiler_cpp_xenia.inl"
+            #endif
+            #if defined(TOOLS_SUPPORT_SALEM)
+                #define AZ_RESTRICTED_SECTION REMOTECOMPILER_CPP_SECTION_2
+                #include "Salem/RemoteCompiler_cpp_salem.inl"
+            #endif
         }
         break;
 
         // ----------------------------------------
-        case eSC_Durango_FXC: // ACCEPTED_USE
+        case eSC_Durango_FXC:
         case eSC_D3D11_FXC:
         {
-            const char* extraFlags = (shaderCompiler==eSC_Durango_FXC) ? "/Gis" : ""; // ACCEPTED_USE
+            const char* extraFlags = (shaderCompiler==eSC_Durango_FXC) ? "/Gis" : "";
 
             const char* debugFlags = "";
             if (CRenderer::CV_r_shadersdebug == 3)
@@ -755,6 +772,8 @@ namespace NRemoteCompiler
         #include "Xenia/RemoteCompiler_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/RemoteCompiler_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/RemoteCompiler_cpp_salem.inl"
     #endif
 #endif
 
@@ -855,8 +874,12 @@ namespace NRemoteCompiler
 
         #if defined(AZ_RESTRICTED_PLATFORM)
             #define AZ_RESTRICTED_SECTION REMOTECOMPILER_CPP_SECTION_4
-            #if defined(AZ_PLATFORM_PROVO)
+            #if defined(AZ_PLATFORM_XENIA)
+                #include "Xenia/RemoteCompiler_cpp_xenia.inl"
+            #elif defined(AZ_PLATFORM_PROVO)
                 #include "Provo/RemoteCompiler_cpp_provo.inl"
+            #elif defined(AZ_PLATFORM_SALEM)
+                #include "Salem/RemoteCompiler_cpp_salem.inl"
             #endif
         #endif
 
@@ -928,6 +951,8 @@ namespace NRemoteCompiler
         #include "Xenia/RemoteCompiler_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/RemoteCompiler_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/RemoteCompiler_cpp_salem.inl"
     #endif
 #endif
 
@@ -1110,7 +1135,7 @@ namespace NRemoteCompiler
             size_t nUncompressedLen = (size_t)nSrcUncompressedLen;
 
             // Maximum size allowed for a shader in bytes
-            static const size_t maxShaderSize = 1*(1024*1024); // 1 MB
+            static const size_t maxShaderSize = 10ull * (1024ull * 1024ull); // 10 MB
 
             if (nUncompressedLen > maxShaderSize)
             {
@@ -1402,7 +1427,9 @@ namespace NRemoteCompiler
             VerboseLogging(true);
             if(!gEnv->IsInToolMode())
             {
-                EBUS_EVENT(AZ::NativeUI::NativeUIRequestBus, DisplayOkDialog, title, message, false);
+                AZStd::vector<AZStd::string> options;
+                options.push_back("OK");
+                EBUS_EVENT(AZ::NativeUI::NativeUIRequestBus, DisplayBlockingDialog, title, message, options);
             }
         }
         return ESNetworkError;

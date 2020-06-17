@@ -93,10 +93,6 @@ namespace AzToolsFramework
     static const char* const s_duplicateUndoRedoDesc = s_duplicateTitle;
     static const char* const s_deleteUndoRedoDesc = s_deleteTitle;
 
-    static const AZ::Color s_xAxisColor = AZ::Color(1.0f, 0.0f, 0.0f, 1.0f);
-    static const AZ::Color s_yAxisColor = AZ::Color(0.0f, 1.0f, 0.0f, 1.0f);
-    static const AZ::Color s_zAxisColor = AZ::Color(0.0f, 0.0f, 1.0f, 1.0f);
-
     static const AZ::Color s_fadedXAxisColor = AZ::Color(AZ::u8(200), AZ::u8(127), AZ::u8(127), AZ::u8(255));
     static const AZ::Color s_fadedYAxisColor = AZ::Color(AZ::u8(127), AZ::u8(190), AZ::u8(127), AZ::u8(255));
     static const AZ::Color s_fadedZAxisColor = AZ::Color(AZ::u8(120), AZ::u8(120), AZ::u8(180), AZ::u8(255));
@@ -872,9 +868,10 @@ namespace AzToolsFramework
             QPointFromScreenPoint(mouseInteraction.m_mousePick.m_screenCoordinates));
 
         // convert to local space - snap if enabled
-        const AZ::Vector3 finalSurfacePosition = GridSnapping(viewportId)
+        const GridSnapParameters gridSnapParams = GridSnapSettings(viewportId);
+        const AZ::Vector3 finalSurfacePosition = gridSnapParams.m_gridSnap
             ? CalculateSnappedTerrainPosition(
-                worldSurfacePosition, AZ::Transform::CreateIdentity(), viewportId, GridSize(viewportId))
+                worldSurfacePosition, AZ::Transform::CreateIdentity(), viewportId, gridSnapParams.m_gridSize)
             : worldSurfacePosition;
 
         return finalSurfacePosition;
@@ -962,8 +959,8 @@ namespace AzToolsFramework
         ToolsApplicationNotificationBus::Handler::BusConnect();
         Camera::EditorCameraNotificationBus::Handler::BusConnect();
         ComponentModeFramework::EditorComponentModeNotificationBus::Handler::BusConnect(entityContextId);
-        EditorContextVisibilityNotificationBus::Handler::BusConnect(entityContextId);
-        EditorContextLockComponentNotificationBus::Handler::BusConnect(entityContextId);
+        EditorEntityVisibilityNotificationBus::Router::BusRouterConnect();
+        EditorEntityLockComponentNotificationBus::Router::BusRouterConnect();
         EditorManipulatorCommandUndoRedoRequestBus::Handler::BusConnect(entityContextId);
 
         RegisterActions();
@@ -981,8 +978,8 @@ namespace AzToolsFramework
         m_pivotOverrideFrame.Reset();
 
         EditorManipulatorCommandUndoRedoRequestBus::Handler::BusDisconnect();
-        EditorContextLockComponentNotificationBus::Handler::BusDisconnect();
-        EditorContextVisibilityNotificationBus::Handler::BusDisconnect();
+        EditorEntityLockComponentNotificationBus::Router::BusRouterDisconnect();
+        EditorEntityVisibilityNotificationBus::Router::BusRouterDisconnect();
         ComponentModeFramework::EditorComponentModeNotificationBus::Handler::BusDisconnect();
         Camera::EditorCameraNotificationBus::Handler::BusDisconnect();
         ToolsApplicationNotificationBus::Handler::BusDisconnect();
@@ -1310,7 +1307,10 @@ namespace AzToolsFramework
             AZ::Vector3::CreateAxisY(),
             AZ::Vector3::CreateAxisZ());
         rotationManipulators->ConfigureView(
-            2.0f, s_xAxisColor, s_yAxisColor, s_zAxisColor);
+            2.0f,
+            AzFramework::ViewportColors::XAxisColor,
+            AzFramework::ViewportColors::YAxisColor,
+            AzFramework::ViewportColors::ZAxisColor);
 
         struct SharedRotationState
         {
@@ -1485,7 +1485,10 @@ namespace AzToolsFramework
             AZ::Vector3::CreateAxisY(),
             AZ::Vector3::CreateAxisZ());
         scaleManipulators->ConfigureView(
-            2.0f, s_xAxisColor, s_yAxisColor, s_zAxisColor);
+            2.0f,
+            AzFramework::ViewportColors::XAxisColor,
+            AzFramework::ViewportColors::YAxisColor,
+            AzFramework::ViewportColors::ZAxisColor);
 
         // lambdas capture shared_ptr by value to increment ref count
         auto manipulatorEntityIds = AZStd::make_shared<ManipulatorEntityIds>();
@@ -2330,6 +2333,12 @@ namespace AzToolsFramework
             s_duplicateTitle, s_duplicateDesc, []()
         {
             AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzToolsFramework);
+
+            // Clear Widget selection - Prevents issues caused by cloning entities while a property in the Reflected Property Editor is being edited.
+            if (QApplication::focusWidget())
+            {
+                QApplication::focusWidget()->clearFocus();
+            }
 
             ScopedUndoBatch undoBatch(s_duplicateUndoRedoDesc);
             auto selectionCommand = AZStd::make_unique<SelectionCommand>(EntityIdList(), s_duplicateUndoRedoDesc);
@@ -3427,14 +3436,12 @@ namespace AzToolsFramework
         RegenerateManipulators();
     }
 
-    void EditorTransformComponentSelection::OnEntityVisibilityChanged(
-        const AZ::EntityId /*entityId*/, const bool /*visibility*/)
+    void EditorTransformComponentSelection::OnEntityVisibilityChanged(const bool /*visibility*/)
     {
         m_selectedEntityIdsAndManipulatorsDirty = true;
     }
 
-    void EditorTransformComponentSelection::OnEntityLockChanged(
-        const AZ::EntityId /*entityId*/, const bool /*locked*/)
+    void EditorTransformComponentSelection::OnEntityLockChanged(const bool /*locked*/)
     {
         m_selectedEntityIdsAndManipulatorsDirty = true;
     }
@@ -3442,19 +3449,17 @@ namespace AzToolsFramework
     void EditorTransformComponentSelection::EnteredComponentMode(
         const AZStd::vector<AZ::Uuid>& /*componentModeTypes*/)
     {
-        EditorContextLockComponentNotificationBus::Handler::BusDisconnect();
-        EditorContextVisibilityNotificationBus::Handler::BusDisconnect();
+        EditorEntityLockComponentNotificationBus::Router::BusRouterDisconnect();
+        EditorEntityVisibilityNotificationBus::Router::BusRouterDisconnect();
         ToolsApplicationNotificationBus::Handler::BusDisconnect();
     }
 
     void EditorTransformComponentSelection::LeftComponentMode(
         const AZStd::vector<AZ::Uuid>& /*componentModeTypes*/)
     {
-        const AzFramework::EntityContextId entityContextId = GetEntityContextId();
-
         ToolsApplicationNotificationBus::Handler::BusConnect();
-        EditorContextVisibilityNotificationBus::Handler::BusConnect(entityContextId);
-        EditorContextLockComponentNotificationBus::Handler::BusConnect(entityContextId);
+        EditorEntityVisibilityNotificationBus::Router::BusRouterConnect();
+        EditorEntityLockComponentNotificationBus::Router::BusRouterConnect();
     }
 
     void EditorTransformComponentSelection::CreateEntityManipulatorDeselectCommand(ScopedUndoBatch& undoBatch)

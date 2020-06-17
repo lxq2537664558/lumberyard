@@ -65,6 +65,8 @@ struct CVars
         #include "Xenia/cvars_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/cvars_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/cvars_h_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -153,7 +155,6 @@ struct CVars
 #endif
 #endif
 
-    int e_TerrainTextureStreamingPoolItemsNum;
     int e_ParticlesPoolSize;
     int e_ParticlesVertexPoolSize;
     int e_ParticlesIndexPoolSize;
@@ -197,6 +198,7 @@ struct CVars
     DeclareConstIntCVar(e_ObjFastRegister, 1);
     float e_ViewDistRatioLights;
     DeclareConstIntCVar(e_DebugDraw, 0);
+    int e_DebugDrawLodMinTriangles; // cvar for min number of triangles in object before displaying lod warnings
     ICVar* e_DebugDrawFilter;
     DeclareConstIntCVar(e_DebugDrawListSize, 16);
     DeclareConstIntCVar(e_DebugDrawListBBoxIndex, 0);
@@ -212,7 +214,6 @@ struct CVars
     float e_VegetationUseTerrainColorDistance;
     int e_BrushUseTerrainColor;
     int e_DecalsMaxTrisInObject;
-    DeclareConstIntCVar(e_TerrainLog, 0);
     DeclareConstFloatCVar(e_OcclusionVolumesViewDistRatio);
     DeclareConstFloatCVar(e_SunAngleSnapDot);
     DeclareConstIntCVar(e_PreloadDecals, 1);
@@ -220,7 +221,6 @@ struct CVars
     float e_DecalsLifeTimeScale;
     int e_DecalsForceDeferred;
     DeclareConstIntCVar(e_CoverageBufferDebugFreeze, 0);
-    DeclareConstFloatCVar(e_TerrainLodRatioHolesMin);
     DeclareConstIntCVar(e_TerrainOcclusionCulling, 1);
     int e_PhysProxyTriLimit;
     float e_FoliageWindActivationDist;
@@ -251,7 +251,6 @@ struct CVars
     DeclareConstIntCVar(e_ShadowsDebug, 0);
     DeclareConstIntCVar(e_ShadowsCascadesDebug, 0);
     DeclareConstFloatCVar(e_StreamPredictionDistanceNear);
-    DeclareConstIntCVar(e_TerrainDrawThisSectorOnly, 0);
     float e_CoverageBufferDebugDrawScale;
     DeclareConstIntCVar(e_VegetationAlphaBlend, 1);
     DeclareConstFloatCVar(e_VegetationSpritesScaleFactor);
@@ -269,12 +268,9 @@ struct CVars
     float e_CoverageBufferTerrainExpand;
     int e_Dissolve;
     int e_GsmCastFromTerrain;
-    float e_TerrainLodRatio;
-    float e_TerrainLodDistRatio;
     int e_StatObjBufferRenderTasks;
     DeclareConstIntCVar(e_StreamCgfUpdatePerNodeDistance, 1);
     DeclareConstFloatCVar(e_DecalsDefferedDynamicDepthScale);
-    DeclareConstIntCVar(e_TerrainBBoxes, 0);
     DeclareConstIntCVar(e_LightVolumes, e_LightVolumesDefault);
     DeclareConstIntCVar(e_LightVolumesDebug, 0);
     DeclareConstIntCVar(e_Portals, 1);
@@ -308,6 +304,7 @@ struct CVars
     DeclareConstFloatCVar(e_WindBendingDistRatio);
     float e_SQTestDelay;
     int e_PhysMinCellSize;
+    DeclareConstIntCVar(e_PhysEntityGridSizeDefault, 4096);
     int e_StreamCgfMaxTasksInProgress;
     int e_StreamCgfMaxNewTasksPerUpdate;
     int e_CoverageBufferResolution;
@@ -348,7 +345,6 @@ struct CVars
     DeclareConstIntCVar(e_OcclusionVolumes, e_OcclusionVolumesDefault);
     int e_DecalsDefferedStatic;
     DeclareConstIntCVar(e_Roads, 1);
-    DeclareConstFloatCVar(e_TerrainDetailMaterialsViewDistXY);
     int e_ParticlesQuality;
     DeclareConstIntCVar(e_DebugDrawShowOnlyCompound, 0);
     DeclareConstIntCVar(e_StatObjMergeUseThread, 1);
@@ -376,7 +372,6 @@ struct CVars
     DeclareConstIntCVar(e_GsmDepthBoundsDebug, 0);
     DeclareConstIntCVar(e_TimeOfDayDebug, 0);
     int e_WaterTessellationAmount;  // being deprecated by Water gem
-    DeclareConstIntCVar(e_TerrainTextureDebug, 0);
     int e_Entities;
     int e_CoverageBuffer;
     int e_FogVolumeShadingQuality;
@@ -410,7 +405,6 @@ struct CVars
     int e_LodMax;
     int e_LodForceUpdate;
     DeclareConstFloatCVar(e_ViewDistCompMaxSize);
-    DeclareConstFloatCVar(e_TerrainTextureLodRatio);
     float e_ShadowsAdaptScale;
     float e_ScreenShotMapSizeX;
     float e_OcclusionCullingViewDistRatio;
@@ -490,7 +484,6 @@ struct CVars
     DeclareConstFloatCVar(e_StreamCgfGridUpdateDistance);
     DeclareConstFloatCVar(e_LodCompMaxSize);
     float e_ViewDistRatioDetail;
-    DeclareConstIntCVar(e_TerrainDetailMaterialsDebug, 0);
     DeclareConstIntCVar(e_Sleep, 0);
     DeclareConstIntCVar(e_TerrainOcclusionCullingStepSize, 4);
     DeclareConstIntCVar(e_Wind, 1);
@@ -509,7 +502,6 @@ struct CVars
     DeclareConstIntCVar(e_StatObjStoreMesh, 0);
     ICVar* e_StreamCgfDebugFilter;
     int e_ShadowsOnAlphaBlend;
-    DeclareConstFloatCVar(e_TerrainDetailMaterialsViewDistZ);
     DeclareConstFloatCVar(e_VolObjShadowStrength);
     DeclareConstIntCVar(e_ParticlesDebug, 0);
     DeclareConstIntCVar(e_WaterOcean, e_WaterOceanDefault);
@@ -518,7 +510,6 @@ struct CVars
     DeclareConstIntCVar(e_ObjectLayersActivationPhysics, 1);
     DeclareConstIntCVar(e_StreamCgfDebugHeatMap, 0);
     DeclareConstFloatCVar(e_StreamPredictionDistanceFar);
-    DeclareConstIntCVar(e_CoverageBufferTerrain, 0);
     int e_ParticlesThread;
     int e_SQTestExitOnFinish;
     DeclareConstIntCVar(e_TerrainOcclusionCullingMaxSteps, 50);
@@ -586,4 +577,10 @@ struct CVars
     int e_StaticInstancingMinInstNum;
 
     DeclareConstIntCVar(e_MemoryProfiling, 0);
+
+#if !defined(_RELEASE)
+    DeclareConstFloatCVar(e_TerrainPerformanceSecondsPerLog);
+    DeclareConstIntCVar(e_TerrainPerformanceCollectMemoryStats, 0);
+#endif
+
 };

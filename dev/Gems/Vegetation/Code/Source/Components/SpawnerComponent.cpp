@@ -167,6 +167,22 @@ namespace Vegetation
 
         SpawnerRequestBus::Handler::BusDisconnect();
 
+        OnUnregisterArea();
+    }
+
+    void SpawnerComponent::OnRegisterArea()
+    {
+        // Every time our area becomes valid and registered, make sure we clear our
+        // temporary descriptor caches.  These should only contain valid data during
+        // PrepareToClaim / Claim, but it doesn't hurt to ensure they're cleared.
+        ClearSelectableDescriptors();
+    }
+
+    void SpawnerComponent::OnUnregisterArea()
+    {
+        // Every time our area becomes invalid and unregistered, make sure we destroy
+        // all instances that this component spawned.  Also clear our temporary descriptor
+        // caches just to keep things tidy.
         ClearSelectableDescriptors();
         DestroyAllInstances();
     }
@@ -207,7 +223,7 @@ namespace Vegetation
         UpdateShapeParams();
 
 #if defined(VEG_PROFILE_ENABLED)
-        CalcInstanceDebugColor(stackIds);
+        CalcInstanceDebugColor(processedIds);
 #endif
 
         //gather tags from all sources so we can early out of processing this area
@@ -227,7 +243,7 @@ namespace Vegetation
         }
 
         AZStd::sort(m_inclusiveTagsToConsider.begin(), m_inclusiveTagsToConsider.end());
-        m_inclusiveTagsToConsider.erase(
+        m_inclusiveTagsToConsider.erase(  
             std::unique(m_inclusiveTagsToConsider.begin(), m_inclusiveTagsToConsider.end()),
             m_inclusiveTagsToConsider.end());
         AZStd::sort(m_exclusiveTagsToConsider.begin(), m_exclusiveTagsToConsider.end());
@@ -565,56 +581,34 @@ namespace Vegetation
 #endif
     }
 
-    void SpawnerComponent::CalcInstanceDebugColor(EntityIdStack& stackIds)
+    void SpawnerComponent::CalcInstanceDebugColor(const EntityIdStack& processedIds)
     {
-        AZ::Color finalDebugColor = AZ::Color(1.0f, 0.0f, 1.0f, 1.0f); // cyan as the default, should be visually obvious.
-        bool finalHide = false;
-        bool propagateDebug = true;
-        bool inheritDebug = true;
-        AreaDebugBus::Event(GetEntityId(), &AreaDebugBus::Events::GetDebugColorOverride, inheritDebug, propagateDebug, finalHide, finalDebugColor);
-        if (inheritDebug)
+        AreaDebugBus::Event(GetEntityId(), &AreaDebugBus::Events::ResetBlendedDebugDisplayData);
+        for (const auto& id : processedIds)
         {
-            AZ::Color debugColor;
-            bool hideDebug = false;
-            for (auto id = stackIds.rbegin(); id != stackIds.rend(); ++id)
-            {
-                AreaDebugBus::Event(*id, &AreaDebugBus::Events::GetDebugColorOverride, inheritDebug, propagateDebug, hideDebug, debugColor);
-                if (propagateDebug)
-                {
-                    finalDebugColor = debugColor;
-                    finalHide = hideDebug;
-
-                    if (!inheritDebug)
-                    {
-                        break;
-                    }
-                }
-                else
-                {
-                    break;
-                }
-            }
+            AreaDebugDisplayData debugDisplayData;
+            AreaDebugBus::EventResult(debugDisplayData, id, &AreaDebugBus::Events::GetBaseDebugDisplayData);
+            AreaDebugBus::Event(GetEntityId(), &AreaDebugBus::Events::AddBlendedDebugDisplayData, debugDisplayData);
         }
-        DebugNotificationBus::QueueBroadcast(&DebugNotificationBus::Handler::SetAreaDebugColor, GetEntityId(), finalDebugColor, !finalHide);
     }
 
-    float SpawnerComponent::GetAreaPriority() const
+    AZ::u32 SpawnerComponent::GetAreaPriority() const
     {
         return m_configuration.m_priority;
     }
 
-    void SpawnerComponent::SetAreaPriority(float priority)
+    void SpawnerComponent::SetAreaPriority(AZ::u32 priority)
     {
         m_configuration.m_priority = priority;
         LmbrCentral::DependencyNotificationBus::Event(GetEntityId(), &LmbrCentral::DependencyNotificationBus::Events::OnCompositionChanged);
     }
 
-    AreaLayer SpawnerComponent::GetAreaLayer() const
+    AZ::u32 SpawnerComponent::GetAreaLayer() const
     {
         return m_configuration.m_layer;
     }
 
-    void SpawnerComponent::SetAreaLayer(AreaLayer layer)
+    void SpawnerComponent::SetAreaLayer(AZ::u32 layer)
     {
         m_configuration.m_layer = layer;
         LmbrCentral::DependencyNotificationBus::Event(GetEntityId(), &LmbrCentral::DependencyNotificationBus::Events::OnCompositionChanged);

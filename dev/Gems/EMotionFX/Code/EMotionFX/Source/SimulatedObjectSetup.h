@@ -34,6 +34,8 @@ namespace EMotionFX
     public:
         AZ_CLASS_ALLOCATOR_DECL
         AZ_RTTI(SimulatedCommon, "{CAABEF38-EBE6-4C39-B579-88228CE85B35}");
+
+        virtual ~SimulatedCommon() = default;
     };
 
     class SimulatedJoint
@@ -53,7 +55,7 @@ namespace EMotionFX
 
         SimulatedJoint() = default;
         SimulatedJoint(SimulatedObject* object, AZ::u32 skeletonJointIndex);
-        virtual ~SimulatedJoint() = default;
+        ~SimulatedJoint() override = default;
 
         SimulatedJoint* FindParentSimulatedJoint() const;
         SimulatedJoint* FindChildSimulatedJoint(size_t childIndex) const;
@@ -100,6 +102,8 @@ namespace EMotionFX
         static void Reflect(AZ::ReflectContext* context);
 
     private:
+        AZ::Crc32 GetPinnedOptionVisibility() const;
+
         SimulatedObject* m_object = nullptr; /**< The simulated object we belong to. */
         AZ::u32 m_jointIndex = 0; /**< The joint index inside the skeleton of the actor. */
         AZStd::string m_jointName; /**< The joint name in the actor skeleton. */
@@ -125,7 +129,7 @@ namespace EMotionFX
 
         SimulatedObject() = default;
         explicit SimulatedObject(SimulatedObjectSetup* setup, const AZStd::string& objectName = {});
-        virtual ~SimulatedObject();
+        ~SimulatedObject() override;
 
         void Clear();
 

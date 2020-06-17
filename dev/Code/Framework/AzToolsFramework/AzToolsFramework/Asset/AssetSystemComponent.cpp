@@ -20,7 +20,14 @@
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 
 #ifdef AZ_PLATFORM_WINDOWS
-#include <Windows.h> // needed for GetCurrentProcessId() for activating the Editor and setting it to the Foreground
+// needed for GetCurrentProcessId() for activating the Editor and setting it to the Foreground
+#ifdef NOMINMAX
+#   include <windows.h>
+#else
+#   define NOMINMAX
+#       include <windows.h>
+#   undef NOMINMAX
+#endif
 #endif
 
 namespace AzToolsFramework
@@ -78,7 +85,22 @@ namespace AzToolsFramework
         {
             if (!SendRequest(request, response))
             {
-                AZ_Error("Editor", false, "Failed to send GetAssetJobsInfo Info for search term: %s", request.m_searchTerm.c_str());
+                bool hasAssetId = request.m_assetId.IsValid();
+                bool hasSearchTerm = !request.m_searchTerm.empty();
+
+                if(hasAssetId)
+                {
+                    AZ_Error("Editor", false, "GetAssetJobsInfo request failed for AssetId: %s", request.m_assetId.ToString<AZStd::string>().c_str());
+                }
+                else if(hasSearchTerm)
+                {
+                    AZ_Error("Editor", false, "GetAssetJobsInfo request failed for search term: %s", request.m_searchTerm.c_str());
+                }
+                else
+                {
+                    AZ_Error("Editor", false, "GetAssetJobsInfo request failed, no AssetId or search term was provided");
+                }
+                
                 return AZ::Failure();
             }
 
@@ -326,6 +348,10 @@ namespace AzToolsFramework
         bool AssetSystemComponent::GetAssetInfoById(const AZ::Data::AssetId& assetId, const AZ::Data::AssetType& assetType, AZ::Data::AssetInfo& assetInfo, AZStd::string& rootFilePath)
         {
             AzFramework::SocketConnection* engineConnection = AzFramework::SocketConnection::GetInstance();
+
+            assetInfo.m_assetId.SetInvalid();
+            assetInfo.m_assetType = AZ::Data::s_invalidAssetType;
+
             if (!engineConnection || !engineConnection->IsConnected())
             {
                 return false;
@@ -340,14 +366,23 @@ namespace AzToolsFramework
                 return false;
             }
 
-            assetInfo = response.m_assetInfo;
-            rootFilePath = response.m_rootFolder;
-            return true;
+            if (response.m_found)
+            {
+                assetInfo = response.m_assetInfo;
+                rootFilePath = response.m_rootFolder;
+                return true;
+            }
+
+            return false;
         }
 
         bool AssetSystemComponent::GetSourceInfoBySourcePath(const char* sourcePath, AZ::Data::AssetInfo& assetInfo, AZStd::string& watchFolder)
         {
             AzFramework::SocketConnection* engineConnection = AzFramework::SocketConnection::GetInstance();
+
+            assetInfo.m_assetId.SetInvalid();
+            assetInfo.m_assetType = AZ::Data::s_invalidAssetType;
+
             if (!engineConnection || !engineConnection->IsConnected())
             {
                 return false;
@@ -373,6 +408,10 @@ namespace AzToolsFramework
         bool AssetSystemComponent::GetSourceInfoBySourceUUID(const AZ::Uuid& sourceUuid, AZ::Data::AssetInfo& assetInfo, AZStd::string& watchFolder)
         {
             AzFramework::SocketConnection* engineConnection = AzFramework::SocketConnection::GetInstance();
+
+            assetInfo.m_assetId.SetInvalid();
+            assetInfo.m_assetType = AZ::Data::s_invalidAssetType;
+
             if (!engineConnection || !engineConnection->IsConnected())
             {
                 return false;

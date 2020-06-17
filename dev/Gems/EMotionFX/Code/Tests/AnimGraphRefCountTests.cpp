@@ -24,7 +24,8 @@
 
 namespace EMotionFX
 {
-    class AnimGraphRefCountFixture : public AnimGraphFixture
+    class AnimGraphRefCountFixture
+        : public AnimGraphFixture
     {
     public:
         void Run()
@@ -58,7 +59,7 @@ namespace EMotionFX
         }
     };
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
 
     struct AnimGraphRefCountData_SimpleChain
     {
@@ -140,13 +141,6 @@ namespace EMotionFX
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    /*
-    This test fails at frame 362 where the root state machine leaves the transition from the sub state machine and fully blends into the end state.
-    Why is this failing? The transition in the sub-state machine is active at frame 362 while it sets to is-done on the beginning of the update. This means that the current state
-    has not been adjusted yet, even though the transition has ended as this happens further down in the state machine update. This also means that we update the source node (sub-sm)
-    while we don't call output or post update to decrease the ref count. We can't first update and end transitions and then update the states as this will introduce one frame delay
-    and make other tests fail again. This only happens with sub-state machines and only at the last frame when transitioning out of sub-state machines.
-    */
     class AnimGraphRefCountTest_SimpleEntryExit
         : public AnimGraphRefCountFixture
     {
@@ -188,8 +182,8 @@ namespace EMotionFX
         }
     };
 
-    TEST_F(AnimGraphRefCountTest_SimpleEntryExit, DISABLED_AnimGraphRefCountTest_SimpleEntryExit)
+    TEST_F(AnimGraphRefCountTest_SimpleEntryExit, AnimGraphRefCountTest_SimpleEntryExit)
     {
         Run();
     }
-} // EMotionFX
+} // namespace EMotionFX

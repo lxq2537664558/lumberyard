@@ -67,13 +67,25 @@
 #if defined(AZ_COMPILER_MSVC)
 #    define AZ_STRINGIZE(text) AZ_STRINGIZE_A((text))
 #    define AZ_STRINGIZE_A(arg) AZ_STRINGIZE_I arg
-#elif defined(AZ_COMPILER_MWERKS)
-#    define AZ_STRINGIZE(text) AZ_STRINGIZE_OO((text))
-#    define AZ_STRINGIZE_OO(par) AZ_STRINGIZE_I ## par
 #else
 #    define AZ_STRINGIZE(text) AZ_STRINGIZE_I(text)
 #endif
 
+// LUMBERYARD_DEPRECATED_BEGIN
+// LUMBERYARD_DEPRECATED(LY-102910)
+/// Compiler has AZStd::nullptr_t (std::nullptr_t)
+#define AZ_HAS_NULLPTR_T
+/// Used to delete a method from a class
+#define AZ_DELETE_METHOD = delete
+/// Use the default implementation of a class method
+#define AZ_DEFAULT_METHOD = default
+/// std::underlying_type for enums
+#define AZSTD_UNDERLAYING_TYPE
+/// Enabled if we have initializers list support
+#define AZ_HAS_INITIALIZERS_LIST
+/// Enabled if we can alias templates with the using keyword
+#define AZ_HAS_TEMPLATE_ALIAS
+// LUMBERYARD_DEPRECATED_END
 
 #if defined(AZ_COMPILER_MSVC)
 
@@ -85,6 +97,17 @@
 /// Pops the warning stack. For use matched with an AZ_PUSH_DISABLE_WARNING
 #define AZ_POP_DISABLE_WARNING                      \
     __pragma(warning(pop))
+
+
+/// Classes in Editor Sandbox and Tools which dll export there interfaces, but inherits from a base class that doesn't dll export
+/// will trigger a warning  
+#define AZ_PUSH_DISABLE_DLL_EXPORT_BASECLASS_WARNING AZ_PUSH_DISABLE_WARNING(4275, "-Wunknown-warning-option")
+#define AZ_POP_DISABLE_DLL_EXPORT_BASECLASS_WARNING AZ_POP_DISABLE_WARNING
+/// Disables a warning for dll exported classes which has non dll-exported members as this can cause ABI issues if the layout of those classes differs between dlls.
+/// QT classes such as QList, QString, QMap, etc... and Cry Math classes such Vec3, Quat, Color don't dllexport their interfaces
+/// Therefore this macro can be used to disable the warning when caused by 3rdParty libraries
+#define AZ_PUSH_DISABLE_DLL_EXPORT_MEMBER_WARNING AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option")
+#define AZ_POP_DISABLE_DLL_EXPORT_MEMBER_WARNING AZ_POP_DISABLE_WARNING
 
 #   define AZ_FORCE_INLINE  __forceinline
 #if !defined(_DEBUG)
@@ -102,95 +125,7 @@
 /// Function signature macro
 #   define AZ_FUNCTION_SIGNATURE    __FUNCSIG__
 
-#   if AZ_COMPILER_MSVC >= 1700
-#       define AZ_HAS_NULLPTR_T
-#   else
-#       define nullptr NULL
-#   endif // _MSC_VER < 1700
-
-#   if AZ_COMPILER_MSVC >= 1800
-// std::underlying_type for enums
-#       define AZSTD_UNDERLAYING_TYPE
-/// Enabled if we have initializers list support
-#       define AZ_HAS_INITIALIZERS_LIST
-/// Enabled if we can alias templates with the using keyword
-#       define AZ_HAS_TEMPLATE_ALIAS
-/// Used to delete a method from a class
-#       define AZ_DELETE_METHOD = delete
-/// Use the default implementation of a class method
-#       define AZ_DEFAULT_METHOD = default
-#   else
-/// Delete a method from a class, not implemented
-#       define AZ_DELETE_METHOD
-/// Default implementation of a class method, not implemented
-#       define AZ_DEFAULT_METHOD
-#   endif
-
 //////////////////////////////////////////////////////////////////////////
-#elif defined(AZ_COMPILER_GCC) || defined(AZ_COMPILER_SNC)
-
-/// Disables a warning using push style. For use matched with an AZ_POP_WARNING
-#define AZ_PUSH_DISABLE_WARNING(__, _gccOption)         \
-    _Pragma("GCC diagnostic push")                      \
-    _Pragma(AZ_STRINGIZE(GCC diagnostic ignored _gccOption))
-
-/// Pops the warning stack. For use matched with an AZ_PUSH_DISABLE_WARNING
-#define AZ_POP_DISABLE_WARNING                          \
-    _Pragma("GCC diagnostic pop")
-
-/// Forces a function to be inlined. \todo check __attribute__( ( always_inline ) )
-#   define AZ_FORCE_INLINE  inline
-#ifdef  AZ_COMPILER_SNC
-#   define AZ_INTERNAL_ALIGNMENT_OF(_type) __alignof__(_type)
-#   if __option(cpp11)
-/// nullptr_t
-#       define AZ_HAS_NULLPTR_T
-/// Enabled if we have initializers list support
-#       define AZ_HAS_INITIALIZERS_LIST
-/// Enabled if we can alias templates with the using keyword
-#       define AZ_HAS_TEMPLATE_ALIAS
-/// Used to delete a method from a class
-#       define AZ_DELETE_METHOD = delete
-/// Use the default implementation of a class method
-#       define AZ_DEFAULT_METHOD = default
-#   else
-/// Delete a method from a class, not implemented
-#       define AZ_DELETE_METHOD
-/// Default implementation of a class method, not implemented
-#       define AZ_DEFAULT_METHOD
-#   endif // __option(cpp11)
-#else
-// std::underlying_type for enums
-#   define AZSTD_UNDERLAYING_TYPE
-/// Note this work properly with templates on older GCC.
-#   define AZ_INTERNAL_ALIGNMENT_OF(_type) __alignof__(_type)
-/// Compiler has AZStd::nullptr_t (std::nullptr_t)
-#   define AZ_HAS_NULLPTR_T
-/// Enabled if we have initializers list support
-#   define AZ_HAS_INITIALIZERS_LIST
-/// Enabled if we can alias templates with the using keyword
-#   define AZ_HAS_TEMPLATE_ALIAS
-/// Used to delete a method from a class
-#   define AZ_DELETE_METHOD = delete
-/// Use the default implementation of a class method
-#   define AZ_DEFAULT_METHOD = default
-
-#endif
-// Aligns a declaration.
-#   define AZ_ALIGN(_decl, _alignment) _decl __attribute__((aligned(_alignment)))
-/// Pointer is not aliased. (ref __restrict)
-#   define AZ_RESTRICT  __restrict
-/// Pointer will be aliased.
-#   define AZ_MAY_ALIAS __attribute__((__may_alias__))
-
-/// Function signature macro
-#   define AZ_FUNCTION_SIGNATURE    __PRETTY_FUNCTION__
-
-
-#if !defined(AZ_HAS_NULLPTR_T)
-#   define nullptr __null
-#endif
-
 #elif defined(AZ_COMPILER_CLANG)
 
 /// Disables a single warning using push style. For use matched with an AZ_POP_WARNING
@@ -202,6 +137,11 @@
 #define AZ_POP_DISABLE_WARNING                              \
     _Pragma("clang diagnostic pop")
 
+#define AZ_PUSH_DISABLE_DLL_EXPORT_BASECLASS_WARNING
+#define AZ_POP_DISABLE_DLL_EXPORT_BASECLASS_WARNING
+#define AZ_PUSH_DISABLE_DLL_EXPORT_MEMBER_WARNING
+#define AZ_POP_DISABLE_DLL_EXPORT_MEMBER_WARNING
+
 #   define AZ_FORCE_INLINE  inline
 /// Aligns a declaration.
 #   define AZ_ALIGN(_decl, _alignment) _decl __attribute__((aligned(_alignment)))
@@ -211,20 +151,8 @@
 #   define AZ_RESTRICT  __restrict
 /// Pointer will be aliased.
 #   define AZ_MAY_ALIAS __attribute__((__may_alias__))
-/// Compiler has AZStd::nullptr_t (std::nullptr_t)
-#   define AZ_HAS_NULLPTR_T
-/// std::underlying_type for enums
-#   define AZSTD_UNDERLAYING_TYPE
 /// Function signature macro
 #   define AZ_FUNCTION_SIGNATURE    __PRETTY_FUNCTION__
-/// Enabled if we have initializers list support
-#   define AZ_HAS_INITIALIZERS_LIST
-/// Enabled if we can alias templates with the using keyword
-#   define AZ_HAS_TEMPLATE_ALIAS
-/// Used to delete a method from a class
-#   define AZ_DELETE_METHOD = delete
-/// Use the default implementation of a class method
-#   define AZ_DEFAULT_METHOD = default
 
 #else
     #error Compiler not supported
@@ -236,6 +164,10 @@
 #   define AZ_DEBUG_BUILD
 #endif
 
+#if !defined(AZ_PROFILE_BUILD) && defined(_PROFILE)
+#   define AZ_PROFILE_BUILD
+#endif
+
 // note that many include ONLY PlatformDef.h and not base.h, so flags such as below need to be here.
 // AZ_ENABLE_DEBUG_TOOLS - turns on and off interaction with the debugger.
 // Things like being able to check whether the current process is being debugged, to issue a "debug break" command, etc.
@@ -243,8 +175,11 @@
 #   define AZ_ENABLE_DEBUG_TOOLS
 #endif
 
+// AZ_ENABLE_TRACE_ASSERTS - toggles display of native UI assert dialogs with ignore/break options
+#define AZ_ENABLE_TRACE_ASSERTS 1
+
 // AZ_ENABLE_TRACING - turns on and off the availability of AZ_TracePrintf / AZ_Assert / AZ_Error / AZ_Warning
-#if defined(AZ_DEBUG_BUILD) && !defined(AZ_ENABLE_TRACING)
+#if (defined(AZ_DEBUG_BUILD) || defined(AZ_PROFILE_BUILD)) && !defined(AZ_ENABLE_TRACING)
 #   define AZ_ENABLE_TRACING
 #endif
 

@@ -34,10 +34,10 @@ namespace Vegetation
                     {
                     default:
                     case 0: //cluster
-                        classElement.AddElementWithData(context, "Layer", AreaLayer::Foreground);
+                        classElement.AddElementWithData(context, "Layer", AreaConstants::s_foregroundLayer);
                         break;
                     case 1: //coverage
-                        classElement.AddElementWithData(context, "Layer", AreaLayer::Background);
+                        classElement.AddElementWithData(context, "Layer", AreaConstants::s_backgroundLayer);
                         break;
                     }
                 }
@@ -47,6 +47,17 @@ namespace Vegetation
                 {
                     classElement.RemoveElementByName(AZ_CRC("Priority", 0x62a6dc27));
                     classElement.AddElementWithData(context, "Priority", (float)(priority - 1) / (float)std::numeric_limits<int>::max());
+                }
+            }
+            if (classElement.GetVersion() < 2)
+            {
+                float priority = 0.0f;
+                if (classElement.GetChildData(AZ_CRC("Priority", 0x62a6dc27), priority))
+                {
+                    priority = AZ::GetClamp(priority, 0.0f, 1.0f);
+                    const AZ::u32 convertedPriority = (AZ::u32)(priority * AreaConstants::s_prioritySoftMax); //using soft max accommodate slider range and int/float conversion
+                    classElement.RemoveElementByName(AZ_CRC("Priority", 0x62a6dc27));
+                    classElement.AddElementWithData(context, "Priority", convertedPriority);
                 }
             }
             return true;
@@ -59,7 +70,7 @@ namespace Vegetation
         if (serialize)
         {
             serialize->Class<AreaConfig, AZ::ComponentConfig>()
-                ->Version(1, &AreaUtil::UpdateVersion)
+                ->Version(2, &AreaUtil::UpdateVersion)
                 ->Field("Layer", &AreaConfig::m_layer)
                 ->Field("Priority", &AreaConfig::m_priority)
                 ;
@@ -73,11 +84,12 @@ namespace Vegetation
                     ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
                     ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &AreaConfig::m_layer, "Layer Priority", "Defines a high level order vegetation areas are applied")
-                    ->EnumAttribute(AreaLayer::Background, "Background")
-                    ->EnumAttribute(AreaLayer::Foreground, "Foreground")
+                    ->Attribute(AZ::Edit::Attributes::EnumValues, &AreaConfig::GetSelectableLayers)
                     ->DataElement(AZ::Edit::UIHandlers::Slider, &AreaConfig::m_priority, "Sub Priority", "Defines order vegetation areas are applied within a layer.  Larger numbers = higher priority")
-                    ->Attribute(AZ::Edit::Attributes::Min, AreaConfig::s_priorityMin)
-                    ->Attribute(AZ::Edit::Attributes::Max, AreaConfig::s_priorityMax)
+                    ->Attribute(AZ::Edit::Attributes::Min, AreaConstants::s_priorityMin)
+                    ->Attribute(AZ::Edit::Attributes::Max, AreaConstants::s_priorityMax)
+                    ->Attribute(AZ::Edit::Attributes::SoftMin, AreaConstants::s_priorityMin)
+                    ->Attribute(AZ::Edit::Attributes::SoftMax, AreaConstants::s_prioritySoftMax)
                     ;
             }
         }
@@ -90,10 +102,18 @@ namespace Vegetation
                 ->Constructor()
                 ->Property("areaPriority", BehaviorValueProperty(&AreaConfig::m_priority))
                 ->Property("areaLayer",
-                    [](AreaConfig* config) { return (AZ::u8&)(config->m_layer); },
-                    [](AreaConfig* config, const AZ::u8& i) { config->m_layer = (AreaLayer)i; })
+                    [](AreaConfig* config) { return config->m_layer; },
+                    [](AreaConfig* config, const AZ::u32& i) { config->m_layer = i; })
                 ;
         }
+    }
+
+    AZStd::vector<AZStd::pair<AZ::u32, AZStd::string>> AreaConfig::GetSelectableLayers() const
+    {
+        AZStd::vector<AZStd::pair<AZ::u32, AZStd::string>> selectableLayers;
+        selectableLayers.push_back({ AreaConstants::s_backgroundLayer, AZStd::string("Background") });
+        selectableLayers.push_back({ AreaConstants::s_foregroundLayer, AZStd::string("Foreground") });
+        return selectableLayers;
     }
 
     void AreaComponentBase::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& services)
@@ -131,25 +151,33 @@ namespace Vegetation
 
     void AreaComponentBase::Activate()
     {
-        m_refreshPending = false;
+        m_areaRegistered = false;
         LmbrCentral::ShapeComponentNotificationsBus::Handler::BusConnect(GetEntityId());
         AZ::TransformNotificationBus::Handler::BusConnect(GetEntityId());
         AreaNotificationBus::Handler::BusConnect(GetEntityId());
         AreaInfoBus::Handler::BusConnect(GetEntityId());
         LmbrCentral::DependencyNotificationBus::Handler::BusConnect(GetEntityId());
-        AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::RegisterArea, GetEntityId());
+
+        UpdateRegistration();
     }
 
     void AreaComponentBase::Deactivate()
     {
-        AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::UnregisterArea, GetEntityId());
+        if (m_areaRegistered)
+        {
+            m_areaRegistered = false;
+            AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::UnregisterArea, GetEntityId());
+
+            // Let area subclasses know that we've just unregistered the area
+            OnUnregisterArea();
+        }
+
         AreaNotificationBus::Handler::BusDisconnect();
         AreaInfoBus::Handler::BusDisconnect();
         AreaRequestBus::Handler::BusDisconnect();
         LmbrCentral::DependencyNotificationBus::Handler::BusDisconnect();
         LmbrCentral::ShapeComponentNotificationsBus::Handler::BusDisconnect();
         AZ::TransformNotificationBus::Handler::BusDisconnect();
-        m_refreshPending = false;
     }
 
     bool AreaComponentBase::ReadInConfig(const AZ::ComponentConfig* baseConfig)
@@ -172,9 +200,14 @@ namespace Vegetation
         return false;
     }
 
-    float AreaComponentBase::GetPriority() const
+    AZ::u32 AreaComponentBase::GetLayer() const
     {
-        return (float)m_configuration.m_layer + AZ::GetClamp(m_configuration.m_priority, 0.0f, 1.0f);
+        return m_configuration.m_layer;
+    }
+
+    AZ::u32 AreaComponentBase::GetPriority() const
+    {
+        return m_configuration.m_priority;
     }
 
     AZ::u32 AreaComponentBase::GetChangeIndex() const
@@ -182,13 +215,52 @@ namespace Vegetation
         return m_changeIndex;
     }
 
+    void AreaComponentBase::UpdateRegistration()
+    {
+        // Area "valid" lifetimes can be shorter than the time in which the area components are active.
+        // This can occur due to the chain of entity dependencies, or dependencies on asset loading, etc.
+        // This method ensures that we update our registration status so that the area is only registered with
+        // the vegetation system once the area is completely valid, and the area is unregistered the moment
+        // it becomes invalid.  Right now, we're defining "completely valid" as "has a well-defined valid AABB",
+        // since that's the minimum requirement for a vegetation area.
+
+        AZ::u32 layer = GetLayer();
+        AZ::u32 priority = GetPriority();
+        AZ::Aabb bounds = GetEncompassingAabb();
+        bool areaIsValid = bounds.IsValid();
+
+        if (m_areaRegistered && areaIsValid)
+        {
+            // Area is already registered, we're just updating information, so Refresh the area
+            AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::RefreshArea, GetEntityId(), layer, priority, bounds);
+        }
+        else if (!m_areaRegistered && areaIsValid)
+        {
+            // We've gone from an invalid to valid state, so Register the area
+            m_areaRegistered = true;
+            AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::RegisterArea, GetEntityId(), layer, priority, bounds);
+
+            // Let area subclasses know that we've just registered the area
+            OnRegisterArea();
+        }
+        else if (m_areaRegistered && !areaIsValid)
+        {
+            // We've gone from a valid to invalid state, so Unregister the area
+            m_areaRegistered = false;
+            AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::UnregisterArea, GetEntityId());
+
+            // Let area subclasses know that we've just unregistered the area
+            OnUnregisterArea();
+        }
+        else
+        {
+            // Our state before and after were both invalid, so do nothing.
+        }
+    }
+
     void AreaComponentBase::OnCompositionChanged()
     {
-        if (!m_refreshPending)
-        {
-            m_refreshPending = true;
-            AreaSystemRequestBus::Broadcast(&AreaSystemRequestBus::Events::RefreshArea, GetEntityId());
-        }
+        UpdateRegistration();
         ++m_changeIndex;
     }
 
@@ -204,7 +276,6 @@ namespace Vegetation
 
     void AreaComponentBase::OnAreaRefreshed()
     {
-        m_refreshPending = false;
     }
 
     void AreaComponentBase::OnTransformChanged(const AZ::Transform& /*local*/, const AZ::Transform& /*world*/)

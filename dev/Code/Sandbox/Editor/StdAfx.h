@@ -37,9 +37,15 @@
 #include "EditorDefs.h"
 
 #ifdef _DEBUG
+#if !defined(AZ_PLATFORM_LINUX)
 #ifdef assert
 #undef assert
+#if defined(USE_AZ_ASSERT)
+#define assert(condition) AZ_Assert(condition, "")
+#else
 #define assert CRY_ASSERT
+#endif
+#endif // !defined(AZ_PLATFORM_LINUX)
 #endif
 #endif
 
@@ -54,8 +60,6 @@
 #include <Cry_Math.h>
 #include <Cry_Geo.h>
 #include <CryListenerSet.h>
-
-#define USE_PYTHON_SCRIPTING
 
 #ifdef max
 #undef max

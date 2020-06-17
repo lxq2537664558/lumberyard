@@ -82,13 +82,13 @@ namespace GraphCanvas
 
         Endpoint GetEndpoint() const;
 
-        const AZStd::string& GetName() const  override { return m_slotConfiguration.m_name.GetDisplayString(); }
+        const AZStd::string GetName() const  override { return m_slotConfiguration.m_name.GetDisplayString(); }
         void SetName(const AZStd::string& name) override;
 
         TranslationKeyedString GetTranslationKeyedName() const override { return m_slotConfiguration.m_name; }
         void SetTranslationKeyedName(const TranslationKeyedString&) override;
 
-        const AZStd::string& GetTooltip() const override { return m_slotConfiguration.m_tooltip.GetDisplayString(); }
+        const AZStd::string GetTooltip() const override { return m_slotConfiguration.m_tooltip.GetDisplayString(); }
         void SetTooltip(const AZStd::string& tooltip)  override;
 
         TranslationKeyedString GetTranslationKeyedTooltip() const override { return m_slotConfiguration.m_tooltip; }
@@ -137,6 +137,9 @@ namespace GraphCanvas
         bool HasModelRemapping() const override;
 
         AZStd::vector< Endpoint > GetRemappedModelEndpoints() const override;
+
+        int GetLayoutPriority() const override;
+        void SetLayoutPriority(int priority) override;
         ////
 
     protected:
@@ -145,11 +148,8 @@ namespace GraphCanvas
 
         AZ::EntityId CreateConnectionHelper(const Endpoint& otherEndpoint, bool createConnection);
 
-        // VS2013 Fixes
         SlotComponent(const SlotComponent&) = delete;
         const SlotComponent& operator=(const SlotComponent&) = delete;
-        ////
-
         virtual AZ::Entity* ConstructConnectionEntity(const Endpoint& sourceEndpoint, const Endpoint& targetEndpoint, bool createModelConnection);
 
         void FinalizeDisplay();
@@ -163,7 +163,11 @@ namespace GraphCanvas
         SlotType          m_slotType;
         SlotConfiguration m_slotConfiguration;
 
+        // The actual display ordering this slot is in
         int               m_displayOrdering;
+
+        // The priority with which to layout this slot
+        int               m_layoutPriority;
 
         //! Keeps track of connections to this slot
         AZStd::vector<AZ::EntityId> m_connections;

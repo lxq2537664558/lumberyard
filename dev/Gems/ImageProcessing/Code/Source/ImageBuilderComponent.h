@@ -15,6 +15,9 @@
 #include <AzCore/Component/Component.h>
 #include <AssetBuilderSDK/AssetBuilderBusses.h>
 #include <AssetBuilderSDK/AssetBuilderSDK.h>
+#include <AzCore/Outcome/Outcome.h>
+
+#include <ImageProcessing/ImageProcessingBus.h>
 
 namespace ImageProcessing
 {
@@ -37,6 +40,9 @@ namespace ImageProcessing
         void ShutDown() override; // if you get this you must fail all existing jobs and return.
         //////////////////////////////////////////////////////////////////////////
 
+        //! Populates the jobProduct vector with all the entries including their product dependencies 
+        AZ::Outcome<void, AZStd::string> PopulateProducts(const AssetBuilderSDK::ProcessJobRequest& request, const AZStd::vector<AZStd::string>& productFilepaths, AZStd::vector<AssetBuilderSDK::JobProduct>& jobProducts);
+
     private:
         bool m_isShuttingDown = false;
     };
@@ -44,6 +50,7 @@ namespace ImageProcessing
     //! BuilderPluginComponent is to handle the lifecycle of ImageBuilder module.
     class BuilderPluginComponent
         : public AZ::Component
+        , protected ImageProcessingRequestBus::Handler
     {
     public:
         AZ_COMPONENT(BuilderPluginComponent, "{2F12E1BE-D8F6-47A4-AC3E-6C5527C55840}")
@@ -61,6 +68,12 @@ namespace ImageProcessing
         static void GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided);
         static void GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible);
         //////////////////////////////////////////////////////////////////////////
+
+    protected:
+        ////////////////////////////////////////////////////////////////////////
+        // ImageProcessingRequestBus interface implementation
+        IImageObject* LoadImage(const AZStd::string& filePath) override;
+        ////////////////////////////////////////////////////////////////////////
 
     private:
         ImageBuilderWorker m_imageBuilder;

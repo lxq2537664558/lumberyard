@@ -12,6 +12,7 @@
 #pragma once
 
 #include <SaveData/SaveDataRequestBus.h>
+#include <SaveData_Traits_Platform.h>
 
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/TickBus.h>
@@ -135,9 +136,11 @@ namespace SaveData
             //! \param[in] saveDataBufferRequestParams The save data buffer request parameters.
             //! \param[in] absoluteFilePath The absolute file path where to save the data buffer.
             //! \param[in] waitForCompletion Should we wait until the save data thread completes?
+            //! \param[in] useTemporaryFile Should we write to a temporary file that gets renamed?
             void SaveDataBufferToFileSystem(const SaveDataBufferParams& saveDataBufferParams,
                                             const AZStd::string& absoluteFilePath,
-                                            bool waitForCompletion = false);
+                                            bool waitForCompletion = false,
+                                            bool useTemporaryFile = true);
 
             ////////////////////////////////////////////////////////////////////////////////////////
             //! Convenience function to broadcast SaveDataNotifications::OnDataBufferLoaded events in

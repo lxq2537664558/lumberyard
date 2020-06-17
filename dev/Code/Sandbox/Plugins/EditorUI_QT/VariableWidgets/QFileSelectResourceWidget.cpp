@@ -9,7 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "stdafx.h"
+#include "EditorUI_QT_Precompiled.h"
 #include "QFileSelectResourceWidget.h"
 #include "Utils.h"
 #include "UIUtils.h"
@@ -47,7 +47,6 @@
 #include <VariableWidgets/ui_QFileSelectWidget.h>
 
 //to disable shortcuts while in line edit
-#include <Include/IAssetTagging.h>
 #include <QMessageBox>
 
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
@@ -395,7 +394,7 @@ void QFileSelectResourceWidget::OpenSourceFile()
         QDir dir(folderPath);
         if (!dir.exists())
         {
-            folderPath = GetIEditor()->GetAssetTagging()->GetProjectName() + "/" + folderPath;
+            folderPath = GetIEditor()->GetProjectName() + "/" + folderPath;
             dir.setPath(folderPath);
         }
 

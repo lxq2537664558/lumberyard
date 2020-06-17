@@ -31,8 +31,7 @@
 #include "IPhysics.h"
 #include "MainWindow.h"
 
-#include "Util/BoostPythonHelpers.h"
-
+#include <AzFramework/Terrain/TerrainDataRequestBus.h>
 #include <AzToolsFramework/UI/UICore/WidgetHelpers.h>
 
 #if defined(AZ_PLATFORM_WINDOWS)
@@ -46,10 +45,28 @@
 
 #include <QMessageBox>
 
+#include <AzCore/RTTI/BehaviorContext.h>
+
 // {D25B8229-7FE7-45d4-8AC5-CD6DA1365879}
 DEFINE_GUID(VEGETATION_TOOL_GUID, 0xd25b8229, 0x7fe7, 0x45d4, 0x8a, 0xc5, 0xcd, 0x6d, 0xa1, 0x36, 0x58, 0x79);
 
-REGISTER_PYTHON_COMMAND(CVegetationTool::Command_Activate, terrain, activate_vegetation_tool, "Activates the vegetation tool.");
+namespace AzToolsFramework
+{
+    void VegetationToolFuncsHandler::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+        {
+            // this will put these methods into the 'azlmbr.legacy.terrain' module
+            auto addLegacyTerrain = [](AZ::BehaviorContext::GlobalMethodBuilder methodBuilder)
+            {
+                methodBuilder->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                    ->Attribute(AZ::Script::Attributes::Category, "Legacy/Terrain")
+                    ->Attribute(AZ::Script::Attributes::Module, "legacy.terrain");
+            };
+            addLegacyTerrain(behaviorContext->Method("activate_vegetation_tool", CVegetationTool::Command_Activate, nullptr, "Activates the vegetation tool."));
+        }
+    }
+}
 
 float CVegetationTool::m_brushRadius = 1;
 
@@ -391,12 +408,17 @@ bool CVegetationTool::MouseCallback(CViewport* view, EMouseEvent event, QPoint& 
 
     if (flags & MK_CONTROL)
     {
-        //swap x/y
-        int unitSize = GetIEditor()->GetHeightmap()->GetUnitSize();
-        float slope = GetIEditor()->GetHeightmap()->GetSlope(m_pointerPos.y / unitSize, m_pointerPos.x / unitSize);
-        char szNewStatusText[512];
-        sprintf_s(szNewStatusText, "Slope: %g", slope);
-        GetIEditor()->SetStatusText(szNewStatusText);
+        CHeightmap* heightmap = GetIEditor()->GetHeightmap();
+
+        if (heightmap)
+        {
+            //swap x/y
+            int unitSize = heightmap->GetUnitSize();
+            float slope = heightmap->GetSlope(m_pointerPos.y / unitSize, m_pointerPos.x / unitSize);
+            char szNewStatusText[512];
+            sprintf_s(szNewStatusText, "Slope: %g", slope);
+            GetIEditor()->SetStatusText(szNewStatusText);
+        }
     }
     else
     {
@@ -1093,6 +1115,8 @@ void CVegetationTool::MoveSelected(CViewport* view, const Vec3& offset, bool bFo
     AABB box;
     box.Reset();
     Vec3 newPos, oldPos;
+    const float defaultTerrainHeight = AzFramework::Terrain::TerrainDataRequests::GetDefaultTerrainHeight();
+    auto terrain = AzFramework::Terrain::TerrainDataRequestBus::FindFirstHandler();
     for (int i = 0; i < m_selectedThings.size(); i++)
     {
         oldPos = m_selectedThings[i].pInstance->pos;
@@ -1117,10 +1141,7 @@ void CVegetationTool::MoveSelected(CViewport* view, const Vec3& offset, bool bFo
         else if (pObject->IsAffectedByTerrain())
         {
             // Stick to terrain.
-            if (I3DEngine* engine = GetIEditor()->GetSystem()->GetI3DEngine())
-            {
-                newPos.z = engine->GetTerrainElevation(newPos.x, newPos.y);
-            }
+            newPos.z = terrain ? terrain->GetHeightFromFloats(newPos.x, newPos.y) : defaultTerrainHeight;   
         }
 
         if (!m_vegetationMap->MoveInstance(m_selectedThings[i].pInstance, newPos))

@@ -8,11 +8,13 @@
 # remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
+
+# System Imports
 import os
+
+# waflib imports
 from waflib.Configure import conf, Logs
-from waflib.TaskGen import feature, after_method
 from waflib import Errors
-from lumberyard import deprecated
 
 
 PLATFORM = 'win_x64_clang'
@@ -34,26 +36,21 @@ def load_win_x64_clang_common_settings(conf):
     v['PLATFORM'] = PLATFORM
 
     # Load MSVC settings for non-build stuff (AzCG, CrcFix, etc)
-    # load_win_x64_win_x64_vs2015_common_settings(conf)
+    # load_win_x64_win_x64_vs2017_common_settings(conf)
     conf.load_windows_common_settings()
 
-    conf.load_win_x64_vs2015_common_settings()
+    conf.load_win_x64_vs2017_common_settings()
     
-    windows_kit = conf.options.win_vs2015_winkit
+    windows_kit = conf.options.win_vs2017_winkit
     try:
-        _, _, _, system_includes, _, _ = conf.detect_msvc(windows_kit, True)
+        # Attempt to detect the C++ compiler for VS 2015 ( msvs version 14.0 )
+        ctx.detect_visual_studio_2015(windows_kit)
+        system_includes = []
     except:
         Logs.warn('Unable to find Windows Kit {}, removing build target'.format(windows_kit))
         conf.disable_target_platform(PLATFORM)
         return
-    
-    restricted_tool_list_macro_header = 'AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS='
-    restricted_tool_list_macro = restricted_tool_list_macro_header
-    
-    # Start with a blank platform slate
-    conf.undefine('AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS')
-    if len(restricted_tool_list_macro) > len(restricted_tool_list_macro_header):
-        v['DEFINES'] += [restricted_tool_list_macro]
+
     
     # Remove MSVC/clang specific settings
     v['CFLAGS'] = []

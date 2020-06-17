@@ -13,6 +13,7 @@
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/Serialization/EditContext.h>
 #include <AzCore/std/smart_ptr/make_shared.h>
+#include <AzCore/IO/FileIO.h>
 #include <AzCore/IO/SystemFile.h>
 #include <AzFramework/Physics/Utils.h>
 #include <AzFramework/Physics/Material.h>
@@ -46,8 +47,11 @@
 namespace PhysX
 {
     SystemComponent::PhysXSDKGlobals SystemComponent::m_physxSDKGlobals;
-    static const char* defaultWorldName = "PhysX Default";
-    static const char* defaultConfigurationPath = "default.physxconfiguration";
+    static const char* const DefaultWorldName = "PhysX Default";
+    static const char* const ProjectPhysicsConfigurationPath = "project.physicsconfiguration";
+    static const char* const ProjectPhysXConfigurationPath = "project.physxconfiguration";
+    // This config is undergoing deprecation, replaced by above configs.
+    static const char* const DefaultConfigurationPath = "default.physxconfiguration";
 
     bool SystemComponent::VersionConverter(AZ::SerializeContext& context,
         AZ::SerializeContext::DataElementNode& classElement)
@@ -109,9 +113,8 @@ namespace PhysX
     void SystemComponent::Reflect(AZ::ReflectContext* context)
     {
         D6JointLimitConfiguration::Reflect(context);
-        Pipeline::MeshAssetCookedData::Reflect(context);
+        Pipeline::MeshAssetData::Reflect(context);
 
-        Physics::ReflectionUtils::ReflectPhysicsApi(context);
         PhysX::ReflectionUtils::ReflectPhysXOnlyApi(context);
 
         if (AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context))
@@ -139,7 +142,8 @@ namespace PhysX
                 ->Version(2, &VersionConverter)
                 ->Field("COMDebugSize", &EditorConfiguration::m_centerOfMassDebugSize)
                 ->Field("COMDebugColor", &EditorConfiguration::m_centerOfMassDebugColor)
-                ->Field("GlobalColliderDebugDraw", &EditorConfiguration::m_globalCollisionDebugDraw);
+                ->Field("GlobalColliderDebugDraw", &EditorConfiguration::m_globalCollisionDebugDraw)
+                ->Field("GlobalColliderDebugDrawColorMode", &EditorConfiguration::m_globalCollisionDebugDrawColorMode);
             ;
 
             serialize->Class<Configuration>()
@@ -152,6 +156,19 @@ namespace PhysX
                 ->Field("MaterialLibrary", &Configuration::m_materialLibrary)
             ;
 
+            serialize->Class<PhysXConfiguration>()
+                ->Version(1)
+                ->Field("Settings", &PhysXConfiguration::m_settings)
+                ->Field("EditorConfiguration", &PhysXConfiguration::m_editorConfiguration)
+            ;
+
+            serialize->Class<PhysicsConfiguration>()
+                ->Version(1)
+                ->Field("WorldConfiguration", &PhysicsConfiguration::m_defaultWorldConfiguration)
+                ->Field("CollisionConfiguration", &PhysicsConfiguration::m_collisionConfiguration)
+                ->Field("MaterialLibrary", &PhysicsConfiguration::m_defaultMaterialLibrary)
+            ;
+
             serialize->Class<SystemComponent, AZ::Component>()
                 ->Version(1)
                 ->Field("Enabled", &SystemComponent::m_enabled)
@@ -162,32 +179,32 @@ namespace PhysX
             {
                 ec->Class<Settings>("PhysX PVD Settings", "PhysX PVD Settings")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                    ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
+                        ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &Settings::m_pvdTransportType,
                     "PVD Transport Type", "PVD supports writing to a TCP/IP network socket or to a file.")
-                    ->EnumAttribute(Settings::PvdTransportType::Network, "Network")
-                    ->EnumAttribute(Settings::PvdTransportType::File, "File")
-                    ->Attribute(AZ::Edit::Attributes::ChangeNotify, AZ::Edit::PropertyRefreshLevels::EntireTree)
+                        ->EnumAttribute(Settings::PvdTransportType::Network, "Network")
+                        ->EnumAttribute(Settings::PvdTransportType::File, "File")
+                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, AZ::Edit::PropertyRefreshLevels::EntireTree)
 
                     ->DataElement(AZ::Edit::UIHandlers::Default, &Settings::m_pvdHost,
                     "PVD Host", "Host IP address of the PhysX Visual Debugger application")
                     ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsNetworkDebug)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &Settings::m_pvdPort,
                     "PVD Port", "Port of the PhysX Visual Debugger application")
-                    ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsNetworkDebug)
+                        ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsNetworkDebug)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &Settings::m_pvdTimeoutInMilliseconds,
                     "PVD Timeout", "Timeout (in milliseconds) used when connecting to the PhysX Visual Debugger application")
-                    ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsNetworkDebug)
+                        ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsNetworkDebug)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &Settings::m_pvdFileName,
                     "PVD FileName", "Filename to output PhysX Visual Debugger data.")
-                    ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsFileDebug)
+                        ->Attribute(AZ::Edit::Attributes::Visibility, &Settings::IsFileDebug)
 
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &Settings::m_pvdAutoConnectMode,
                     "PVD Auto Connect", "Automatically connect to the PhysX Visual Debugger "
                     "(Requires PhysX Debug gem for Editor and Game modes).")
-                    ->EnumAttribute(Settings::PvdAutoConnectMode::Disabled, "Disabled")
-                    ->EnumAttribute(Settings::PvdAutoConnectMode::Editor, "Editor")
-                    ->EnumAttribute(Settings::PvdAutoConnectMode::Game, "Game")
+                        ->EnumAttribute(Settings::PvdAutoConnectMode::Disabled, "Disabled")
+                        ->EnumAttribute(Settings::PvdAutoConnectMode::Editor, "Editor")
+                        ->EnumAttribute(Settings::PvdAutoConnectMode::Game, "Game")
 
                     ->DataElement(AZ::Edit::UIHandlers::CheckBox, &Settings::m_pvdReconnect,
                     "PVD Reconnect", "Reconnect (Disconnect and Connect) when switching between game and edit mode "
@@ -196,24 +213,31 @@ namespace PhysX
 
                 ec->Class<EditorConfiguration>("Editor Configuration", "Editor settings for PhysX")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                    ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
-                    ->Attribute(AZ::Edit::Attributes::ForceAutoExpand, true)
+                        ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(AZ::Edit::UIHandlers::Slider, &EditorConfiguration::m_centerOfMassDebugSize,
                     "Debug Draw Center of Mass Size", "The size of the debug draw circle representing the center of mass.")
-                    ->Attribute(AZ::Edit::Attributes::Min, 0.1f)
-                    ->Attribute(AZ::Edit::Attributes::Max, 5.0f)
+                        ->Attribute(AZ::Edit::Attributes::Min, 0.1f)
+                        ->Attribute(AZ::Edit::Attributes::Max, 5.0f)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &EditorConfiguration::m_centerOfMassDebugColor,
                     "Debug Draw Center of Mass Color", "The color of the debug draw circle representing the center of mass.")
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &EditorConfiguration::m_globalCollisionDebugDraw, "Global Collision Debug",
                         "Set up global collision debug draw."
                         "<ul style=\"margin-left:15px; margin-top:-10px; -qt-list-indent:0;\">"
-                        "<li style=\"padding-left : 0px;\"><b>Enable all colliders</b><br>Displays all PhysX collider shapes, including colliders previously set as hidden.\n</li>"
+                        "<li><b>Enable all colliders</b><br>Displays all PhysX collider shapes, including colliders previously set as hidden.\n</li>"
                         "<li><b>Disable all colliders</b><br>Hides all PhysX collider shapes, including colliders previously set as visible.\n</li>"
                         "<li><b>Set manually</b><br>You can update PhysX colliders on each entity. The default state is on.</li>"
                         "</ul>")
-                    ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugState::AlwaysOn , "Enable all colliders")
-                    ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugState::AlwaysOff, "Disable all colliders")
-                    ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugState::Manual, "Set manually")
+                        ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugState::AlwaysOn , "Enable all colliders")
+                        ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugState::AlwaysOff, "Disable all colliders")
+                        ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugState::Manual, "Set manually")
+                    ->DataElement(AZ::Edit::UIHandlers::ComboBox, &EditorConfiguration::m_globalCollisionDebugDrawColorMode, "Global Collision Debug Color Mode",
+                        "Set up debug color mode."
+                        "<ul style=\"margin-left:15px; margin-top:-10px; -qt-list-indent:0;\">"
+                        "<li><b>Material Color Mode</b><br>Uses material's debug color specified in material library.\n</li>"
+                        "<li><b>Error Mode</b><br>Shows glowing red error colors for cases like meshes with too many triangles.\n</li>"
+                        "</ul>")
+                        ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugColorMode::MaterialColor, "Material Color Mode")
+                        ->EnumAttribute(PhysX::EditorConfiguration::GlobalCollisionDebugColorMode::ErrorColor, "Error Mode")
 
 #ifdef PHYSX_EDITOR
                     ->Attribute(AZ::Edit::Attributes::ChangeNotify, &OnEditorConfigurationChanged)
@@ -222,9 +246,9 @@ namespace PhysX
 
                 ec->Class<SystemComponent>("PhysX", "Global PhysX physics configuration")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                    ->Attribute(AZ::Edit::Attributes::Category, "PhysX")
-                    ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("System", 0xc94d118b))
-                    ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
+                        ->Attribute(AZ::Edit::Attributes::Category, "PhysX")
+                        ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("System", 0xc94d118b))
+                        ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &SystemComponent::m_enabled,
                     "Enabled", "Enables the PhysX system component.")
                     ->DataElement(AZ::Edit::UIHandlers::Default, &SystemComponent::m_configurationPath,
@@ -246,7 +270,7 @@ namespace PhysX
 
     void SystemComponent::GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
     {
-        (void)required;
+        required.push_back(AZ_CRC("AssetDatabaseService", 0x3abf5601));
     }
 
     void SystemComponent::GetDependentServices(AZ::ComponentDescriptor::DependencyArrayType& dependent)
@@ -256,7 +280,7 @@ namespace PhysX
 
     SystemComponent::SystemComponent()
         : m_enabled(true)
-        , m_configurationPath(defaultConfigurationPath)
+        , m_configurationPath(DefaultConfigurationPath)
     {
     }
 
@@ -274,7 +298,9 @@ namespace PhysX
 
         // create PhysX basis
         m_physxSDKGlobals.m_foundation = PxCreateFoundation(PX_PHYSICS_VERSION, m_physxSDKGlobals.m_azAllocator, m_physxSDKGlobals.m_azErrorCallback);
+#ifdef AZ_PHYSICS_DEBUG_ENABLED
         m_physxSDKGlobals.m_pvd = PxCreatePvd(*m_physxSDKGlobals.m_foundation);
+#endif
         m_physxSDKGlobals.m_physics = PxCreatePhysics(PX_PHYSICS_VERSION, *m_physxSDKGlobals.m_foundation, physx::PxTolerancesScale(), true, m_physxSDKGlobals.m_pvd);
         PxInitExtensions(*m_physxSDKGlobals.m_physics, m_physxSDKGlobals.m_pvd);
 
@@ -299,8 +325,11 @@ namespace PhysX
         m_physxSDKGlobals.m_physics->release();
         m_physxSDKGlobals.m_physics = nullptr;
 
-        m_physxSDKGlobals.m_pvd->release();
-        m_physxSDKGlobals.m_pvd = nullptr;
+        if (m_physxSDKGlobals.m_pvd)
+        {
+            m_physxSDKGlobals.m_pvd->release();
+            m_physxSDKGlobals.m_pvd = nullptr;
+        }
 
         m_physxSDKGlobals.m_foundation->release();
         m_physxSDKGlobals.m_foundation = nullptr;
@@ -370,6 +399,8 @@ namespace PhysX
 #else
         m_cpuDispatcher = AzPhysXCpuDispatcherCreate();
 #endif
+        
+        PxSetProfilerCallback(&m_pxAzProfilerCallback);
 
         // Set Physics API constants to PhysX-friendly values
         Physics::DefaultRigidBodyConfiguration::m_computeInertiaTensor = true;
@@ -380,10 +411,11 @@ namespace PhysX
 
     bool SystemComponent::ConnectToPvd()
     {
+#ifdef AZ_PHYSICS_DEBUG_ENABLED
         DisconnectFromPvd();
 
         // Select current PhysX Pvd debug type
-        switch (m_configuration.m_settings.m_pvdTransportType)
+        switch (m_physxConfiguration.m_settings.m_pvdTransportType)
         {
             case PhysX::Settings::PvdTransportType::File:
             {
@@ -391,12 +423,12 @@ namespace PhysX
                 AZ::u64 currentTimeStamp = AZStd::GetTimeUTCMilliSecond() / 1000;
 
                 // Strip any filename used as .pxd2 forced (only .pvd or .px2 valid for PVD version 3.2016.12.21494747)
-                AzFramework::StringFunc::Path::StripExtension(m_configuration.m_settings.m_pvdFileName);
+                AzFramework::StringFunc::Path::StripExtension(m_physxConfiguration.m_settings.m_pvdFileName);
 
                 // Create output filename (format: <TimeStamp>-<FileName>.pxd2)
                 AZStd::string filename = AZStd::to_string(currentTimeStamp);
                 AzFramework::StringFunc::Append(filename, "-");
-                AzFramework::StringFunc::Append(filename, m_configuration.m_settings.m_pvdFileName.c_str());
+                AzFramework::StringFunc::Append(filename, m_physxConfiguration.m_settings.m_pvdFileName.c_str());
                 AzFramework::StringFunc::Append(filename, ".pxd2");
 
                 AZStd::string rootDirectory;
@@ -418,15 +450,15 @@ namespace PhysX
             {
                 m_pvdTransport = physx::PxDefaultPvdSocketTransportCreate
                     (
-                    m_configuration.m_settings.m_pvdHost.c_str(),
-                    m_configuration.m_settings.m_pvdPort,
-                    m_configuration.m_settings.m_pvdTimeoutInMilliseconds
+                    m_physxConfiguration.m_settings.m_pvdHost.c_str(),
+                    m_physxConfiguration.m_settings.m_pvdPort,
+                    m_physxConfiguration.m_settings.m_pvdTimeoutInMilliseconds
                     );
                 break;
             }
             default:
             {
-                AZ_Error("PhysX", false, "Invalid PhysX Visual Debugger (PVD) Debug Type used %d.", m_configuration.m_settings.m_pvdTransportType);
+                AZ_Error("PhysX", false, "Invalid PhysX Visual Debugger (PVD) Debug Type used %d.", m_physxConfiguration.m_settings.m_pvdTransportType);
                 break;
             }
         }
@@ -437,19 +469,23 @@ namespace PhysX
             pvdConnectionSuccessful = m_physxSDKGlobals.m_pvd->connect(*m_pvdTransport, physx::PxPvdInstrumentationFlag::eALL);
             if (pvdConnectionSuccessful)
             {
-                AZ_Printf("PhysX", "Successfully connected to the PhysX Visual Debugger (PVD).");
+                AZ_Printf("PhysX", "Successfully connected to the PhysX Visual Debugger (PVD).\n");
             }
             else
             {
-                AZ_Printf("PhysX", "Failed to connect to the PhysX Visual Debugger (PVD).");
+                AZ_Printf("PhysX", "Failed to connect to the PhysX Visual Debugger (PVD).\n");
             }
         }
 
         return pvdConnectionSuccessful;
+#else
+        return false;
+#endif
     }
 
     void SystemComponent::DisconnectFromPvd()
     {
+#ifdef AZ_PHYSICS_DEBUG_ENABLED
         if (m_physxSDKGlobals.m_pvd)
         {
             m_physxSDKGlobals.m_pvd->disconnect();
@@ -459,13 +495,14 @@ namespace PhysX
         {
             m_pvdTransport->release();
             m_pvdTransport = nullptr;
-            AZ_Printf("PhysX", "Successfully disconnected from the PhysX Visual Debugger (PVD).");
+            AZ_Printf("PhysX", "Successfully disconnected from the PhysX Visual Debugger (PVD).\n");
         }
+#endif
     }
 
     void SystemComponent::UpdateColliderProximityVisualization(bool enabled, const AZ::Vector3& cameraPosition, float radius)
     {
-        Settings::ColliderProximityVisualization& colliderProximityVisualization = m_configuration.m_settings.m_colliderProximityVisualization;
+        Settings::ColliderProximityVisualization& colliderProximityVisualization = m_physxConfiguration.m_settings.m_colliderProximityVisualization;
         colliderProximityVisualization.m_enabled = enabled;
         colliderProximityVisualization.m_cameraPosition = cameraPosition;
         colliderProximityVisualization.m_radius = radius;
@@ -491,6 +528,7 @@ namespace PhysX
         PhysX::ConfigurationRequestBus::Handler::BusDisconnect();
         PhysX::SystemRequestsBus::Handler::BusDisconnect();
         Physics::SystemRequestBus::Handler::BusDisconnect();
+        AZ::Data::AssetBus::Handler::BusDisconnect();
 
         // Reset material manager
         m_materialManager.ReleaseAllMaterials();
@@ -520,6 +558,10 @@ namespace PhysX
     {
         AZ_Assert(m_cpuDispatcher, "PhysX CPU dispatcher was not created");
 
+#ifdef PHYSX_ENABLE_MULTI_THREADING
+        sceneDesc.flags |= physx::PxSceneFlag::eREQUIRE_RW_LOCK;
+#endif
+
         sceneDesc.cpuDispatcher = m_cpuDispatcher;
         return m_physxSDKGlobals.m_physics->createScene(sceneDesc);
     }
@@ -542,60 +584,59 @@ namespace PhysX
 
     bool SystemComponent::CookConvexMeshToFile(const AZStd::string& filePath, const AZ::Vector3* vertices, AZ::u32 vertexCount)
     {
-        physx::PxConvexMeshDesc convexDesc;
-        convexDesc.points.count = vertexCount;
-        convexDesc.points.stride = sizeof(AZ::Vector3);
-        convexDesc.points.data = vertices;
-        convexDesc.flags = physx::PxConvexFlag::eCOMPUTE_CONVEX;
+        AZStd::vector<AZ::u8> physxData;
 
-        physx::PxDefaultMemoryOutputStream memoryStream;
-
-        physx::PxConvexMeshCookingResult::Enum convexCookingResultCode = physx::PxConvexMeshCookingResult::eSUCCESS;
-
-        if (m_physxSDKGlobals.m_cooking->cookConvexMesh(convexDesc, memoryStream, &convexCookingResultCode))
+        if (CookConvexMeshToMemory(vertices, vertexCount, physxData))
         {
-            // Write into a file
-            Pipeline::MeshAssetCookedData assetFileContent(memoryStream);
-            assetFileContent.m_isConvexMesh = true;
-
-            return Utils::WriteCookedMeshToFile(filePath, assetFileContent);
+            return Utils::WriteCookedMeshToFile(filePath, physxData, 
+                Physics::CookedMeshShapeConfiguration::MeshType::Convex);
         }
 
-        AZ_Error("PhysX", false, "Error in CookTriangleMeshToFile for %s. PhysX cooking failed: %s", filePath, Utils::ConvexCookingResultToString(convexCookingResultCode));
+        AZ_Error("PhysX", false, "CookConvexMeshToFile. Convex cooking failed for %s.", filePath);
         return false;
     }
 
     bool SystemComponent::CookTriangleMeshToFile(const AZStd::string& filePath, const AZ::Vector3* vertices, AZ::u32 vertexCount,
         const AZ::u32* indices, AZ::u32 indexCount)
-    {
-        AZ_Error("PhysX", indexCount % 3 == 0, "Error in CookTriangleMeshToFile for %s. Index count (%d) should be a multiple of 3.",
-            filePath, indexCount);
+    {   
+        AZStd::vector<AZ::u8> physxData;
 
-        // Prepare data
-        physx::PxTriangleMeshDesc meshDesc;
-        meshDesc.points.count = vertexCount;
-        meshDesc.points.stride = sizeof(AZ::Vector3);
-        meshDesc.points.data = vertices;
-
-        meshDesc.triangles.count = indexCount / 3;
-        meshDesc.triangles.stride = sizeof(AZ::u32) * 3;
-        meshDesc.triangles.data = indices;
-
-        // Do PhysX cooking
-        physx::PxDefaultMemoryOutputStream memoryStream;
-
-        physx::PxTriangleMeshCookingResult::Enum trimeshCookingResultCode = physx::PxTriangleMeshCookingResult::eSUCCESS;
-
-        if (m_physxSDKGlobals.m_cooking->cookTriangleMesh(meshDesc, memoryStream, &trimeshCookingResultCode))
+        if (CookTriangleMeshToMemory(vertices, vertexCount, indices, indexCount, physxData))
         {
-            Pipeline::MeshAssetCookedData assetFileContent(memoryStream);
-            assetFileContent.m_isConvexMesh = false;
-
-            return Utils::WriteCookedMeshToFile(filePath, assetFileContent);
+            return Utils::WriteCookedMeshToFile(filePath, physxData,
+                Physics::CookedMeshShapeConfiguration::MeshType::TriangleMesh);
         }
 
-        AZ_Error("PhysX", false, "Error in CookTriangleMeshToFile for %s. PhysX cooking failed: %s", filePath, Utils::TriMeshCookingResultToString(trimeshCookingResultCode));
+        AZ_Error("PhysX", false, "CookTriangleMeshToFile. Mesh cooking failed for %s.", filePath);
         return false;
+    }
+
+    bool SystemComponent::CookConvexMeshToMemory(const AZ::Vector3* vertices, AZ::u32 vertexCount, AZStd::vector<AZ::u8>& result)
+    {
+        physx::PxDefaultMemoryOutputStream memoryStream;
+        
+        bool cookingResult = Utils::CookConvexToPxOutputStream(vertices, vertexCount, memoryStream);
+        
+        if(cookingResult)
+        {
+            result.insert(result.end(), memoryStream.getData(), memoryStream.getData() + memoryStream.getSize());
+        }
+        
+        return cookingResult;
+    }
+
+    bool SystemComponent::CookTriangleMeshToMemory(const AZ::Vector3* vertices, AZ::u32 vertexCount,
+        const AZ::u32* indices, AZ::u32 indexCount, AZStd::vector<AZ::u8>& result)
+    {
+        physx::PxDefaultMemoryOutputStream memoryStream;
+        bool cookingResult = Utils::CookTriangleMeshToToPxOutputStream(vertices, vertexCount, indices, indexCount, memoryStream);
+
+        if (cookingResult)
+        {
+            result.insert(result.end(), memoryStream.getData(), memoryStream.getData() + memoryStream.getSize());
+        }
+
+        return cookingResult;
     }
 
     physx::PxConvexMesh* SystemComponent::CreateConvexMeshFromCooked(const void* cookedMeshData, AZ::u32 bufferSize)
@@ -612,13 +653,60 @@ namespace PhysX
 
     AZStd::shared_ptr<Physics::World> SystemComponent::CreateWorld(AZ::Crc32 id)
     {
-        return CreateWorldCustom(id, m_configuration.m_worldConfiguration);
+        return CreateWorldCustom(id, m_physicsConfiguration.m_defaultWorldConfiguration);
     }
 
     AZStd::shared_ptr<Physics::World> SystemComponent::CreateWorldCustom(AZ::Crc32 id, const Physics::WorldConfiguration& settings)
     {
         AZStd::shared_ptr<World> physxWorld = AZStd::make_shared<World>(id, settings);
         return physxWorld;
+    }
+
+    void SystemComponent::SetDefaultWorldConfiguration(const Physics::WorldConfiguration& worldConfiguration)
+    {
+        const bool gravityChanged =
+            m_physicsConfiguration.m_defaultWorldConfiguration.m_gravity != worldConfiguration.m_gravity;
+        const bool maxTimeStepChanged =
+            m_physicsConfiguration.m_defaultWorldConfiguration.m_maxTimeStep != worldConfiguration.m_maxTimeStep;
+        const bool fixedTimeStepChanged =
+            m_physicsConfiguration.m_defaultWorldConfiguration.m_fixedTimeStep != worldConfiguration.m_fixedTimeStep;
+
+        m_physicsConfiguration.m_defaultWorldConfiguration = worldConfiguration;
+
+        if (gravityChanged)
+        {
+            Physics::WorldRequestBus::Broadcast(
+                &Physics::WorldRequests::SetGravity, m_physicsConfiguration.m_defaultWorldConfiguration.m_gravity);
+        }
+
+        if (maxTimeStepChanged)
+        {
+            Physics::WorldRequestBus::Broadcast(
+                &Physics::WorldRequests::SetMaxDeltaTime, m_physicsConfiguration.m_defaultWorldConfiguration.m_maxTimeStep);
+        }
+
+        if (fixedTimeStepChanged)
+        {
+            Physics::WorldRequestBus::Broadcast(
+                &Physics::WorldRequests::SetFixedDeltaTime, m_physicsConfiguration.m_defaultWorldConfiguration.m_fixedTimeStep);
+        }
+
+        SaveConfiguration();
+    }
+
+    void SystemComponent::SetDefaultMaterialLibrary(const AZ::Data::Asset<Physics::MaterialLibraryAsset>& materialLibrary)
+    {
+        if (m_physicsConfiguration.m_defaultMaterialLibrary == materialLibrary)
+        {
+            return;
+        }
+        m_physicsConfiguration.m_defaultMaterialLibrary = materialLibrary;
+        LoadDefaultMaterialLibrary();
+#ifdef PHYSX_EDITOR
+        PhysX::ConfigurationNotificationBus::Broadcast(
+            &PhysX::ConfigurationNotifications::OnDefaultMaterialLibraryChanged, materialLibrary.GetId());
+#endif
+        SaveConfiguration();
     }
 
     AZStd::unique_ptr<Physics::RigidBodyStatic> SystemComponent::CreateStaticRigidBody(const Physics::WorldBodyConfiguration& configuration)
@@ -671,6 +759,19 @@ namespace PhysX
         return m_materialManager.GetDefaultMaterial();
     }
 
+    void SystemComponent::OnAssetReloaded(AZ::Data::Asset<AZ::Data::AssetData> asset)
+    {
+        if (m_physicsConfiguration.m_defaultMaterialLibrary == asset)
+        {
+            m_physicsConfiguration.m_defaultMaterialLibrary = asset;
+
+#ifdef PHYSX_EDITOR
+            PhysX::ConfigurationNotificationBus::Broadcast(
+                &PhysX::ConfigurationNotifications::OnDefaultMaterialLibraryChanged, asset.GetId());
+#endif
+        }
+    }
+
     AZStd::vector<AZ::TypeId> SystemComponent::GetSupportedJointTypes()
     {
         return JointUtils::GetSupportedJointTypes();
@@ -714,38 +815,67 @@ namespace PhysX
             childWorldRotation, axis, exampleLocalRotations);
     }
 
-    Configuration SystemComponent::CreateDefaultConfiguration() const
+    void SystemComponent::ReleaseNativeMeshObject(void* nativeMeshObject)
     {
-        Configuration configuration;
+        if (nativeMeshObject)
+        {
+            static_cast<physx::PxBase*>(nativeMeshObject)->release();
+        }
+    }
+
+    Physics::CollisionConfiguration SystemComponent::CreateDefaultCollisionConfiguration() const
+    {
+        Physics::CollisionConfiguration configuration;
         configuration.m_collisionLayers.SetName(Physics::CollisionLayer::Default, "Default");
-        configuration.m_collisionLayers.SetName(Physics::CollisionLayer::TouchBend, "TouchBend");
 
         configuration.m_collisionGroups.CreateGroup("All", Physics::CollisionGroup::All, Physics::CollisionGroups::Id(), true);
         configuration.m_collisionGroups.CreateGroup("None", Physics::CollisionGroup::None, Physics::CollisionGroups::Id::Create(), true);
+
+#ifdef TOUCHBENDING_LAYER_BIT
+        configuration.m_collisionLayers.SetName(Physics::CollisionLayer::TouchBend, "TouchBend");
         configuration.m_collisionGroups.CreateGroup("All_NoTouchBend", Physics::CollisionGroup::All_NoTouchBend, Physics::CollisionGroups::Id::Create(), true);
+#endif
 
         return configuration;
     }
 
     void SystemComponent::LoadConfiguration()
     {
-        // Load configuration from asset cache
-        AZStd::string assetRoot, fullpath;
-        EBUS_EVENT_RESULT(assetRoot, AzFramework::ApplicationRequests::Bus, GetAssetRoot);
-
-        AZStd::string fullPath;
-        AzFramework::StringFunc::Path::Join(assetRoot.c_str(), m_configurationPath.c_str(), fullPath);
-
-        // Load configuration
-        bool loaded = AZ::Utils::LoadObjectFromFileInPlace<Configuration>(fullPath.c_str(), m_configuration);
-        if (loaded)
+        // Initialize collision configuration with default one.
+        m_physicsConfiguration.m_collisionConfiguration = CreateDefaultCollisionConfiguration();
+        
+        // Try loading deprecated configs first.
         {
-            PhysX::ConfigurationNotificationBus::Broadcast(&PhysX::ConfigurationNotificationBus::Events::OnConfigurationLoaded);
+            bool loaded = AZ::Utils::LoadObjectFromFileInPlace<Configuration>(DefaultConfigurationPath, m_configuration);
+
+            if (loaded)
+            {
+                m_physicsConfiguration.m_defaultWorldConfiguration = m_configuration.m_worldConfiguration;
+                m_physicsConfiguration.m_collisionConfiguration.m_collisionLayers = m_configuration.m_collisionLayers;
+                m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups = m_configuration.m_collisionGroups;
+                m_physxConfiguration.m_editorConfiguration = m_configuration.m_editorConfiguration;
+                m_physxConfiguration.m_settings = m_configuration.m_settings;
+                m_physicsConfiguration.m_defaultMaterialLibrary = m_configuration.m_materialLibrary;
+                PhysX::ConfigurationNotificationBus::Broadcast(&PhysX::ConfigurationNotificationBus::Events::OnPhysXConfigurationLoaded);
+            }
         }
-        else
+
+        // Load PhysX configuration.
         {
-            SetConfiguration(CreateDefaultConfiguration());
+            bool loaded = AZ::Utils::LoadObjectFromFileInPlace<PhysXConfiguration>(ProjectPhysXConfigurationPath, m_physxConfiguration);
+
+            if (loaded)
+            {
+                PhysX::ConfigurationNotificationBus::Broadcast(&PhysX::ConfigurationNotificationBus::Events::OnPhysXConfigurationLoaded);
+            }
         }
+
+        // Load Physics configuration.
+        {
+            AZ::Utils::LoadObjectFromFileInPlace<PhysicsConfiguration>(ProjectPhysicsConfigurationPath, m_physicsConfiguration);
+        }
+
+        SaveConfiguration();
     }
 
     void SystemComponent::SaveConfiguration()
@@ -754,37 +884,60 @@ namespace PhysX
 #ifdef PHYSX_EDITOR
         auto assetRoot = AZ::IO::FileIOBase::GetInstance()->GetAlias("@devassets@");
 
-        AZStd::string fullPath;
-        AzFramework::StringFunc::Path::Join(assetRoot, m_configurationPath.c_str(), fullPath);
-
-        bool saved = AZ::Utils::SaveObjectToFile<Configuration>(fullPath.c_str(), AZ::DataStream::ST_XML, &m_configuration);
-        AZ_Warning("PhysXSystemComponent", saved, "Failed to save PhysX configuration");
-        if (saved)
+        if (!assetRoot)
         {
-            PhysX::ConfigurationNotificationBus::Broadcast(
-                &PhysX::ConfigurationNotificationBus::Events::OnConfigurationRefreshed, m_configuration);
+            return;
+        }
+
+        // Save PhysX configuration.
+        {
+            AZStd::string fullPath;
+            AzFramework::StringFunc::Path::Join(assetRoot, ProjectPhysXConfigurationPath, fullPath);
+
+            bool saved = AZ::Utils::SaveObjectToFile<PhysXConfiguration>(fullPath.c_str(), AZ::DataStream::ST_XML,
+                                                                         &m_physxConfiguration);
+            AZ_Warning("PhysXSystemComponent", saved, "Failed to save PhysX configuration");
+            if (saved)
+            {
+                PhysX::ConfigurationNotificationBus::Broadcast(
+                    &PhysX::ConfigurationNotificationBus::Events::OnPhysXConfigurationRefreshed, m_physxConfiguration);
+            }
+        }
+
+        // Save physics configuration.
+        {
+            AZStd::string fullPath;
+            AzFramework::StringFunc::Path::Join(
+                assetRoot, ProjectPhysicsConfigurationPath, fullPath);
+
+            bool saved = AZ::Utils::SaveObjectToFile<PhysicsConfiguration>(
+                fullPath.c_str(), AZ::DataStream::ST_XML, &m_physicsConfiguration);
+            AZ_Warning("PhysXSystemComponent", saved, "Failed to save physics configuration");
         }
 #endif
     }
 
     void SystemComponent::CheckoutConfiguration()
     {
-        // Checkout the configuration file so we can write to it later on
+        // Checkout the configuration files so we can write to it later on
 #ifdef PHYSX_EDITOR
         using AzToolsFramework::SourceControlFileInfo;
         using AzToolsFramework::SourceControlCommandBus;
+        
+        const auto assetRoot = AZ::IO::FileIOBase::GetInstance()->GetAlias("@devassets@");
 
-        auto assetRoot = AZ::IO::FileIOBase::GetInstance()->GetAlias("@devassets@");
-
-        AZStd::string fullPath;
-        AzFramework::StringFunc::Path::Join(assetRoot, m_configurationPath.c_str(), fullPath);
-
-        AzToolsFramework::SourceControlCommandBus::Broadcast(&AzToolsFramework::SourceControlCommandBus::Events::RequestEdit,
-            fullPath.c_str(), true,
-            [fullPath, this](bool /*success*/, const AzToolsFramework::SourceControlFileInfo& info)
+        for (const auto path : {DefaultConfigurationPath, ProjectPhysicsConfigurationPath, ProjectPhysXConfigurationPath})
         {
-            // File is checked out
-        });
+            AZStd::string fullPath;
+            AzFramework::StringFunc::Path::Join(assetRoot, path, fullPath);
+            
+            AzToolsFramework::SourceControlCommandBus::Broadcast(&AzToolsFramework::SourceControlCommandBus::Events::RequestEdit,
+                fullPath.c_str(), true,
+                [](bool /*success*/, const AzToolsFramework::SourceControlFileInfo& info)
+            {
+                // File is checked out
+            });            
+        }
 #endif
     }
 
@@ -803,17 +956,26 @@ namespace PhysX
             if (shapeType == Physics::ShapeType::Sphere)
             {
                 const Physics::SphereShapeConfiguration& sphereConfiguration = static_cast<const Physics::SphereShapeConfiguration&>(shapeConfiguration);
-                entity->CreateComponent<SphereColliderComponent>(colliderConfiguration, sphereConfiguration);
+                auto sphereColliderComponent = entity->CreateComponent<SphereColliderComponent>();
+                sphereColliderComponent->SetShapeConfigurationList({ AZStd::make_pair(
+                    AZStd::make_shared<Physics::ColliderConfiguration>(colliderConfiguration),
+                    AZStd::make_shared<Physics::SphereShapeConfiguration>(sphereConfiguration)) });
             }
             else if (shapeType == Physics::ShapeType::Box)
             {
                 const Physics::BoxShapeConfiguration& boxConfiguration = static_cast<const Physics::BoxShapeConfiguration&>(shapeConfiguration);
-                entity->CreateComponent<BoxColliderComponent>(colliderConfiguration, boxConfiguration);
+                auto boxColliderComponent = entity->CreateComponent<BoxColliderComponent>();
+                boxColliderComponent->SetShapeConfigurationList({ AZStd::make_pair(
+                    AZStd::make_shared<Physics::ColliderConfiguration>(colliderConfiguration),
+                    AZStd::make_shared<Physics::BoxShapeConfiguration>(boxConfiguration)) });
             }
             else if (shapeType == Physics::ShapeType::Capsule)
             {
                 const Physics::CapsuleShapeConfiguration& capsuleConfiguration = static_cast<const Physics::CapsuleShapeConfiguration&>(shapeConfiguration);
-                entity->CreateComponent<CapsuleColliderComponent>(colliderConfiguration, capsuleConfiguration);
+                auto capsuleColliderComponent = entity->CreateComponent<CapsuleColliderComponent>();
+                capsuleColliderComponent->SetShapeConfigurationList({ AZStd::make_pair(
+                    AZStd::make_shared<Physics::ColliderConfiguration>(colliderConfiguration),
+                    AZStd::make_shared<Physics::CapsuleShapeConfiguration>(capsuleConfiguration)) });
             }
         }
 
@@ -829,23 +991,54 @@ namespace PhysX
 
     const Configuration& SystemComponent::GetConfiguration()
     {
+        m_configuration.m_worldConfiguration = m_physicsConfiguration.m_defaultWorldConfiguration;
+        m_configuration.m_collisionLayers = m_physicsConfiguration.m_collisionConfiguration.m_collisionLayers;
+        m_configuration.m_collisionGroups = m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups;
+        m_configuration.m_editorConfiguration = m_physxConfiguration.m_editorConfiguration;
+        m_configuration.m_settings = m_physxConfiguration.m_settings;
+        m_configuration.m_materialLibrary = m_physicsConfiguration.m_defaultMaterialLibrary;
+
         return m_configuration;
     }
 
     void SystemComponent::SetConfiguration(const Configuration& configuration)
     {
-        const bool gravityChanged =
-            m_configuration.m_worldConfiguration.m_gravity != configuration.m_worldConfiguration.m_gravity;
+        SetDefaultWorldConfiguration(configuration.m_worldConfiguration);
+        SetDefaultMaterialLibrary(configuration.m_materialLibrary);
 
-        m_configuration = configuration;
+        Physics::CollisionConfiguration collisionConfiguration;
+        collisionConfiguration.m_collisionGroups = configuration.m_collisionGroups;
+        collisionConfiguration.m_collisionLayers = configuration.m_collisionLayers;
+        SetCollisionConfiguration(collisionConfiguration);
 
-        if (gravityChanged)
-        {
-            Physics::WorldRequestBus::Broadcast(
-                &Physics::WorldRequests::SetGravity, m_configuration.m_worldConfiguration.m_gravity);
-        }
+        PhysXConfiguration physxConfiguration;
+        physxConfiguration.m_settings = configuration.m_settings;
+        physxConfiguration.m_editorConfiguration = configuration.m_editorConfiguration;
+        SetPhysXConfiguration(physxConfiguration);
+    }
 
+    void SystemComponent::SetPhysXConfiguration(const PhysXConfiguration& configuration)
+    {
+        m_physxConfiguration = configuration;
+#ifdef PHYSX_EDITOR
+        OnEditorConfigurationChanged();
+#endif
         SaveConfiguration();
+    }
+
+    const PhysXConfiguration& SystemComponent::GetPhysXConfiguration()
+    {
+        return m_physxConfiguration;
+    }
+
+    const Physics::WorldConfiguration& SystemComponent::GetDefaultWorldConfiguration()
+    {
+        return m_physicsConfiguration.m_defaultWorldConfiguration;
+    }
+
+    const AZ::Data::Asset<Physics::MaterialLibraryAsset>* SystemComponent::GetDefaultMaterialLibraryAssetPtr()
+    {
+        return &m_physicsConfiguration.m_defaultMaterialLibrary;
     }
 
     void SystemComponent::OnCrySystemInitialized(ISystem&, const SSystemInitParams&)
@@ -865,17 +1058,68 @@ namespace PhysX
 
     Physics::CollisionLayer SystemComponent::GetCollisionLayerByName(const AZStd::string& layerName)
     {
-        return m_configuration.m_collisionLayers.GetLayer(layerName);
+        return m_physicsConfiguration.m_collisionConfiguration.m_collisionLayers.GetLayer(layerName);
+    }
+
+    AZStd::string SystemComponent::GetCollisionLayerName(const Physics::CollisionLayer& layer)
+    {
+        return m_physicsConfiguration.m_collisionConfiguration.m_collisionLayers.GetName(layer);
+    }
+
+    bool SystemComponent::TryGetCollisionLayerByName(const AZStd::string& layerName, Physics::CollisionLayer& layer)
+    {
+        return m_physicsConfiguration.m_collisionConfiguration.m_collisionLayers.TryGetLayer(layerName, layer);
     }
 
     Physics::CollisionGroup SystemComponent::GetCollisionGroupByName(const AZStd::string& groupName)
     {
-        return m_configuration.m_collisionGroups.FindGroupByName(groupName);
+        return m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups.FindGroupByName(groupName);
+    }
+
+    bool SystemComponent::TryGetCollisionGroupByName(const AZStd::string& groupName, Physics::CollisionGroup& group)
+    {
+        return m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups.TryFindGroupByName(groupName, group);
+    }
+
+    AZStd::string SystemComponent::GetCollisionGroupName(const Physics::CollisionGroup& collisionGroup)
+    {
+        AZStd::string groupName;
+        for (const auto& group : m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups.GetPresets())
+        {
+            if (group.m_group.GetMask() == collisionGroup.GetMask())
+            {
+                groupName = group.m_name;
+                break;
+            }
+        }
+        return groupName;
     }
 
     Physics::CollisionGroup SystemComponent::GetCollisionGroupById(const Physics::CollisionGroups::Id& groupId)
     {
-        return m_configuration.m_collisionGroups.FindGroupById(groupId);
+        return m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups.FindGroupById(groupId);
+    }
+
+    void SystemComponent::SetCollisionLayerName(int index, const AZStd::string& layerName)
+    {
+        m_physicsConfiguration.m_collisionConfiguration.m_collisionLayers.SetName(index, layerName);
+    }
+
+    void SystemComponent::CreateCollisionGroup(const AZStd::string& groupName, const Physics::CollisionGroup& group)
+    {
+        m_physicsConfiguration.m_collisionConfiguration.m_collisionGroups.CreateGroup(groupName, group);
+    }
+
+    void SystemComponent::SetCollisionConfiguration(const Physics::CollisionConfiguration& collisionConfiguration)
+    {
+        m_physicsConfiguration.m_collisionConfiguration = collisionConfiguration;
+
+        SaveConfiguration();
+    }
+
+    Physics::CollisionConfiguration SystemComponent::GetCollisionConfiguration()
+    {
+        return m_physicsConfiguration.m_collisionConfiguration;
     }
 
     physx::PxFilterData SystemComponent::CreateFilterData(const Physics::CollisionLayer& layer, const Physics::CollisionGroup& group)
@@ -929,20 +1173,30 @@ namespace PhysX
     bool SystemComponent::LoadDefaultMaterialLibrary()
     {
         AZ::Data::Asset<Physics::MaterialLibraryAsset>& materialLibrary 
-            = m_configuration.m_materialLibrary;
+            = m_physicsConfiguration.m_defaultMaterialLibrary;
 
         if (!materialLibrary.GetId().IsValid())
         {
             AZ_Warning("PhysX", false,
-                "LoadDefaultMaterialLibrary: Material Library asset ID is invalid.");
+                "LoadDefaultMaterialLibrary: Default Material Library asset ID is invalid.");
             return false;
         }
 
+        const bool queueLoadData = true;
+        const AZ::Data::AssetFilterCB assetLoadFilterCB = nullptr;
+        const bool loadBlocking = true;
         materialLibrary = AZ::Data::AssetManager::Instance().GetAsset<Physics::MaterialLibraryAsset>(
-            materialLibrary.GetId(), true, nullptr, true);
+            materialLibrary.GetId(), queueLoadData, assetLoadFilterCB, loadBlocking);
+
+        // Listen for material library asset modification events
+        if (!AZ::Data::AssetBus::Handler::BusIsConnectedId(materialLibrary.GetId()))
+        {
+            AZ::Data::AssetBus::Handler::BusDisconnect();
+            AZ::Data::AssetBus::Handler::BusConnect(materialLibrary.GetId());
+        }
 
         AZ_Warning("PhysX", (materialLibrary.GetData() != nullptr),
-            "LoadDefaultMaterialLibrary: Material Library asset data is invalid.");
+            "LoadDefaultMaterialLibrary: Default Material Library asset data is invalid.");
         return materialLibrary.GetData() != nullptr;
     }
 
@@ -951,37 +1205,20 @@ namespace PhysX
     {
         Physics::MaterialSelection& materialSelection = colliderConfiguration.m_materialSelection;
 
-        // If material library is not set, choose the Default one
-#ifdef ENABLE_DEFAULT_MATERIAL_LIBRARY
-        if (!materialSelection.MaterialLibraryIsValid())
-        {
-            AZ::Data::AssetId defaultMaterialLibraryAssetId = m_configuration.m_materialLibrary.GetId();
-            if (defaultMaterialLibraryAssetId.IsValid())
-            {
-                materialSelection.CreateMaterialLibrary(defaultMaterialLibraryAssetId);
-            }
-        }
-        
         // If the material library is still not set, we can't update the material selection
-        if (!materialSelection.MaterialLibraryIsValid())
+        if (!materialSelection.IsMaterialLibraryValid())
         {
             AZ_Warning("PhysX", false,
-                "UpdateMaterialSelection: Material Selection has no valid material library. "
-                "Please make sure the default material library is set");
+                "UpdateMaterialSelection: Material Selection tried to use an invalid/non-existing Physics material library: \"%s\". "
+                "Please make sure the file exists or re-assign another library", materialSelection.GetMaterialLibraryAssetHint().c_str());
             return false;
         }
-#else 
-        if (!materialSelection.MaterialLibraryIsValid())
-        {
-            return false;
-        }
-#endif
 
         // If there's no material library data loaded, try to load it
         if (materialSelection.GetMaterialLibraryAssetData() == nullptr)
         {
             AZ::Data::AssetId materialLibraryAssetId = materialSelection.GetMaterialLibraryAssetId();
-            materialSelection.CreateMaterialLibrary(materialLibraryAssetId);
+            materialSelection.SetMaterialLibrary(materialLibraryAssetId);
         }
 
         // If there's still not material library data, we can't update the material selection 
@@ -1019,10 +1256,17 @@ namespace PhysX
     {
         Physics::MaterialSelection& materialSelection = colliderConfiguration.m_materialSelection;
 
-        // Set the default selection if there's no available physics asset.
-        if (!assetConfiguration.m_asset.GetId().IsValid() || !assetConfiguration.m_asset.IsReady())
+        if (!assetConfiguration.m_asset.GetId().IsValid())
         {
+            // Set the default selection if there's no physics asset.
             materialSelection.SetMaterialSlots(Physics::MaterialSelection::SlotsArray());
+            return false;
+        }
+
+        if (!assetConfiguration.m_asset.IsReady())
+        {
+            // The asset is valid but is still loading, 
+            // Do not set the empty slots in this case to avoid the entity being in invalid state
             return false;
         }
 
@@ -1035,22 +1279,26 @@ namespace PhysX
         }
 
         // Set the slots from the mesh asset
-        materialSelection.SetMaterialSlots(meshAsset->GetMaterialSlots());
+        materialSelection.SetMaterialSlots(meshAsset->m_assetData.m_surfaceNames);
 
-#ifdef ENABLE_DEFAULT_MATERIAL_LIBRARY
+        if (!assetConfiguration.m_useMaterialsFromAsset)
+        {
+            return false;
+        }
+
         const Physics::MaterialLibraryAsset* materialLibrary = materialSelection.GetMaterialLibraryAssetData();
-        const AZStd::vector<Physics::MaterialConfiguration>& meshMaterials = meshAsset->GetMaterialsData();
+        const AZStd::vector<AZStd::string>& meshMaterialNames = meshAsset->m_assetData.m_materialNames;
 
         // Update material IDs in the selection for each slot
         int slotIndex = 0;
-        for (const Physics::MaterialConfiguration& meshMaterial : meshMaterials)
+        for (const AZStd::string& meshMaterialName : meshMaterialNames)
         {
             Physics::MaterialFromAssetConfiguration materialData;
-            bool found = materialLibrary->GetDataForMaterialName(meshMaterial.m_surfaceType, materialData);
+            bool found = materialLibrary->GetDataForMaterialName(meshMaterialName, materialData);
 
             AZ_Warning("PhysX", found, 
                 "UpdateMaterialSelectionFromPhysicsAsset: No material found for surfaceType (%s) in the collider material library", 
-                meshMaterial.m_surfaceType.c_str());
+                meshMaterialName.c_str());
 
             if (found)
             {
@@ -1059,8 +1307,20 @@ namespace PhysX
 
             slotIndex++;
         }
-#endif
+
         return true;
+    }
+
+    void* PxAzProfilerCallback::zoneStart(const char* eventName, bool /*detached*/, uint64_t /*contextId*/)
+    {
+        AZ_PROFILE_EVENT_BEGIN(AZ::Debug::ProfileCategory::Physics, eventName);
+        return nullptr;
+    }
+
+    void PxAzProfilerCallback::zoneEnd(void* /*profilerData*/, 
+        const char* /*eventName*/, bool /*detached*/, uint64_t /*contextId*/)
+    {
+        AZ_PROFILE_EVENT_END(AZ::Debug::ProfileCategory::Physics);
     }
 
 } // namespace PhysX

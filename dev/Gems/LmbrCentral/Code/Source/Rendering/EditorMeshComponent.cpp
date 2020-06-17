@@ -16,11 +16,14 @@
 
 #include "EditorMeshComponent.h"
 #include <AzFramework/Viewport/ViewportColors.h>
+#include <AzToolsFramework/Entity/EditorEntityInfoBus.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/Serialization/EditContext.h>
 #include <AzCore/RTTI/BehaviorContext.h>
 #include <AzCore/Asset/AssetManager.h>
 #include <AzCore/std/string/string_view.h>
+
+#include <AzToolsFramework/API/EntityCompositionRequestBus.h>
 
 #include <MathConversion.h>
 
@@ -150,10 +153,10 @@ namespace LmbrCentral
         AZ::TransformBus::EventResult(isStatic, m_entity->GetId(), &AZ::TransformBus::Events::IsStaticTransform);
         m_mesh.SetTransformStaticState(isStatic);
 
-        bool currentVisibility = true;
-        AzToolsFramework::EditorVisibilityRequestBus::EventResult(
-            currentVisibility, GetEntityId(), &AzToolsFramework::EditorVisibilityRequests::GetCurrentVisibility);
-        m_mesh.UpdateAuxiliaryRenderFlags(!currentVisibility, ERF_HIDDEN);
+        bool visible = false;
+        AzToolsFramework::EditorEntityInfoRequestBus::EventResult(
+            visible, GetEntityId(), &AzToolsFramework::EditorEntityInfoRequestBus::Events::IsVisible);
+        m_mesh.UpdateAuxiliaryRenderFlags(!visible, ERF_HIDDEN);
 
         // Note we are purposely connecting to buses before calling m_mesh.CreateMesh().
         // m_mesh.CreateMesh() can result in events (eg: OnMeshCreated) that we want receive.
@@ -183,6 +186,7 @@ namespace LmbrCentral
 
     void EditorMeshComponent::Deactivate()
     {
+        AZ::Data::AssetBus::Handler::BusDisconnect();
         CryPhysicsComponentRequestBus::Handler::BusDisconnect();
         MaterialOwnerRequestBus::Handler::BusDisconnect();
         RenderBoundsRequestBus::Handler::BusDisconnect();
@@ -274,22 +278,35 @@ namespace LmbrCentral
 
     void EditorMeshComponent::OnTransformChanged(const AZ::Transform& /*local*/, const AZ::Transform& world)
     {
-        if (m_physicalEntity)
+        if (!m_physicalEntity)
+        {
+            CreateEditorPhysics();
+        }
+        else
         {
             const AZ::Vector3 scale = world.RetrieveScale();
 
-            if (!m_physScale.IsClose(scale))
+            if (IsPhysicalizable(world))
             {
-                // Scale changes require re-physicalizing.
-                DestroyEditorPhysics();
-                CreateEditorPhysics();
+                if (!m_physScale.IsClose(scale))
+                {
+                    // Scale changes require re-physicalizing.
+                    DestroyEditorPhysics();
+                    CreateEditorPhysics();
+                }
+                else
+                {
+                    Matrix34 transform = AZTransformToLYTransform(world);
+                    pe_params_pos par_pos;
+                    par_pos.pMtx3x4 = &transform;
+                    m_physicalEntity->SetParams(&par_pos);
+                }
             }
-
-            Matrix34 transform = AZTransformToLYTransform(world);
-
-            pe_params_pos par_pos;
-            par_pos.pMtx3x4 = &transform;
-            m_physicalEntity->SetParams(&par_pos);
+            else
+            {
+                DestroyEditorPhysics();
+                PhysicsTransformWarning();
+            }
         }
     }
 
@@ -404,7 +421,7 @@ namespace LmbrCentral
             dd.bExtrude = true;
             dd.color = triangleColor;
             dd.lineColor = lineColor;
-            
+
             if (IStatObj* geometry = GetStatObj())
             {
                 geometry->DebugDraw(dd);
@@ -432,6 +449,16 @@ namespace LmbrCentral
             return;
         }
 
+        if (!IsPhysicalizable(transformInterface->GetWorldTM()))
+        {
+            PhysicsTransformWarning();
+            return;
+        }
+        else
+        {
+            m_physicsTransformWarningIssued = false;
+        }
+
         IStatObj* geometry = m_mesh.GetEntityStatObj();
         if (!geometry)
         {
@@ -446,9 +473,10 @@ namespace LmbrCentral
             pe_geomparams params;
             geometry->Physicalize(m_physicalEntity, &params);
 
-            // Immediately set transform, otherwise physics doesn't propgate the world change.
+            // Immediately set transform, otherwise physics doesn't propagate the world change.
             const AZ::Transform& transform = transformInterface->GetWorldTM();
             Matrix34 cryTransform = AZTransformToLYTransform(transform);
+
             pe_params_pos par_pos;
             par_pos.pMtx3x4 = &cryTransform;
             m_physicalEntity->SetParams(&par_pos);
@@ -465,7 +493,7 @@ namespace LmbrCentral
     {
         // If physics is completely torn down, all physical entities are by extension completely invalid (dangling pointers).
         // It doesn't matter that we held a reference.
-        if (gEnv->pPhysicalWorld)
+        if (gEnv && gEnv->pPhysicalWorld)
         {
             if (m_physicalEntity)
             {
@@ -475,6 +503,13 @@ namespace LmbrCentral
         }
 
         m_physicalEntity = nullptr;
+    }
+
+    void EditorMeshComponent::PhysicsTransformWarning() const
+    {
+        AZ_Warning("Mesh Component", m_physicsTransformWarningIssued, "Transform for entity \"%s\" has too much skew "
+            "to physicalize mesh (probably as a result of parenting entities with non-uniform scale).", GetEntity()->GetName().c_str());
+        m_physicsTransformWarningIssued = true;
     }
 
     IStatObj* EditorMeshComponent::GetStatObj()
@@ -525,7 +560,7 @@ namespace LmbrCentral
         {
             return staticViewportIcon;
         }
-        
+
         return dynamicViewportIcon;
     }
 
@@ -578,5 +613,48 @@ namespace LmbrCentral
     void EditorMeshComponent::OnAccentTypeChanged(AzToolsFramework::EntityAccentType accent)
     {
         m_accentType = accent;
+    }
+
+    bool AddMeshComponentWithMesh(const AZ::EntityId& targetEntity, const AZ::Uuid& meshAssetId)
+    {
+        // Error handling for failures should be done at the call site, this function can be invoked from Python.
+        if (!targetEntity.IsValid())
+        {
+            return false;
+        }
+        AZ::ComponentTypeList componentsToAdd;
+        componentsToAdd.push_back(AZ::AzTypeInfo<LmbrCentral::EditorMeshComponent>::Uuid());
+
+        AZStd::vector<AZ::EntityId> entityList;
+        entityList.push_back(targetEntity);
+
+        AzToolsFramework::EntityCompositionRequests::AddComponentsOutcome outcome =
+            AZ::Failure(AZStd::string("Failed to call AddComponentsToEntities on EntityCompositionRequestBus"));
+        AzToolsFramework::EntityCompositionRequestBus::BroadcastResult(outcome, &AzToolsFramework::EntityCompositionRequests::AddComponentsToEntities, entityList, componentsToAdd);
+
+        if (!outcome.IsSuccess())
+        {
+            return false;
+        }
+
+        AZ::Data::AssetId meshAsset(meshAssetId);
+
+        // If necessary, the call site can verify if the mesh was actually set.
+        LmbrCentral::MeshComponentRequestBus::Event(
+            targetEntity,
+            &LmbrCentral::MeshComponentRequestBus::Events::SetMeshAsset,
+            meshAsset);
+        return true;
+    }
+
+    bool IsPhysicalizable(const AZ::Transform& transform)
+    {
+        Matrix34 cryTransform = AZTransformToLYTransform(transform);
+        for (int columnIndex = 0; columnIndex < 3; ++columnIndex)
+        {
+            Vec3 column = cryTransform.GetColumn(columnIndex);
+            cryTransform.SetColumn(columnIndex, column / column.len());
+        }
+        return cryTransform.IsOrthonormalRH(0.1f);
     }
 } // namespace LmbrCentral

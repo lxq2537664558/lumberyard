@@ -33,7 +33,7 @@
 #include <QStandardItem>
 #include <QScopedValueRollback>
 #include <QScreen>
-#include <QDesktopwidget>
+#include <QDesktopWidget>
 #include <QTimer>
 #include <QSettings>
 #include <QPushButton>
@@ -42,6 +42,8 @@
 #include <QStyledItemDelegate>
 #include <QPainter>
 #include <QStyle>
+
+#include <QTextDocument>
 
 Q_DECLARE_METATYPE(AZ::Uuid);
 
@@ -57,15 +59,41 @@ namespace AzQtComponents
     const char* const s_filterSearchWidgetName = "filteredSearchWidget";
     const char* const s_searchLayout = "searchLayout";
 
-    FilterCriteriaButton::FilterCriteriaButton(QString labelText, QWidget* parent)
+    const QString BackgroundColor{ "#565A5B" };
+    const QString SeparatorColor{ "#606060" };
+
+    FilterCriteriaButton::FilterCriteriaButton(const QString& labelText, QWidget* parent, FilterCriteriaButton::ExtraButtonType type)
         : QFrame(parent)
     {
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-
         m_frameLayout = new QHBoxLayout(this);
         m_frameLayout->setMargin(0);
         m_frameLayout->setContentsMargins(4, 1, 4, 1);
         m_frameLayout->setSpacing(4);
+
+        if (type != FilterCriteriaButton::ExtraButtonType::None)
+        {
+            QPushButton* extraButton = new QPushButton(this);
+            switch (type)
+            {
+            case FilterCriteriaButton::ExtraButtonType::None:
+                break;
+            case FilterCriteriaButton::ExtraButtonType::Locked:
+                extraButton->setObjectName("locked");
+                break;
+            case FilterCriteriaButton::ExtraButtonType::Unlocked:
+                extraButton->setObjectName("unlocked");
+                break;
+            case FilterCriteriaButton::ExtraButtonType::Visible:
+                extraButton->setObjectName("visible");
+                break;
+            }
+            extraButton->setFlat(true);
+            extraButton->setProperty("iconButton", "true");
+            extraButton->setMouseTracking(true);
+            connect(extraButton, &QPushButton::clicked, this, [this, type]() { emit ExtraButtonClicked(type); });
+            m_frameLayout->addWidget(extraButton);
+        }
 
         m_tagLabel = new QLabel(this);
         m_tagLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -74,6 +102,7 @@ namespace AzQtComponents
         m_tagLabel->setText(labelText);
 
         QPushButton* button = new QPushButton(this);
+        button->setObjectName("closeTag");
         button->setFlat(true);
         button->setProperty("iconButton", "true");
         button->setMouseTracking(true);
@@ -212,7 +241,7 @@ namespace AzQtComponents
             return;
         }
 
-        bool amFiltering = m_filterString.length() > 0;
+        bool amFiltering = !m_filterString.isEmpty();
 
         QScopedValueRollback<bool> setupGuard(m_settingUp, true);
         QMap<QString, QStandardItem*> categories;
@@ -221,6 +250,7 @@ namespace AzQtComponents
         QStandardItem* firstItem = nullptr;
         int numCategories = 0;
         int numItems = 0;
+        int numItemsAdded = 0;
 
         for (int unfilteredDataIndex = 0, length = m_unfilteredData->length(); unfilteredDataIndex < length; ++unfilteredDataIndex)
         {
@@ -271,6 +301,8 @@ namespace AzQtComponents
                 continue;
             }
 
+            numItemsAdded++;
+
             m_filteredItemIndices.append(unfilteredDataIndex);
 
             QStandardItem* item = new QStandardItem(filter.displayName);
@@ -292,6 +324,14 @@ namespace AzQtComponents
             {
                 firstItem = item;
             }
+        }
+
+        if (numItemsAdded == GetNumFixedItems())
+        {
+            QStandardItem* item = new QStandardItem(QObject::tr("<i>No result found.</i>"));
+            m_model->appendRow(item);
+            item->setEditable(false);
+            ++numItems;
         }
 
         // If there is only one category and its name is empty, let put everything at root.
@@ -551,7 +591,7 @@ namespace AzQtComponents
         connect(m_ui->textSearch, &QLineEdit::textChanged, this, &FilteredSearchWidget::OnTextChanged);
         // QLineEdit's clearButton only triggers a textEdited, not a textChanged, so we special case that
         connect(m_ui->textSearch, &QLineEdit::textEdited, this, [this](const QString& newText) {
-            if (newText.size() == 0)
+            if (newText.isEmpty())
             {
                 OnTextChanged(newText);
             }
@@ -580,6 +620,12 @@ namespace AzQtComponents
 
     FilteredSearchWidget::~FilteredSearchWidget()
     {
+        delete m_delegate;
+        m_delegate = nullptr;
+
+        delete m_selector;
+        m_selector = nullptr;
+
         delete m_ui;
     }
 
@@ -587,6 +633,7 @@ namespace AzQtComponents
     {
         m_selector = selector;
         m_ui->assetTypeSelector->setMenu(m_selector);
+        SetupPaintDelegates();
 
         connect(m_selector, &SearchTypeSelector::aboutToShow, this, [this]() {m_selector->Setup(m_typeFilters); });
         connect(m_selector, &SearchTypeSelector::TypeToggled, this, &FilteredSearchWidget::SetFilterStateByIndex);
@@ -685,6 +732,13 @@ namespace AzQtComponents
         }
     }
 
+    void  FilteredSearchWidget::SetupPaintDelegates()
+    {
+        m_delegate = new FilteredSearchItemDelegate(m_selector->GetTree());
+        m_selector->GetTree()->setItemDelegate(m_delegate);
+        m_delegate->SetSelector(m_selector);
+    }
+
     int FilteredSearchWidget::FindFilterIndex(const QString& category, const QString& displayName) const
     {
         for (int i = 0; i < m_typeFilters.size(); ++i)
@@ -728,7 +782,7 @@ namespace AzQtComponents
     FilterCriteriaButton* FilteredSearchWidget::createCriteriaButton(const SearchTypeFilter& filter, int filterIndex)
     {
         Q_UNUSED(filterIndex);
-        return new FilterCriteriaButton(filter.displayName, this);
+        return new FilterCriteriaButton(filter.displayName, this, filter.typeExtraButton);
     }
 
     void FilteredSearchWidget::SetFilterStateByIndex(int index, bool enabled)
@@ -746,6 +800,23 @@ namespace AzQtComponents
         {
             FilterCriteriaButton* button = createCriteriaButton(filter, index);
             connect(button, &FilterCriteriaButton::RequestClose, this, [this, index]() { SetFilterStateByIndex(index, false); });
+            connect(button, &FilterCriteriaButton::ExtraButtonClicked, this, [this, index](FilterCriteriaButton::ExtraButtonType type)
+            {
+                switch (type)
+                {
+                case FilterCriteriaButton::ExtraButtonType::None:
+                    break;
+                case FilterCriteriaButton::ExtraButtonType::Locked:
+                    //TODO
+                    break;
+                case FilterCriteriaButton::ExtraButtonType::Unlocked:
+                    //TODO
+                    break;
+                case FilterCriteriaButton::ExtraButtonType::Visible:
+                    //TODO
+                    break;
+                }
+            });
             m_flowLayout->addWidget(button);
             m_typeButtons[index] = button;
         }
@@ -784,7 +855,7 @@ namespace AzQtComponents
 
     void FilteredSearchWidget::setLabelText(const QString& newLabelText)
     {
-        if (newLabelText.size() > 0)
+        if (!newLabelText.isEmpty())
         {
             m_ui->label->setText(newLabelText);
 
@@ -806,6 +877,16 @@ namespace AzQtComponents
     QString FilteredSearchWidget::labelText() const
     {
         return m_ui->label->text();
+    }
+
+    QString FilteredSearchWidget::GetBackgroundColor()
+    {
+        return BackgroundColor;
+    }
+
+    QString FilteredSearchWidget::GetSeparatorColor()
+    {
+        return SeparatorColor;
     }
 
     void FilteredSearchWidget::readSettings(QSettings& settings, const QString& widgetName)
@@ -978,6 +1059,109 @@ namespace AzQtComponents
         Style::removeFlagToIgnore(filteredSearchWidget->m_ui->assetTypeSelector);
 
         return true;
+    }
+
+    FilteredSearchItemDelegate::FilteredSearchItemDelegate(QWidget* parent) : QStyledItemDelegate(parent)
+    {
+    }
+
+    void FilteredSearchItemDelegate::PaintRichText(QPainter* painter, QStyleOptionViewItem& opt, QString& text) const
+    {
+        int textDocDrawYOffset = 3;
+        QPoint paintertextDocRenderOffset = QPoint(1, 4);
+
+        QTextDocument textDoc;
+        textDoc.setDefaultFont(opt.font);
+        opt.palette.color(QPalette::Text);
+        textDoc.setDefaultStyleSheet("body {color: " + opt.palette.color(QPalette::Text).name() + "}");
+        textDoc.setHtml("<body>" + text + "</body>");
+        QRect textRect = opt.widget->style()->proxy()->subElementRect(QStyle::SE_ItemViewItemText, &opt);
+        painter->translate(textRect.topLeft() - paintertextDocRenderOffset);
+        textDoc.setTextWidth(textRect.width());
+        textDoc.drawContents(painter, QRectF(0, textDocDrawYOffset, textRect.width(), textRect.height() + textDocDrawYOffset));
+    }
+
+    void FilteredSearchItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
+        const QModelIndex& index) const
+    {
+        bool isGlobalOption = false;
+        painter->save();
+
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+
+        const QWidget* widget = option.widget;
+        QStyle* style = widget ? widget->style() : QApplication::style();
+        if (!opt.icon.isNull())
+        {
+            // Draw the icon if there is one.
+            QRect r = style->subElementRect(QStyle::SubElement::SE_ItemViewItemDecoration, &opt, widget);
+            r.setX(-r.width());
+
+            QIcon::Mode mode = QIcon::Normal;
+            QIcon::State state = QIcon::On;
+            opt.icon.paint(painter, r, opt.decorationAlignment, mode, state);
+
+            opt.icon = QIcon();
+            opt.decorationSize = QSize(0, 0);
+            isGlobalOption = true;
+        }
+
+        if (opt.text.contains("-------"))
+        {
+            // Draw this item as a solid line.
+            painter->setPen(QColor(FilteredSearchWidget::GetSeparatorColor()));
+            painter->drawLine(0, opt.rect.center().y() + 3, opt.rect.right(), opt.rect.center().y() + 4);
+        }
+        else
+        {
+            if (m_selector->GetFilterString().length() > 0 && !isGlobalOption && opt.features & QStyleOptionViewItem::ViewItemFeature::HasCheckIndicator)
+            {
+                // Create rich text menu text to show filterstring
+                QString label{ opt.text };
+                opt.text = "";
+
+                style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
+
+                int highlightTextIndex = 0;
+                do
+                {
+                    // Find filter term within the text.
+                    highlightTextIndex = label.lastIndexOf(m_selector->GetFilterString(), highlightTextIndex - 1, Qt::CaseInsensitive);
+                    if (highlightTextIndex >= 0)
+                    {
+                        // Insert background-color terminator at appropriate place to return to normal text.
+                        label.insert(highlightTextIndex + m_selector->GetFilterString().length(), "</span>");
+                        // Insert background-color command at appropriate place to highlight filter term.
+                        label.insert(highlightTextIndex, "<span style=\"background-color: " + FilteredSearchWidget::GetBackgroundColor() + "\">");
+                    }
+                } while (highlightTextIndex > 0);// Repeat in case there are multiple occurrences.
+                PaintRichText(painter, opt, label);
+            }
+            else
+            {
+                // There's no filter to apply, just draw it.
+                QString label = opt.text;
+                opt.text = "";
+                style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
+                PaintRichText(painter, opt, label);
+            }
+        }
+
+        painter->restore();
+    }
+
+    QSize FilteredSearchItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const
+    {
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+
+        //correct the vertical space for the separator
+        if (opt.text.contains("-------"))
+        {
+            return QSize(0, 6);
+        }
+        return QStyledItemDelegate::sizeHint(option, index);
     }
 } // namespace AzQtComponents
 

@@ -284,6 +284,8 @@ void CD3D9Renderer::RT_Draw2dImageInternal(C2dImage* images, uint32 numImages, b
         #include "Xenia/D3DRenderThread_cpp_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/D3DRenderThread_cpp_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/D3DRenderThread_cpp_salem.inl"
     #endif
 #endif
         }
@@ -601,6 +603,11 @@ void CD3D9Renderer::RT_PrecacheDefaultShaders()
 {
     SShaderCombination cmb;
     m_cEF.s_ShaderStereo->mfPrecache(cmb, true, true, NULL);
+
+    cmb.m_RTMask |= g_HWSR_MaskBit[HWSR_SAMPLE0];
+    cmb.m_RTMask |= g_HWSR_MaskBit[HWSR_SAMPLE1];
+    cmb.m_RTMask |= g_HWSR_MaskBit[HWSR_SAMPLE2];
+    m_cEF.s_ShaderVideo->mfPrecache(cmb, true, true, nullptr);
 }
 
 void CD3D9Renderer::RT_ResetGlass()

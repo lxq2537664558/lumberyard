@@ -21,11 +21,8 @@ namespace Vegetation
 {
     struct DebugData
     {
-        AZStd::atomic_int m_instanceActiveCount{ 0 };
         AZStd::atomic_int m_areaTaskQueueCount{ 0 };
         AZStd::atomic_int m_areaTaskActiveCount{ 0 };
-        AZStd::atomic_int m_instanceRegisterCount{ 0 };
-        AZStd::atomic_int m_instanceUnregisterCount{ 0 };
     };
 
     class DebugSystemData
@@ -39,11 +36,3 @@ namespace Vegetation
     };
     using DebugSystemDataBus = AZ::EBus<DebugSystemData>;
 }
-
-// VEG_PROFILE_ENABLED is defined in the wscript
-// VEG_PROFILE_ENABLED is only defined in the Vegetation gem by default
-#if defined(VEG_PROFILE_ENABLED)
-#define VEG_PROFILE_METHOD(Method) Method
-#else
-#define VEG_PROFILE_METHOD(...) // no-op
-#endif

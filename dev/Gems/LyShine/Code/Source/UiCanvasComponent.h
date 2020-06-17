@@ -72,7 +72,7 @@ public: // member functions
 
     // UiCanvasInterface
 
-    const string& GetPathname() override;
+    const AZStd::string& GetPathname() override;
     LyShine::CanvasId GetCanvasId() override;
 
     AZ::u64 GetUniqueCanvasId() override;
@@ -167,10 +167,12 @@ public: // member functions
     AZ::EntityId GetTooltipDisplayElement() override;
     void SetTooltipDisplayElement(AZ::EntityId entityId) override;
 
+    void ForceFocusInteractable(AZ::EntityId interactableId) override;
     void ForceActiveInteractable(AZ::EntityId interactableId, bool shouldStayActive, AZ::Vector2 point) override;
     AZ::EntityId GetHoverInteractable() override;
     void ForceHoverInteractable(AZ::EntityId interactableId) override;
     void ClearAllInteractables() override;
+    void ForceEnterInputEventOnInteractable(AZ::EntityId interactableId) override;
 
     // ~UiCanvasInterface
 
@@ -180,6 +182,7 @@ public: // member functions
 
     // UiAnimationInterface
     void StartSequence(const AZStd::string& sequenceName) override;
+    void PlaySequenceRange(const AZStd::string& sequenceName, float startTime, float endTime) override;
     void StopSequence(const AZStd::string& sequenceName) override;
     void AbortSequence(const AZStd::string& sequenceName) override;
     void PauseSequence(const AZStd::string& sequenceName) override;
@@ -189,6 +192,8 @@ public: // member functions
     void SetSequencePlayingSpeed(const AZStd::string& sequenceName, float speed) override;
     float GetSequencePlayingTime(const AZStd::string& sequenceName) override;
     bool IsSequencePlaying(const AZStd::string& sequenceName) override;
+    float GetSequenceLength(const AZStd::string& sequenceName) override;
+    void SetSequenceStopBehavior(IUiAnimationSystem::ESequenceStopBehavior stopBehavior) override;
     // ~UiAnimationInterface
 
     // UiInteractableActiveNotifications
@@ -246,7 +251,7 @@ public: // member functions
 
     //! Clone this canvas's entity and return the Canvas component
     //! (used when it is loaded from in game or for preview mode etc)
-    UiCanvasComponent* CloneAndInitializeCanvas(UiEntityContext* entityContext, const string& assetIdPathname, const AZ::Vector2* canvasSize = nullptr);
+    UiCanvasComponent* CloneAndInitializeCanvas(UiEntityContext* entityContext, const AZStd::string& assetIdPathname, const AZ::Vector2* canvasSize = nullptr);
 
     //! Deactivate all elements. Used when queuing a canvas up for deletion
     void DeactivateElements();
@@ -258,6 +263,9 @@ public: // member functions
 
     void ScheduleElementForTransformRecompute(UiElementComponent* elementComponent);
     void UnscheduleElementForTransformRecompute(UiElementComponent* elementComponent);
+
+    //! Queue an element to be destroyed at end of frame
+    void ScheduleElementDestroy(AZ::EntityId entityId);
 
 #ifndef _RELEASE
     struct DebugInfoNumElements
@@ -313,7 +321,7 @@ public: // static member functions
         const AZ::SliceComponent::EntityIdToEntityIdMap* previousRemapTable = nullptr, AZ::EntityId previousCanvasId = AZ::EntityId());
     static UiCanvasComponent* FixupReloadedCanvasForEditorInternal(AZ::Entity* newCanvasEntity,
         AZ::Entity* rootSliceEntity, UiEntityContext* entityContext,
-        LyShine::CanvasId existingId, const string& existingPathname);
+        LyShine::CanvasId existingId, const AZStd::string& existingPathname);
 
 protected: // member functions
 
@@ -361,7 +369,7 @@ private: // member functions
     void ClearActiveInteractable();
 
     //! Check if the hover interactable is set to auto-activate, and if so activate it
-    void CheckHoverInteractableAndAutoActivate(AZ::EntityId prevHoverInteractable = AZ::EntityId(), UiNavigationHelpers::Command command = UiNavigationHelpers::Command::Unknown);
+    void CheckHoverInteractableAndAutoActivate(AZ::EntityId prevHoverInteractable = AZ::EntityId(), UiNavigationHelpers::Command command = UiNavigationHelpers::Command::Unknown, bool forceAutoActivate = false);
 
     //! Check if the active interactable has a descendant interactable. If it does,
     //! make the descendant the hover interactable and clear the active interactable
@@ -427,6 +435,8 @@ private: // member functions
     //! Get any orphaned elements caused by old bugs
     void GetOrphanedElements(AZ::SliceComponent::EntityList& orphanedEntities);
 
+    void DestroyScheduledElements();
+
 private: // static member functions
 
     static AZ::u64 CreateUniqueId();
@@ -443,7 +453,7 @@ private: // types
 
 private: // data
 
-    string m_pathname;              //! This is an asset ID pathname
+    AZStd::string m_pathname;              //! This is an asset ID pathname
     AZ::u64 m_uniqueId;
     AZ::EntityId m_rootElement;
     LyShine::ElementId m_lastElementId;
@@ -579,6 +589,9 @@ private: // data
     using ElementComponentSlist = AZStd::intrusive_slist<UiElementComponent, AZStd::slist_base_hook<UiElementComponent>>;
     ElementComponentSlist m_elementsNeedingTransformRecompute;
 
+    //! Holds elements that are queued up to be deleted at end of frame
+    AZStd::vector<AZ::EntityId> m_elementsScheduledForDestroy;
+
 private: // static data
 
 
@@ -587,7 +600,7 @@ private: // static data
     //! occurs and back to true on mouse/touch activity.
     static bool s_handleHoverInputEvents;
 
-    //! If true, when handling hover input events, allow clearing the hover interactable if the mouse isn't 
+    //! If true, when handling hover input events, allow clearing the hover interactable if the mouse isn't
     //! over any interactables. Set to false when a key event occurs and back to true when handling hover
     //! input events and the input position hovers over an interactable.
     static bool s_allowClearingHoverInteractableOnHoverInput;

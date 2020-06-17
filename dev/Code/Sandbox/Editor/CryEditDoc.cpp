@@ -21,9 +21,13 @@
 #include "DisplaySettings.h"
 #include "GameEngine.h"
 #include "MissionSelectDialog.h"
+
+#ifdef LY_TERRAIN_EDITOR
 #include "Terrain/SurfaceType.h"
 #include "Terrain/TerrainManager.h"
 #include "Terrain/Clouds.h"
+#endif //#ifdef LY_TERRAIN_EDITOR
+
 #include "Util/PakFile.h"
 #include "Util/FileUtil.h"
 #include "Objects/BaseObject.h"
@@ -31,14 +35,12 @@
 #include "Material/MaterialManager.h"
 #include "Particles/ParticleManager.h"
 #include "Prefabs/PrefabManager.h"
-#include "GameTokens/GameTokenManager.h"
 #include "LensFlareEditor/LensFlareManager.h"
 #include "ErrorReportDialog.h"
 #include "Undo/Undo.h"
 #include "SurfaceTypeValidator.h"
 #include "ShaderCache.h"
 #include "Util/AutoLogTime.h"
-#include "Util/BoostPythonHelpers.h"
 #include "Objects/ObjectLayerManager.h"
 #include "ICryPak.h"
 #include "Objects/BrushObject.h"
@@ -79,6 +81,8 @@
 
 #include "ActionManager.h"
 
+#include <AzCore/RTTI/BehaviorContext.h>
+
 //#define PROFILE_LOADING_WITH_VTUNE
 
 // profilers api.
@@ -110,6 +114,19 @@ static bool IsSliceFile(const QString& filePath)
     return filePath.endsWith(AzToolsFramework::SliceUtilities::GetSliceFileExtension().c_str(), Qt::CaseInsensitive);
 }
 
+namespace Internal
+{
+    bool SaveLevel()
+    {
+        if (!GetIEditor()->GetDocument()->DoSave(GetIEditor()->GetDocument()->GetActivePathName(), TRUE))
+        {
+            return false;
+        }
+
+        return true;
+    }
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // CCryEditDoc construction/destruction
 
@@ -130,7 +147,11 @@ CCryEditDoc::CCryEditDoc()
     ////////////////////////////////////////////////////////////////////////
     m_bLoadFailed = false;
     m_waterColor = QColor(0, 0, 255);
+
+#ifdef LY_TERRAIN_EDITOR
     m_pClouds = new CClouds();
+#endif //#ifdef LY_TERRAIN_EDITOR
+
     m_fogTemplate = GetIEditor()->FindTemplate("Fog");
     m_environmentTemplate = GetIEditor()->FindTemplate("Environment");
 
@@ -157,9 +178,17 @@ CCryEditDoc::~CCryEditDoc()
 {
     GetIEditor()->SetDocument(nullptr);
     ClearMissions();
+
+#ifdef LY_TERRAIN_EDITOR
     GetIEditor()->GetTerrainManager()->ClearLayers();
+#endif
+
     delete m_pLevelShaderCache;
+
+#ifdef LY_TERRAIN_EDITOR
     SAFE_DELETE(m_pClouds);
+#endif
+
     CLogFile::WriteLine("Document destroyed");
 
     AzToolsFramework::EditorEntityContextNotificationBus::Handler::BusDisconnect();
@@ -291,14 +320,22 @@ void CCryEditDoc::DeleteContents()
     }
 
     GetIEditor()->GetVegetationMap()->ClearAll();
+
+#ifdef LY_TERRAIN_EDITOR
     GetIEditor()->GetTerrainManager()->ClearLayers();
     m_pClouds->GetLastParam()->bValid = false;
+#endif //#ifdef LY_TERRAIN_EDITOR
+    
     GetIEditor()->ResetViews();
 
     // Delete all objects from Object Manager.
     GetIEditor()->GetObjectManager()->DeleteAllObjects();
     GetIEditor()->GetObjectManager()->GetLayersManager()->ClearLayers();
+
+#ifdef LY_TERRAIN_EDITOR
     GetIEditor()->GetTerrainManager()->RemoveAllSurfaceTypes();
+#endif
+
     ClearMissions();
 
     GetIEditor()->GetGameEngine()->ResetResources();
@@ -352,8 +389,12 @@ void CCryEditDoc::Save(TDocMultiArchive& arrXmlAr)
         (*arrXmlAr[DMAS_GENERAL]).root->setAttr("SandboxVersion", version);
 
         SerializeViewSettings((*arrXmlAr[DMAS_GENERAL]));
+
+#ifdef LY_TERRAIN_EDITOR
         // Cloud parameters ////////////////////////////////////////////////////
         m_pClouds->Serialize((*arrXmlAr[DMAS_GENERAL]));
+#endif //#ifdef LY_TERRAIN_EDITOR
+
         // Fog settings  ///////////////////////////////////////////////////////
         SerializeFogSettings((*arrXmlAr[DMAS_GENERAL]));
         // Serialize Missions //////////////////////////////////////////////////
@@ -366,8 +407,6 @@ void CCryEditDoc::Save(TDocMultiArchive& arrXmlAr)
         GetIEditor()->GetMaterialManager()->Serialize((*arrXmlAr[DMAS_GENERAL]).root, (*arrXmlAr[DMAS_GENERAL]).bLoading);
         //! Serialize particles manager.
         GetIEditor()->GetParticleManager()->Serialize((*arrXmlAr[DMAS_GENERAL]).root, (*arrXmlAr[DMAS_GENERAL]).bLoading);
-        //! Serialize game tokens manager.
-        GetIEditor()->GetGameTokenManager()->Save();
         //! Serialize LensFlare manager.
         GetIEditor()->GetLensFlareManager()->Serialize((*arrXmlAr[DMAS_GENERAL]).root, (*arrXmlAr[DMAS_GENERAL]).bLoading);
 
@@ -484,6 +523,7 @@ void CCryEditDoc::Load(TDocMultiArchive& arrXmlAr, const QString& szFilename)
 
         HEAP_CHECK
 
+#ifdef LY_TERRAIN_EDITOR
         {
             CAutoLogTime logtime("Load Terrain");
 
@@ -498,6 +538,21 @@ void CCryEditDoc::Load(TDocMultiArchive& arrXmlAr, const QString& szFilename)
             GetIEditor()->GetHeightmap()->InitTerrain();
             GetIEditor()->GetHeightmap()->UpdateEngineTerrain();
         }
+#else
+        {
+            CAutoLogTime logtime("Load Terrain");
+            bool terrainLoaded = GetIEditor()->Get3DEngine()->LoadCompiledOctreeForEditor();
+            AZ_Assert(terrainLoaded, "Failed to load Terrain data file.");
+
+            CVegetationMap* pVegetationMap = GetIEditor()->GetVegetationMap();
+            if (pVegetationMap)
+            {
+                const bool keepExistingVegetation = false;
+                const int noTerrainSize = 4096;
+                pVegetationMap->Allocate(noTerrainSize, keepExistingVegetation);
+            }
+        }
+#endif //#ifdef LY_TERRAIN_EDITOR
 
         {
             CAutoLogTime logtime("Game Engine level load");
@@ -534,18 +589,6 @@ void CCryEditDoc::Load(TDocMultiArchive& arrXmlAr, const QString& szFilename)
         }
 
         //////////////////////////////////////////////////////////////////////////
-        // Load GameTokensManager.
-        //////////////////////////////////////////////////////////////////////////
-        {
-            CAutoLogTime logtime("Load GameTokens");
-
-            if (!GetIEditor()->GetGameTokenManager()->Load())
-            {
-                GetIEditor()->GetGameTokenManager()->Serialize((*arrXmlAr[DMAS_GENERAL]).root, (*arrXmlAr[DMAS_GENERAL]).bLoading);    // load old version
-            }
-        }
-
-        //////////////////////////////////////////////////////////////////////////
         // Load View Settings
         //////////////////////////////////////////////////////////////////////////
         SerializeViewSettings((*arrXmlAr[DMAS_GENERAL]));
@@ -562,11 +605,13 @@ void CCryEditDoc::Load(TDocMultiArchive& arrXmlAr, const QString& szFilename)
             }
         }
 
+#ifdef LY_TERRAIN_EDITOR
         // update surf types because layers info only now is available in vegetation groups
         {
             CAutoLogTime logtime("Updating Surface Types");
             GetIEditor()->GetTerrainManager()->ReloadSurfaceTypes(false);
         }
+#endif //#ifdef LY_TERRAIN_EDITOR
 
         //////////////////////////////////////////////////////////////////////////
         // Fog settings
@@ -1543,6 +1588,7 @@ bool CCryEditDoc::SaveLevel(const QString& filename)
         return false;
     }
 
+#ifdef LY_TERRAIN_EDITOR
     {
         AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzToolsFramework, "CCryEditDoc::SaveLevel Save Terrain");
         // Save Heightmap and terrain data
@@ -1553,6 +1599,7 @@ bool CCryEditDoc::SaveLevel(const QString& filename)
         AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzToolsFramework, "CCryEditDoc::SaveLevel Save Terrain Textuer");
         GetIEditor()->GetTerrainManager()->SaveTexture();
     }
+#endif //#ifdef LY_TERRAIN_EDITOR
 
     // Save vegetation
     if (GetIEditor()->GetVegetationMap())
@@ -1801,7 +1848,6 @@ bool CCryEditDoc::LoadLevel(TDocMultiArchive& arrXmlAr, const QString& absoluteC
 
     QString folderPath = QFileInfo(absoluteCryFilePath).absolutePath();
 
-    GetIEditor()->GetGameEngine()->SetLevelPath(folderPath);
     OnStartLevelResourceList();
 
     // Load next level resource list.
@@ -1809,6 +1855,10 @@ bool CCryEditDoc::LoadLevel(TDocMultiArchive& arrXmlAr, const QString& absoluteC
     GetIEditor()->Notify(eNotify_OnBeginLoad);
     //GetISystem()->GetISystemEventDispatcher()->OnSystemEvent( ESYSTEM_EVENT_LEVEL_LOAD_START,0,0 );
     DeleteContents();
+
+    // Set level path directly *after* DeleteContents(), since that will unload the previous level and clear the level path.
+    GetIEditor()->GetGameEngine()->SetLevelPath(folderPath);
+
     SetModifiedFlag(TRUE);  // dirty during de-serialize
     SetModifiedModules(eModifiedAll);
     Load(arrXmlAr, absoluteCryFilePath);
@@ -1828,6 +1878,11 @@ bool CCryEditDoc::LoadLevel(TDocMultiArchive& arrXmlAr, const QString& absoluteC
 
 void CCryEditDoc::Hold(const QString& holdName)
 {
+    Hold(holdName, holdName);
+}
+
+void CCryEditDoc::Hold(const QString& holdName, const QString& relativeHoldPath)
+{
     if (!IsDocumentReady() || GetEditMode() == CCryEditDoc::DocumentEditingMode::SliceEdit)
     {
         return;
@@ -1837,7 +1892,7 @@ void CCryEditDoc::Hold(const QString& holdName)
     char resolvedLevelPath[AZ_MAX_PATH_LEN] = { 0 };
     AZ::IO::FileIOBase::GetDirectInstance()->ResolvePath(levelPath.toUtf8().data(), resolvedLevelPath, AZ_MAX_PATH_LEN);
 
-    QString holdPath = QString::fromUtf8(resolvedLevelPath) + "/" + holdName + "/";
+    QString holdPath = QString::fromUtf8(resolvedLevelPath) + "/" + relativeHoldPath + "/";
     QString holdFilename = holdPath + holdName + GetIEditor()->GetGameEngine()->GetLevelExtension();
 
     // never auto-backup while we're trying to hold.
@@ -1849,7 +1904,12 @@ void CCryEditDoc::Hold(const QString& holdName)
     GetIEditor()->GetGameEngine()->SetLevelPath(levelPath);
 }
 
-void CCryEditDoc::Fetch(const QString& holdName, bool bShowMessages, bool bDelHoldFolder)
+void CCryEditDoc::Fetch(const QString& relativeHoldPath, bool bShowMessages, bool bDelHoldFolder)
+{
+    Fetch(relativeHoldPath, relativeHoldPath, bShowMessages, bDelHoldFolder ? FetchPolicy::DELETE_FOLDER : FetchPolicy::PRESERVE);
+}
+
+void CCryEditDoc::Fetch(const QString& holdName, const QString& relativeHoldPath, bool bShowMessages, FetchPolicy policy)
 {
     if (!IsDocumentReady() || GetEditMode() == CCryEditDoc::DocumentEditingMode::SliceEdit)
     {
@@ -1860,7 +1920,7 @@ void CCryEditDoc::Fetch(const QString& holdName, bool bShowMessages, bool bDelHo
     char resolvedLevelPath[AZ_MAX_PATH_LEN] = { 0 };
     AZ::IO::FileIOBase::GetDirectInstance()->ResolvePath(levelPath.toUtf8().data(), resolvedLevelPath, AZ_MAX_PATH_LEN);
 
-    QString holdPath = QString::fromUtf8(resolvedLevelPath) + "/" + holdName + "/";
+    QString holdPath = QString::fromUtf8(resolvedLevelPath) + "/" + relativeHoldPath + "/";
     QString holdFilename = holdPath + holdName + GetIEditor()->GetGameEngine()->GetLevelExtension();
 
     {
@@ -1892,7 +1952,7 @@ void CCryEditDoc::Fetch(const QString& holdName, bool bShowMessages, bool bDelHo
         AZ_Error("CryEditDoc", false, "Fetch failed to load the Xml Archive");
         return;
     }
-    
+
     // Load the state
     LoadLevel(arrXmlAr, holdFilename);
 
@@ -1900,12 +1960,25 @@ void CCryEditDoc::Fetch(const QString& holdName, bool bShowMessages, bool bDelHo
     LoadEntitiesFromLevel(holdFilename);
 
     GetIEditor()->GetGameEngine()->SetLevelPath(levelPath);
+
+#ifdef LY_TERRAIN_EDITOR
     GetIEditor()->GetTerrainManager()->GetRGBLayer()->ClosePakForLoading(); //TODO: Support hold/fetch for terrain texture and remove this line
+#endif
+
     GetIEditor()->FlushUndo();
 
-    if (bDelHoldFolder)
+    switch (policy)
     {
+    case FetchPolicy::DELETE_FOLDER:
         CFileUtil::Deltree(holdPath.toUtf8().data(), true);
+        break;
+
+    case FetchPolicy::DELETE_LY_FILE:
+        CFileUtil::DeleteFile(holdFilename);
+        break;
+
+    default:
+        break;
     }
 }
 
@@ -2217,7 +2290,9 @@ void CCryEditDoc::GetMemoryUsage(ICrySizer* pSizer)
     }
 
     pSizer->Add(*this);
+#ifdef LY_TERRAIN_EDITOR
     GetIEditor()->GetTerrainManager()->GetTerrainMemoryUsage(pSizer);
+#endif
 }
 
 void CCryEditDoc::RegisterConsoleVariables()
@@ -2305,14 +2380,7 @@ BOOL CCryEditDoc::DoFileSave()
         return FALSE;
     }
 
-    if (GetIEditor()->GetCommandManager()->Execute("general.save_level") == "true")
-    {
-        return TRUE;
-    }
-    else
-    {
-        return FALSE;
-    }
+    return Internal::SaveLevel();
 }
 
 const char* CCryEditDoc::GetTemporaryLevelName() const
@@ -2339,14 +2407,20 @@ void CCryEditDoc::InitEmptyLevel(int resolution, int unitSize, bool bUseTerrain)
     ////////////////////////////////////////////////////////////////////////
     // Reset heightmap (water level, etc) to default
     ////////////////////////////////////////////////////////////////////////
+#ifdef LY_TERRAIN_EDITOR
     GetIEditor()->GetTerrainManager()->ResetHeightMap();
     GetIEditor()->GetTerrainManager()->SetUseTerrain(bUseTerrain);
-
-    // If possible set terrain to correct size here, this will help with initial camera placement in new levels
-    if (bUseTerrain)
+    // Set terrain to correct size here, this will help with initial camera placement in new levels
+    GetIEditor()->GetTerrainManager()->SetTerrainSize(resolution, unitSize);
+#else
+    CVegetationMap* pVegetationMap = GetIEditor()->GetVegetationMap();
+    if (pVegetationMap)
     {
-        GetIEditor()->GetTerrainManager()->SetTerrainSize(resolution, unitSize);
+        const bool keepExistingVegetation = false;
+        const int useDefaultWorldSize = 0;
+        pVegetationMap->Allocate(useDefaultWorldSize, keepExistingVegetation);
     }
+#endif //#ifdef LY_TERRAIN_EDITOR
 
     ////////////////////////////////////////////////////////////////////////
     // Reset the terrain texture of the top render window
@@ -2360,7 +2434,9 @@ void CCryEditDoc::InitEmptyLevel(int resolution, int unitSize, bool bUseTerrain)
     //////////////////////////////////////////////////////////////////////////
     if (!GetIEditor()->IsInPreviewMode())
     {
+#ifdef LY_TERRAIN_EDITOR
         GetIEditor()->GetTerrainManager()->CreateDefaultLayer();
+#endif //#ifdef LY_TERRAIN_EDITOR
 
         // Make new mission.
         GetIEditor()->ReloadTemplates();
@@ -2408,7 +2484,13 @@ void CCryEditDoc::InitEmptyLevel(int resolution, int unitSize, bool bUseTerrain)
 
 void CCryEditDoc::CreateDefaultLevelAssets(int resolution, int unitSize)
 {
+    if (gEnv->pRenderer->GetRenderType() == eRT_Other)
+    {
+        return;
+    }
+
     AZ::Data::AssetCatalogRequestBus::BroadcastResult(m_envProbeSliceAssetId, &AZ::Data::AssetCatalogRequests::GetAssetIdByPath, m_envProbeSliceRelativePath, azrtti_typeid<AZ::SliceAsset>(), false);
+
     if (m_envProbeSliceAssetId.IsValid())
     {
         AZ::Data::Asset<AZ::Data::AssetData> asset = AZ::Data::AssetManager::Instance().GetAsset<AZ::SliceAsset>(m_envProbeSliceAssetId, false);
@@ -2584,6 +2666,9 @@ void CCryEditDoc::OnSliceInstantiated(const AZ::Data::AssetId& sliceAssetId, AZ:
         SetModifiedModules(eModifiedEntities);
         
         AzToolsFramework::EditorEntityContextNotificationBus::Handler::BusDisconnect();
+
+        //save after level default slice fully instantiated
+        Save();
     }
     GetIEditor()->ResumeUndo();
 }
@@ -2600,21 +2685,22 @@ void CCryEditDoc::OnSliceInstantiationFailed(const AZ::Data::AssetId& sliceAsset
 }
 //////////////////////////////////////////////////////////////////////////
 
-namespace
+namespace AzToolsFramework
 {
-    bool PySaveLevel()
+    void CryEditDocFuncsHandler::Reflect(AZ::ReflectContext* context)
     {
-        if (!GetIEditor()->GetDocument()->DoSave(GetIEditor()->GetDocument()->GetActivePathName(), TRUE))
+        if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
         {
-            return false;
+            // this will put these methods into the 'azlmbr.legacy.general' module
+            auto addLegacyGeneral = [](AZ::BehaviorContext::GlobalMethodBuilder methodBuilder)
+            {
+                methodBuilder->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Automation)
+                    ->Attribute(AZ::Script::Attributes::Category, "Legacy/Editor")
+                    ->Attribute(AZ::Script::Attributes::Module, "legacy.general");
+            };
+            addLegacyGeneral(behaviorContext->Method("save_level", ::Internal::SaveLevel, nullptr, "Saves the current level."));
         }
-
-        return true;
     }
 }
-
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PySaveLevel, general, save_level,
-    "Saves the current level.",
-    "general.save_level()");
 
 #include <CryEditDoc.moc>

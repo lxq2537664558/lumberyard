@@ -17,7 +17,7 @@
 #include <AzCore/Component/TransformBus.h>
 #include <AzFramework/Physics/RigidBody.h>
 #include <AzFramework/Physics/RigidBodyBus.h>
-#include <AzFramework/Physics/SystemBus.h>
+#include <AzFramework/Physics/World.h>
 #include <AzFramework/Entity/EntityContextBus.h>
 
 namespace PhysX
@@ -31,7 +31,7 @@ namespace PhysX
         , public AZ::TickBus::Handler
         , public AzFramework::EntityContextEventBus::Handler
         , protected AZ::TransformNotificationBus::MultiHandler
-        , protected Physics::SystemNotificationBus::Handler
+        , protected Physics::WorldNotificationBus::Handler
     {
     public:
         AZ_COMPONENT(RigidBodyComponent, "{D4E52A70-BDE1-4819-BD3C-93AB3F4F3BE3}");
@@ -101,6 +101,7 @@ namespace PhysX
         void SetKinematic(bool kinematic) override;
         void SetKinematicTarget(const AZ::Transform& targetPosition) override;
 
+        bool IsGravityEnabled() const override;
         void SetGravityEnabled(bool enabled) override;
         void SetSimulationEnabled(bool enabled) override;
 
@@ -127,7 +128,8 @@ namespace PhysX
 
         void OnTick(float deltaTime, AZ::ScriptTimePoint time) override;
         int GetTickOrder() override;
-        void OnPostPhysicsUpdate(float deltaTime, Physics::World* world) override;
+        void OnPostPhysicsUpdate(float deltaTime) override;
+        int GetPhysicsTickOrder() override;
 
         // TransformNotificationBus
         void OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world) override;
@@ -144,6 +146,8 @@ namespace PhysX
 
         AZ::Vector3 m_initialScale = AZ::Vector3::CreateOne();
         bool m_staticTransformAtActivation = false; ///< Whether the transform was static when the component last activated.
+        bool m_isLastMovementFromKinematicSource = false; ///< True when the source of the movement comes from SetKinematicTarget as opposed to coming from a Transform change
+        bool m_rigidBodyTransformNeedsUpdateOnPhysReEnable = false; ///< True if rigid body transform needs to be synced to the entity's when physics is re-enabled
     };
 
     class TransformForwardTimeInterpolator

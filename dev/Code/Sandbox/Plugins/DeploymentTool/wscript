@@ -37,6 +37,9 @@ def build(bld):
                                        'AWS_CPP_SDK_DEVICEFARM'],
         features                    = ['qt5'],
         defines                     = ['EDITOR_COMMON_IMPORTS'],
+        includes                    = [bld.Path('Code/CryEngine/CryCommon'),
+                                       bld.Path('Code/Sandbox/Editor'),
+                                       bld.Path('Code/Sandbox/Editor/Include')],
 
         win_file_list    = ['deploymenttool_win.waf_files'],
 
@@ -55,5 +58,5 @@ def build(bld):
         # Plugins have rtti forced on after variant processing so, darwin_enable_rtti
         # will have no effect here. Add the cxx flag to get the result of disabling
         # rtti for this plugin on mac.
-        darwin_cxxflags = ['-fno-rtti'],
+        darwin_cxxflags = ['-fno-rtti']
     )

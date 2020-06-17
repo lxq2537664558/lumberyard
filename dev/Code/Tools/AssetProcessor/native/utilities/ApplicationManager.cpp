@@ -63,8 +63,8 @@
 #include <AzToolsFramework/Entity/EditorEntityFixupComponent.h>
 #include <AzToolsFramework/ToolsComponents/ToolsAssetCatalogComponent.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserComponent.h>
-#include <LyShine/UiAssetTypes.h>
-#include <AzToolsFramework/Archive/SevenZipComponent.h>
+#include <AzToolsFramework/Archive/ArchiveComponent.h>
+#include <AzToolsFramework/SourceControl/PerforceComponent.h>
 
 namespace AssetProcessor
 {
@@ -156,7 +156,8 @@ AZ::ComponentTypeList AssetProcessorAZApplication::GetRequiredSystemComponents()
         }
     }
 
-    components.push_back(azrtti_typeid<AzToolsFramework::SevenZipComponent>());
+    components.push_back(azrtti_typeid<AzToolsFramework::PerforceComponent>());
+
     return components;
 }
 
@@ -264,7 +265,6 @@ void ApplicationManager::GetExternalBuilderFileList(QStringList& externalBuilder
     filter.append("*" AZ_DYNAMIC_LIBRARY_EXTENSION);
 
     QDir builderDir;
-    bool builderDirFound = false;
     for (auto builderPath : builderPaths)
     {
         builderDir.setPath(builderPath);
@@ -472,8 +472,9 @@ void ApplicationManager::PopulateApplicationDependencies()
     // Note that its not necessary for any of these files to actually exist.  It is considered a "change" if they 
     // change their file modtime, or if they go from existing to not existing, or if they go from not existing, to existing.
     // any of those should cause AP to drop.
-    for (const QString& pathName : { "CrySystem", "CryAction", "SceneCore", 
-                                     "SceneData", "FbxSceneBuilder", "AzQtComponents", 
+    for (const QString& pathName : { "CrySystem",
+                                     "SceneCore", "SceneData",
+                                     "FbxSceneBuilder", "AzQtComponents", 
                                      "LyIdentity_shared", "LyMetricsProducer_shared", "LyMetricsShared_shared" 
                                      })
     {
@@ -701,7 +702,7 @@ ApplicationManager::BeforeRunStatus ApplicationManager::BeforeRun()
 
     // Calculate the override app root path if provided and validate it before passing it along
     QString overrideAppRootPath = ParseOptionAppRootArgument();
-    bool invalidOverrideAppRoot = false;
+
     if (!overrideAppRootPath.isEmpty())
     {
         if (ValidateExternalAppRoot(overrideAppRootPath))
@@ -849,7 +850,7 @@ void ApplicationManager::RegisterComponentDescriptor(const AZ::ComponentDescript
     this->m_frameworkApp.RegisterComponentDescriptor(descriptor);
 }
 
-ApplicationManager::RegistryCheckInstructions ApplicationManager::CheckForRegistryProblems(QWidget* parentWidget, bool showPopupMessage)
+ApplicationManager::RegistryCheckInstructions ApplicationManager::CheckForRegistryProblems(QWidget* /*parentWidget*/, bool showPopupMessage)
 {
 #if defined(AZ_PLATFORM_WINDOWS)
     // There's a bug that prevents rc.exe from closing properly, making it appear

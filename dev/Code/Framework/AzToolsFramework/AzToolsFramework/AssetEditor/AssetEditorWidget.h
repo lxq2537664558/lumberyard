@@ -12,6 +12,7 @@
 #pragma once
 
 #include <AzCore/Asset/AssetCommon.h>
+#include <AzCore/Component/TickBus.h>
 #include <AzCore/UserSettings/UserSettings.h>
 #include <AzFramework/Asset/AssetCatalogBus.h>
 #include <AzToolsFramework/UI/PropertyEditor/PropertyEditorAPI_Internals.h>
@@ -62,6 +63,7 @@ namespace AzToolsFramework
             , private AZ::Data::AssetBus::Handler
             , private AzFramework::AssetCatalogEventBus::Handler
             , private AzToolsFramework::IPropertyEditorNotify
+            , private AZ::SystemTickBus::Handler
         {
             Q_OBJECT
 
@@ -69,16 +71,19 @@ namespace AzToolsFramework
             AZ_CLASS_ALLOCATOR(AssetEditorWidget, AZ::SystemAllocator, 0);
 
             explicit AssetEditorWidget(QWidget* parent = nullptr);
-            ~AssetEditorWidget() override = default;
+            ~AssetEditorWidget() override;
 
             void CreateAsset(AZ::Data::AssetType assetType);
             void OpenAsset(const AZ::Data::Asset<AZ::Data::AssetData> asset);
 
             void OnAssetReady(AZ::Data::Asset<AZ::Data::AssetData> asset) override;
+            void OnAssetReloaded(AZ::Data::Asset<AZ::Data::AssetData> asset) override;
             void OnAssetError(AZ::Data::Asset<AZ::Data::AssetData> asset) override;
 
             bool IsDirty() const { return m_dirty; }
             bool TrySave(const AZStd::function<void()>& savedCallback);
+            bool WaitingToSave() const;
+            void SetCloseAfterSave();
 
         public Q_SLOTS:
             void OpenAssetWithDialog();
@@ -99,7 +104,6 @@ namespace AzToolsFramework
             void OnAssetOpenedSignal(const AZ::Data::Asset<AZ::Data::AssetData>& asset);
 
         protected: // IPropertyEditorNotify
-
             void AfterPropertyModified(InstanceDataNode* /*node*/) override;
             void RequestPropertyContextMenu(InstanceDataNode*, const QPoint&) override;
 
@@ -113,13 +117,20 @@ namespace AzToolsFramework
             void OnCatalogAssetRemoved(const AZ::Data::AssetId& assetId) override;
 
         private:
-
             void DirtyAsset();
 
             void SetStatusText(const QString& assetStatus);
+            void ApplyStatusText();
+
+            QString m_queuedAssetStatus;
 
             void AddRecentPath(const AZStd::string& recentPath);
             void PopulateRecentMenu();
+
+            void UpdateMenusOnAssetOpen();
+
+            // AZ::SystemTickBus
+            void OnSystemTick() override;
 
             AZStd::vector<AZ::Data::AssetType> m_genericAssetTypes;
             AZ::Data::AssetId                    m_sourceAssetId;
@@ -143,6 +154,10 @@ namespace AzToolsFramework
 
             QMenu* m_recentFileMenu;
 
+            AZStd::vector<AZ::u8> m_saveData;
+            bool m_closeAfterSave = false;
+            bool m_waitingToSave = false;
+
             AZStd::intrusive_ptr<AssetEditorWidgetUserSettings> m_userSettings;
             AZStd::unique_ptr< Ui::AssetEditorStatusBar > m_statusBar;
 
@@ -151,6 +166,8 @@ namespace AzToolsFramework
             bool SaveAsDialog(AZ::Data::Asset<AZ::Data::AssetData>& asset);
             void LoadAsset(AZ::Data::AssetId assetId, AZ::Data::AssetType assetType);
             void UpdatePropertyEditor(AZ::Data::Asset<AZ::Data::AssetData>& asset);
+
+            void GenerateSaveDataSnapshot();
         };
     } // namespace AssetEditor
 } // namespace AzToolsFramework

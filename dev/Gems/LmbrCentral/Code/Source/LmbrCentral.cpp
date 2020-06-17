@@ -36,9 +36,9 @@
 #include "Audio/AudioSwitchComponent.h"
 #include "Audio/AudioSystemComponent.h"
 #include "Audio/AudioTriggerComponent.h"
+#include "Bundling/BundlingSystemComponent.h"
 #include "Rendering/DecalComponent.h"
 #include "Rendering/StereoRendererComponent.h"
-#include "Scripting/FlowGraphComponent.h"
 #include "Rendering/LensFlareComponent.h"
 #include "Rendering/LightComponent.h"
 #include "Rendering/HighQualityShadowComponent.h"
@@ -119,16 +119,17 @@
 #include <LmbrCentral/Animation/MannequinAsset.h>
 
 // Asset handlers
-#include "Rendering/LensFlareAssetHandler.h"
-#include "Rendering/MeshAssetHandler.h"
-#include "Rendering/ParticleAssetHandler.h"
-#include "Ai/BehaviorTreeAssetHandler.h"
+#include <Rendering/LensFlareAssetHandler.h>
+#include <Rendering/MeshAssetHandler.h>
+#include <Rendering/ParticleAssetHandler.h>
+#include <Ai/BehaviorTreeAssetHandler.h>
 
 // Scriptable Ebus Registration
 #include "Events/ReflectScriptableEvents.h"
 
 // Shape components
 #include "Shape/SphereShapeComponent.h"
+#include "Shape/DiskShapeComponent.h"
 #include "Shape/BoxShapeComponent.h"
 #include "Shape/CylinderShapeComponent.h"
 #include "Shape/CapsuleShapeComponent.h"
@@ -252,9 +253,9 @@ namespace LmbrCentral
             AudioSystemComponent::CreateDescriptor(),
             AudioTriggerComponent::CreateDescriptor(),
             BehaviorTreeComponent::CreateDescriptor(),
+            BundlingSystemComponent::CreateDescriptor(),
             ConstraintComponent::CreateDescriptor(),
             DecalComponent::CreateDescriptor(),
-            FlowGraphComponent::CreateDescriptor(),
             LensFlareComponent::CreateDescriptor(),
             LightComponent::CreateDescriptor(),
             LmbrCentralAllocatorComponent::CreateDescriptor(),
@@ -284,6 +285,7 @@ namespace LmbrCentral
             MotionParameterSmoothingComponent::CreateDescriptor(),
             CharacterAnimationManagerComponent::CreateDescriptor(),
             SphereShapeComponent::CreateDescriptor(),
+            DiskShapeComponent::CreateDescriptor(),
             BoxShapeComponent::CreateDescriptor(),
             CylinderShapeComponent::CreateDescriptor(),
             CapsuleShapeComponent::CreateDescriptor(),
@@ -299,6 +301,7 @@ namespace LmbrCentral
             RandomTimedSpawnerComponent::CreateDescriptor(),
             GeometryCacheComponent::CreateDescriptor(),
             SphereShapeDebugDisplayComponent::CreateDescriptor(),
+            DiskShapeDebugDisplayComponent::CreateDescriptor(),
             BoxShapeDebugDisplayComponent::CreateDescriptor(),
             CapsuleShapeDebugDisplayComponent::CreateDescriptor(),
             CylinderShapeDebugDisplayComponent::CreateDescriptor(),
@@ -334,6 +337,7 @@ namespace LmbrCentral
                    azrtti_typeid<NavigationSystemComponent>(),
                    azrtti_typeid<GeometrySystemComponent>(),
                    azrtti_typeid<AudioSystemComponent>(),
+                   azrtti_typeid<BundlingSystemComponent>(),
 #if AZ_LOADSCREENCOMPONENT_ENABLED
                    azrtti_typeid<LoadScreenComponent>(),
 #endif // if AZ_LOADSCREENCOMPONENT_ENABLED
@@ -430,6 +434,7 @@ namespace LmbrCentral
         auto characterDefinitionAssetHandler = aznew CharacterDefinitionAssetHandler();
         characterDefinitionAssetHandler->Register(); // registers self with AssetManager
         m_assetHandlers.emplace_back(characterDefinitionAssetHandler);
+
 
         auto particleAssetHandler = aznew ParticleAssetHandler;
         particleAssetHandler->Register(); // registers self with AssetManager

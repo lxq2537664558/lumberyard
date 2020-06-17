@@ -341,7 +341,7 @@ namespace Vegetation
         }
     }
 
-    void MeshBlockerComponent::OnSurfaceChanged(const AZ::EntityId& /*entityId*/, const AZ::Aabb& /*bounds*/)
+    void MeshBlockerComponent::OnSurfaceChanged(const AZ::EntityId& /*entityId*/, const AZ::Aabb& /*oldBounds*/, const AZ::Aabb& /*newBounds*/)
     {
         // If our surfaces have changed, we will need to refresh our cache.  
         // Our cache performs lookups based on ClaimPoint handles, but the list of handles can potentially change
@@ -414,23 +414,23 @@ namespace Vegetation
         AreaComponentBase::OnCompositionChanged();
     }
 
-    float MeshBlockerComponent::GetAreaPriority() const
+    AZ::u32 MeshBlockerComponent::GetAreaPriority() const
     {
         return m_configuration.m_priority;
     }
 
-    void MeshBlockerComponent::SetAreaPriority(float priority)
+    void MeshBlockerComponent::SetAreaPriority(AZ::u32 priority)
     {
         m_configuration.m_priority = priority;
         LmbrCentral::DependencyNotificationBus::Event(GetEntityId(), &LmbrCentral::DependencyNotificationBus::Events::OnCompositionChanged);
     }
 
-    AreaLayer MeshBlockerComponent::GetAreaLayer() const
+    AZ::u32 MeshBlockerComponent::GetAreaLayer() const
     {
         return m_configuration.m_layer;
     }
 
-    void MeshBlockerComponent::SetAreaLayer(AreaLayer layer)
+    void MeshBlockerComponent::SetAreaLayer(AZ::u32 layer)
     {
         m_configuration.m_layer = layer;
         LmbrCentral::DependencyNotificationBus::Event(GetEntityId(), &LmbrCentral::DependencyNotificationBus::Events::OnCompositionChanged);

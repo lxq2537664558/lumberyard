@@ -14,12 +14,12 @@
 
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/EntityId.h>
+#include <AzCore/Math/Quaternion.h>
 #include <AzCore/Math/Vector2.h>
 #include <AzCore/Math/Color.h>
 #include <AzCore/RTTI/TypeInfo.h>
 #include "EMotionFXConfig.h"
 #include <MCore/Source/Vector.h>
-#include <MCore/Source/Quaternion.h>
 #include <MCore/Source/Ray.h>
 #include <MCore/Source/MultiThreadManager.h>
 #include "BaseObject.h"
@@ -521,7 +521,7 @@ namespace EMotionFX
          * This is relative to its parent (if it is attached ot something). Otherwise it is in world space.
          * @param rotation The rotation to use.
          */
-        MCORE_INLINE void SetLocalSpaceRotation(const MCore::Quaternion& rotation)    { mLocalTransform.mRotation = rotation; }
+        MCORE_INLINE void SetLocalSpaceRotation(const AZ::Quaternion& rotation)    { mLocalTransform.mRotation = rotation; }
 
         EMFX_SCALECODE
         (
@@ -552,7 +552,7 @@ namespace EMotionFX
          * This is relative to its parent (if it is attached ot something). Otherwise it is in world space.
          * @result The local space rotation.
          */
-        MCORE_INLINE const MCore::Quaternion& GetLocalSpaceRotation() const         { return mLocalTransform.mRotation; }
+        MCORE_INLINE const AZ::Quaternion& GetLocalSpaceRotation() const         { return mLocalTransform.mRotation; }
 
         MCORE_INLINE void SetLocalSpaceTransform(const Transform& transform)        { mLocalTransform = transform; }
 
@@ -849,11 +849,23 @@ namespace EMotionFX
         uint32 GetThreadIndex() const;
         void SetThreadIndex(uint32 index);
 
-        void DrawSkeleton(Pose& pose, const AZ::Color& color);
+        void DrawSkeleton(const Pose& pose, const AZ::Color& color);
+        static void ApplyMotionExtractionDelta(Transform& inOutTransform, const Transform& trajectoryDelta);
         void ApplyMotionExtractionDelta(const Transform& trajectoryDelta);
         void ApplyMotionExtractionDelta();
         void MotionExtractionCompensate(EMotionExtractionFlags motionExtractionFlags = (EMotionExtractionFlags)0);
-        void MotionExtractionCompensate(Transform& inOutMotionExtractionNodeTransform, EMotionExtractionFlags motionExtractionFlags = (EMotionExtractionFlags)0);
+        void MotionExtractionCompensate(Transform& inOutMotionExtractionNodeTransform,
+            EMotionExtractionFlags motionExtractionFlags = (EMotionExtractionFlags)0);
+
+        /**
+         * Remove the trajectory transform from the input transformation.
+         * @param[out] inOutMotionExtractionNodeTransform Local space transformation of the motion extraction joint.
+         * @param[in] localSpaceBindPoseTransform Bind pose transform of the motion extraction joint in local space.
+         * @param[in] motionExtractionFlags Motion extraction capture options.
+         */
+        static void MotionExtractionCompensate(Transform& inOutMotionExtractionNodeTransform,
+            const Transform& localSpaceBindPoseTransform,
+            EMotionExtractionFlags motionExtractionFlags = (EMotionExtractionFlags)0);
 
         void SetMotionExtractionEnabled(bool enabled);
         bool GetMotionExtractionEnabled() const;

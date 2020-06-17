@@ -23,6 +23,7 @@
 #include <EMotionFX/Source/EMotionFXManager.h>
 #include <EMotionFX/Source/Parameter/FloatSliderParameter.h>
 #include <EMotionFX/Source/Parameter/ParameterFactory.h>
+#include <Tests/Printers.h>
 
 
 namespace EMotionFX
@@ -81,10 +82,11 @@ namespace EMotionFX
 
             AnimGraphStateMachine* rootStateMachine = aznew AnimGraphStateMachine();
             m_referenceAnimGraph->SetRootStateMachine(rootStateMachine);
+
             ConstructReferenceGraph();
             m_referenceAnimGraph->InitAfterLoading();
 
-            m_referenceNode->SetAnimGraph(m_animGraph);
+            m_referenceNode->SetAnimGraph(m_animGraph.get());
             m_referenceNode->OnAssetReady(animGraphAsset);
         }
 
@@ -152,7 +154,7 @@ namespace EMotionFX
             m_referenceNode->AddUnitializedConnection(parameterNode, 0, 0);
         }
 
-        BlendTreeTransformNode* m_transformNode;
+        BlendTreeTransformNode* m_transformNode = nullptr;
     };
 
     // Just evaluate the node

@@ -17,8 +17,8 @@
 #include <EMotionFX/Source/AnimGraphStateMachine.h>
 #include <AzCore/IO/ByteContainerStream.h>
 #include <AzCore/Serialization/Utils.h>
+#include <AzCore/UnitTest/UnitTest.h>
 #include "AnimGraphFixture.h"
-#include <AzCore/Debug/TraceMessageBus.h>
 
 namespace EMotionFX
 {
@@ -29,19 +29,14 @@ namespace EMotionFX
     class AnimGraphFuzzTest
         : public AnimGraphFixture
         , public ::testing::WithParamInterface<Seed>
-        , public AZ::Debug::TraceMessageBus::Handler
     {
         void SetUp()
         {
             AnimGraphFixture::SetUp();
-
-            BusConnect();
         }
 
         void TearDown()
         {
-            BusDisconnect();
-
             AnimGraphFixture::TearDown();
         }
 
@@ -92,12 +87,13 @@ namespace EMotionFX
 
     TEST_P(AnimGraphFuzzTest, TestLoad)
     {
-        // Set the root state machine's Id so to ensure consistency between
-        // test runs
+        AZ_TEST_START_TRACE_SUPPRESSION;
+
+        // Set the root state machine's Id so to ensure consistency between test runs
         m_animGraph->GetRootStateMachine()->SetId(9347464774972852905u);
         AZStd::string charBuffer;
         AZ::IO::ByteContainerStream<AZStd::string > charStream(&charBuffer);
-        AZ::Utils::SaveObjectToStream(charStream, AZ::ObjectStream::ST_XML, m_animGraph, GetSerializeContext());
+        AZ::Utils::SaveObjectToStream(charStream, AZ::ObjectStream::ST_XML, m_animGraph.get(), GetSerializeContext());
 
         const Seed seed = GetParam();
         AZ::SimpleLcgRandom random(seed);
@@ -116,6 +112,8 @@ namespace EMotionFX
                 delete animGraph;
             }
         }
+
+        AZ_TEST_STOP_TRACE_SUPPRESSION_NO_COUNT;
     }
 
     static const std::vector<Seed> GetSeedsForTest(const int count)
@@ -135,6 +133,5 @@ namespace EMotionFX
         AnimGraphFuzzTest,
         ::testing::ValuesIn(randomSeeds),
         ::testing::PrintToStringParamName()
-    );
-
+        );
 } //end namespace EMotionFX

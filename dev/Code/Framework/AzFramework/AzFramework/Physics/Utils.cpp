@@ -24,6 +24,7 @@
 #include <AzFramework/Physics/CollisionNotificationBus.h>
 #include <AzFramework/Physics/TriggerBus.h>
 #include <AzFramework/Physics/ScriptCanvasPhysicsUtils.h>
+#include <AzFramework/Physics/CollisionBus.h>
 
 namespace Physics
 {
@@ -53,6 +54,8 @@ namespace Physics
                 if (AZ::BehaviorContext* behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
                 {
                     behaviorContext->EBus<Physics::TriggerNotificationBus>("TriggerNotificationBus")
+                        ->Attribute(AZ::Script::Attributes::Module, "physics")
+                        ->Attribute(AZ::Script::Attributes::Scope, AZ::Script::Attributes::ScopeFlags::Common)
                         ->Handler<TriggerNotificationBusBehaviorHandler>()
                         ;
                 }
@@ -140,14 +143,17 @@ namespace Physics
             SphereShapeConfiguration::Reflect(context);
             PhysicsAssetShapeConfiguration::Reflect(context);
             NativeShapeConfiguration::Reflect(context);
+            CookedMeshShapeConfiguration::Reflect(context);
             CollisionLayer::Reflect(context);
             CollisionGroup::Reflect(context);
             CollisionLayers::Reflect(context);
             CollisionGroups::Reflect(context);
+            CollisionConfiguration::Reflect(context);
             WorldConfiguration::Reflect(context);
             MaterialConfiguration::Reflect(context);
             MaterialLibraryAsset::Reflect(context);
             MaterialLibraryAssetReflectionWrapper::Reflect(context);
+            DefaultMaterialLibraryAssetReflectionWrapper::Reflect(context);
             JointLimitConfiguration::Reflect(context);
             WorldBodyConfiguration::Reflect(context);
             RigidBodyConfiguration::Reflect(context);
@@ -158,9 +164,11 @@ namespace Physics
             AnimationConfiguration::Reflect(context);
             CharacterConfiguration::Reflect(context);
             ReflectWorldBus(context);
+            CollisionFilteringRequests::Reflect(context);
             TriggerNotificationBusBehaviorHandler::Reflect(context);
             CollisionNotificationBusBehaviorHandler::Reflect(context);
             RayCastHit::Reflect(context);
+            WorldNotificationBusBehaviorHandler::Reflect(context);
         }
     }
 
@@ -208,6 +216,12 @@ namespace Physics
                 world->RemoveBody(*worldBody);
                 world->DeferDelete(AZStd::move(worldBody));
             }
+        }
+
+        bool FilterTag(AZ::Crc32 tag, AZ::Crc32 filterTag)
+        {
+            // If the filter tag is empty, then ignore it
+            return !filterTag || tag == filterTag;
         }
     }
 }

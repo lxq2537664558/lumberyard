@@ -28,21 +28,12 @@ namespace AZStd
             list_node_base*     m_prev;
         };
 
-// #MSVC2013: These warnings are safe to disable because if the default constructor is actually called, it will generate an error.
-#if AZ_COMPILER_MSVC == 1800
-#pragma warning(push)
-#pragma warning(disable: 4510) // 'AZStd::Internal::list_node<T>' : default constructor could not be generated
-#pragma warning(disable: 4610) // struct 'AZStd::Internal::list_node<T>' can never be instantiated - user defined constructor required
-#endif
         template<typename ValueType>
         struct list_node
             : public list_node_base
         {
             ValueType                       m_value;
         };
-#if AZ_COMPILER_MSVC == 1800
-#pragma warning(pop)
-#endif
     }
 
     /**
@@ -280,14 +271,12 @@ namespace AZStd
             insert(begin(), rhs.begin(), rhs.end());
         }
 
-#if defined(AZ_HAS_INITIALIZERS_LIST)
         AZ_FORCE_INLINE list(std::initializer_list<T> list)
             : m_numElements(0)
         {
             m_head.m_next = m_head.m_prev = &m_head;
             insert(begin(), list.begin(), list.end());
         }
-#endif // #if defined(AZ_HAS_INITIALIZERS_LIST)
 
         AZ_FORCE_INLINE ~list()
         {
@@ -428,12 +417,10 @@ namespace AZStd
             return iterator((--insertPos).m_node);
         }
 
-#if defined(AZ_HAS_INITIALIZERS_LIST)
         iterator insert(const_iterator insertPos, std::initializer_list<T> ilist)
         {
             return insert(insertPos, ilist.begin(), ilist.end());
         }
-#endif // #if defined(AZ_HAS_INITIALIZERS_LIST)
 
         inline iterator insert(const_iterator insertPos, const_reference value)
         {

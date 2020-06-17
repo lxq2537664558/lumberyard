@@ -15,13 +15,9 @@ def build(bld):
     bld.DefineGem(
         # General
         includes                = [ '.',
-                                    bld.Path('Code/CryEngine/CryCommon'),
-                                    bld.Path('Code/CryEngine/CryAction')
+                                    bld.Path('Code/CryEngine/CryCommon')
                                   ],
         use                     = ['AzGameFramework'],
-
-        # Platform Specific
-        android_use             = ['AndroidLauncher'],
 
         # ==============================
         # iOS

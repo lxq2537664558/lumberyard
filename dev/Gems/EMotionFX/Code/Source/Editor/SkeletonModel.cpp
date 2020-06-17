@@ -53,8 +53,6 @@ namespace EMotionFX
     SkeletonModel::~SkeletonModel()
     {
         ActorEditorNotificationBus::Handler::BusDisconnect();
-
-        Reset();
     }
 
     void SkeletonModel::SetActor(Actor* actor)

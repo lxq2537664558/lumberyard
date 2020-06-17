@@ -65,7 +65,7 @@ namespace EMStudio
         void SetTargetPort(NodePort* port)             { mTargetPort = port; }
         NodePort* GetTargetPort()                      { return mTargetPort; }
         float GetDashOffset() const                    { return mDashOffset; }
-        QColor GetErrorBlinkColor() const              { int32 red = 160 + ((0.5f + 0.5f * MCore::Math::Cos(mErrorBlinkOffset)) * 96); red = MCore::Clamp<int32>(red, 0, 255); return QColor(red, 0, 0); }
+        QColor GetErrorBlinkColor() const              { int32 red = aznumeric_cast<int32>(160 + ((0.5f + 0.5f * MCore::Math::Cos(mErrorBlinkOffset)) * 96)); red = MCore::Clamp<int32>(red, 0, 255); return QColor(red, 0, 0); }
 
         bool GetIsRepositioningTransitionHead() const               { return (mReplaceTransitionHead); }
         bool GetIsRepositioningTransitionTail() const               { return (mReplaceTransitionTail); }
@@ -112,7 +112,7 @@ namespace EMStudio
         void UpdateHighlightConnectionFlags(const QPoint& mousePos);
 
         virtual void RenderBackground(QPainter& painter, int32 width, int32 height);
-        virtual void Render(QPainter& painter, int32 width, int32 height, const QPoint& mousePos, float timePassedInSeconds);
+        virtual void Render(const QItemSelectionModel& selectionModel, QPainter& painter, int32 width, int32 height, const QPoint& mousePos, float timePassedInSeconds);
         virtual void RenderCreateConnection(QPainter& painter);
         void UpdateNodesAndConnections(int32 width, int32 height, const QPoint& mousePos);
 
@@ -149,7 +149,6 @@ namespace EMStudio
         void OnRowsAboutToBeRemoved(const QModelIndexList& modelIndexes);
         void OnRowsInserted(const QModelIndexList& modelIndexes);
         void OnDataChanged(const QModelIndex& modelIndex, const QVector<int>& roles);
-        void OnSelectionModelChanged(const QModelIndexList& selected, const QModelIndexList& deselected);
 
         void Reinit();
 
@@ -164,8 +163,7 @@ namespace EMStudio
 
         void RecursiveSetOpacity(EMotionFX::AnimGraphNode* startNode, float opacity);
 
-        const QString& GetTitleBarText() const { return m_titleBarText; }
-        void SetTitleBarText(const QString& text) { m_titleBarText = text; }
+        AnimGraphModel& GetAnimGraphModel() const;
 
     protected:
         void RenderNodeGroups(QPainter& painter);
@@ -225,7 +223,6 @@ namespace EMStudio
 
         // Overlay drawing
         QFont                       mFont;
-        QString                     m_titleBarText;
         QString                     mQtTempString;
         QTextOption                 mTextOptions;
         QFontMetrics*               mFontMetrics;

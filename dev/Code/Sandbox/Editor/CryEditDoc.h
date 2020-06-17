@@ -17,6 +17,7 @@
 
 #include "DocMultiArchive.h"
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
+#include <AzCore/Component/Component.h>
 
 class CMission;
 class CLevelShaderCache;
@@ -27,10 +28,12 @@ struct LightingSettings;
 // conform to the "$tmp[0-9]_" naming convention
 #define HOLD_FETCH_FILE "$tmp_hold" 
 
+AZ_PUSH_DISABLE_DLL_EXPORT_BASECLASS_WARNING
 class SANDBOX_API CCryEditDoc
     : public QObject
     , protected AzToolsFramework::EditorEntityContextNotificationBus::Handler
 {
+AZ_POP_DISABLE_DLL_EXPORT_BASECLASS_WARNING
     Q_OBJECT
     Q_PROPERTY(bool modified READ IsModified WRITE SetModifiedFlag);
     Q_PROPERTY(QString pathName READ GetLevelPathName WRITE SetPathName);
@@ -103,8 +106,17 @@ public: // Create from serialization only
 
     BOOL CanCloseFrame();
 
+    enum class FetchPolicy
+    {
+        DELETE_FOLDER,
+        DELETE_LY_FILE,
+        PRESERVE
+    };
+
     void Hold(const QString& holdName);
-    void Fetch(const QString& holdName, bool bShowMessages = true, bool bDelHoldFolder = false);
+    void Hold(const QString& holdName, const QString& relativeHoldPath);
+    void Fetch(const QString& relativeHoldPath, bool bShowMessages = true, bool bDelHoldFolder = false);
+    void Fetch(const QString& holdName, const QString& relativeHoldPath, bool bShowMessages, FetchPolicy policy);
 
     const char* GetTemporaryLevelName() const;
     void DeleteTemporaryLevel();
@@ -205,6 +217,7 @@ protected:
     void OnSliceInstantiationFailed(const AZ::Data::AssetId& sliceAssetId, const AzFramework::SliceInstantiationTicket& /*ticket*/) override;
     //////////////////////////////////////////////////////////////////////////
 
+    AZ_PUSH_DISABLE_DLL_EXPORT_MEMBER_WARNING
     QString m_strMasterCDFolder;
     bool m_bLoadFailed;
     QColor m_waterColor;
@@ -225,6 +238,7 @@ protected:
     QString m_slicePathName;
     QString m_title;
     AZ::Data::AssetId m_envProbeSliceAssetId;
+    AZ_POP_DISABLE_DLL_EXPORT_MEMBER_WARNING
     float m_terrainSize;
     const char* m_envProbeSliceRelativePath;
     const float m_envProbeHeight;
@@ -248,4 +262,23 @@ public:
 private:
     bool m_prevState;
 };
+
+namespace AzToolsFramework
+{
+    //! A component to reflect scriptable commands for the Editor
+    class CryEditDocFuncsHandler
+        : public AZ::Component
+    {
+    public:
+        AZ_COMPONENT(CryEditDocFuncsHandler, "{628CE458-72E7-4B7B-B8A2-62F95F55E738}")
+
+            static void Reflect(AZ::ReflectContext* context);
+
+        // AZ::Component ...
+        void Activate() override {}
+        void Deactivate() override {}
+    };
+
+} // namespace AzToolsFramework
+
 #endif // CRYINCLUDE_EDITOR_CRYEDITDOC_H

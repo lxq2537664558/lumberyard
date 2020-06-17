@@ -17,6 +17,8 @@
 #include <AzCore/Socket/AzSocket.h>
 #include <AzCore/std/string/conversions.h> // for stoul
 
+#include <AzToolsFramework/API/ToolsApplicationAPI.h>
+
 #include "DeployNotificationsBus.h"
 #include "NetworkUtils.h"
 #include "JsonPreProcessor.h"
@@ -39,8 +41,6 @@ namespace
     {
         switch (platform)
         {
-            case PlatformOptions::Android_ARMv7:
-                return "android_armv7_clang";
             case PlatformOptions::Android_ARMv8:
                 return "android_armv8_clang";
 
@@ -52,6 +52,13 @@ namespace
             default:
                 return nullptr;
         }
+    }
+
+    const char* GetEngineRoot()
+    {
+        const char* engineRoot = ".";
+        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(engineRoot, &AzToolsFramework::ToolsApplicationRequests::GetEngineRootPath);
+        return engineRoot;
     }
 }
 
@@ -218,7 +225,7 @@ bool DeployWorkerBase::LaunchShaderCompiler() const
     }
 
     AZ::AzSock::AzSocketAddress socketAddress;
-    if (!socketAddress.SetAddress(m_deploymentConfig.m_shaderCompilerIpAddress, AZStd::stoul(m_deploymentConfig.m_shaderCompilerPort)))
+    if (!socketAddress.SetAddress(m_deploymentConfig.m_shaderCompilerIpAddress, aznumeric_cast<AZ::u16>(AZStd::stoul(m_deploymentConfig.m_shaderCompilerPort))))
     {
         DEPLOY_LOG_ERROR("[ERROR] Could not set socket address!");
         return false;
@@ -307,8 +314,10 @@ bool DeployWorkerBase::LaunchShaderCompiler() const
         }
         else
         {
-            DEPLOY_LOG_ERROR("[ERROR] Unable to validate connection to specified shader compiler IP address and port!");
-            return false;
+            // Just warn here instead of producing an error. Just because our host machine can't connect to the
+            // shader compiler doesn't mean that the target device wont be able to connect to it.
+            DEPLOY_LOG_WARN("[WARN] Unable to validate connection to specified shader compiler IP address and port.");
+            return true;
         }
     }
     else
@@ -427,11 +436,7 @@ StringOutcome DeployWorkerBase::GetUserSettingsValue(const char* groupName, cons
 
     // Get the platform specific Output Folder key
     AZStd::string platformOutputFolderKey;
-    if (platformOption == PlatformOptions::Android_ARMv7)
-    {
-        platformOutputFolderKey = "out_folder_android_armv7_clang";
-    }
-    else if (platformOption == PlatformOptions::Android_ARMv8)
+    if (platformOption == PlatformOptions::Android_ARMv8)
     {
         platformOutputFolderKey = "out_folder_android_armv8_clang";
     }
@@ -478,33 +483,31 @@ StringOutcome DeployWorkerBase::GetUserSettingsValue(const char* groupName, cons
     return AZ::Success(resultValue);
 }
 
-AZStd::string DeployWorkerBase::GetPlatformSpecficDefaultSettingsFilename(PlatformOptions platformOption, const char* devRoot)
+AZStd::string DeployWorkerBase::GetPlatformSpecficDefaultSettingsFilename(PlatformOptions platformOption)
 {
-    AZStd::string defaultSettingsFile;
-    if (platformOption == PlatformOptions::Android_ARMv7)
+    const char* platformFileName = nullptr;
+    switch (platformOption)
     {
-        defaultSettingsFile = AZStd::string::format("%s/_WAF_/settings/platforms/platform.android_armv7_clang.json", devRoot);
+        case PlatformOptions::Android_ARMv8:
+            platformFileName = "platform.android_armv8_clang.json";
+            break;
+        case PlatformOptions::iOS:
+            platformFileName = "platform.ios.json";
+            break;
+        default:
+            AZ_Error("DeploymentTool", false, "[ERROR] Unknown platform detected in GetPlatformSpecficDefaultSettingsFilename.");
+            return AZStd::string();
     }
-    else if (platformOption == PlatformOptions::Android_ARMv8)
-    {
-        defaultSettingsFile = AZStd::string::format("%s/_WAF_/settings/platforms/platform.android_armv8_clang.json", devRoot);
-    }
-    else if (platformOption == PlatformOptions::iOS)
-    {
-        defaultSettingsFile = AZStd::string::format("%s/_WAF_/settings/platforms/platform.ios.json", devRoot);
-    }
-    else
-    {
-        AZ_Error("DeploymentTool", false, "[ERROR] Unknown platform detected in GetPlatformSpecficDefaultSettingsFilename.", devRoot);
-    }
-    return defaultSettingsFile;
+
+    return AZStd::string::format("%s/_WAF_/settings/platforms/%s", GetEngineRoot(), platformFileName);;
 }
 
-StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultAttributeValue(const char* name, PlatformOptions platformOption, const char* devRoot)
+
+StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultAttributeValue(const char* name, PlatformOptions platformOption)
 {
     AZ_Assert(name, "Expected valid name of attribute");
 
-    AZStd::string defaultSettingsFile = GetPlatformSpecficDefaultSettingsFilename(platformOption, devRoot);
+    AZStd::string defaultSettingsFile = GetPlatformSpecficDefaultSettingsFilename(platformOption);
 
     AZStd::string resultValue;
 
@@ -532,7 +535,7 @@ StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultAttributeValue(const ch
             return AZ::Failure<AZStd::string>(AZStd::move(msg));
         }
     }
-    else    
+    else
     {
         AZStd::string msg = AZStd::string::format("Failed to find '%s' member in config file '%s'", attributesMemberName, defaultSettingsFile.c_str());
         return AZ::Failure<AZStd::string>(AZStd::move(msg));
@@ -541,12 +544,12 @@ StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultAttributeValue(const ch
     return AZ::Success(resultValue);
 }
 
-StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultSettingsValue(const char* groupName, const char* keyName, PlatformOptions platformOption, const char* devRoot)
+StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultSettingsValue(const char* groupName, const char* keyName, PlatformOptions platformOption)
 {
     AZ_Assert(groupName, "Expected valid groupName");
     AZ_Assert(keyName, "Expected valid keyName");
 
-    AZStd::string defaultSettingsFile = GetPlatformSpecficDefaultSettingsFilename(platformOption, devRoot);
+    AZStd::string defaultSettingsFile = GetPlatformSpecficDefaultSettingsFilename(platformOption);
 
     rapidjson::Document defaultWafSettings;
     StringOutcome outcome = LoadJsonData(defaultSettingsFile, defaultWafSettings);
@@ -588,13 +591,12 @@ StringOutcome DeployWorkerBase::GetPlatformSpecficDefaultSettingsValue(const cha
     return AZ::Success(resultValue);
 }
 
-StringOutcome DeployWorkerBase::GetCommonBuildConfigurationsDefaultSettingsValue(const char* buildConfiguration, const char* name, const char* devRoot)
+StringOutcome DeployWorkerBase::GetCommonBuildConfigurationsDefaultSettingsValue(const char* buildConfiguration, const char* name)
 {
     AZ_Assert(buildConfiguration, "Expected valid name of build configuration");
     AZ_Assert(name, "Expected valid name of setting");
-    AZ_Assert(devRoot, "Expected valid dev root");
 
-    AZStd::string defaultSettingsFile = AZStd::string::format("%s/_WAF_/settings/build_configurations.json", devRoot);
+    AZStd::string defaultSettingsFile = AZStd::string::format("%s/_WAF_/settings/build_configurations.json", GetEngineRoot());
 
     AZStd::string resultValue;
 

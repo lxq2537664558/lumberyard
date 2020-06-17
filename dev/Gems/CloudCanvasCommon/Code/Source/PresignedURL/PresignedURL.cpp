@@ -18,6 +18,12 @@
 #include <AzCore/EBus/EBus.h>
 
 #if defined(PLATFORM_SUPPORTS_AWS_NATIVE_SDK)
+// The AWS Native SDK AWSAllocator triggers a warning due to accessing members of std::allocator directly.
+// AWSAllocator.h(70): warning C4996: 'std::allocator<T>::pointer': warning STL4010: Various members of std::allocator are deprecated in C++17.
+// Use std::allocator_traits instead of accessing these members directly.
+// You can define _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING or _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS to acknowledge that you have received this warning.
+
+AZ_PUSH_DISABLE_WARNING(4251 4996, "-Wunknown-warning-option")
 #include <aws/core/client/ClientConfiguration.h>
 #include <aws/core/http/HttpClient.h>
 #include <aws/core/http/HttpRequest.h>
@@ -25,11 +31,14 @@
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/memory/stl/AWSStringStream.h>
+AZ_POP_DISABLE_WARNING
 #endif
 
 #include <AzCore/Jobs/JobContext.h>
 #include <AzCore/Jobs/JobFunction.h>
 #include <AzCore/Jobs/JobManagerBus.h>
+#include <AzCore/std/string/tokenize.h>
+#include <AzFramework/AzFramework_Traits_Platform.h>
 
 #include <CloudCanvasCommon/CloudCanvasCommonBus.h>
 
@@ -62,6 +71,35 @@ namespace CloudCanvas
         }
     }
 
+    AZStd::unordered_map<AZStd::string, AZStd::string> PresignedURLManager::GetQueryParameters(const AZStd::string& signedURL)
+    {
+        size_t queryParametersStartPosition = signedURL.find("?");
+        if (queryParametersStartPosition == AZStd::string::npos)
+        {
+            return AZStd::unordered_map<AZStd::string, AZStd::string>();
+        }
+
+        AZStd::vector<AZStd::string> queryParameters;
+        AZStd::tokenize(signedURL.substr(queryParametersStartPosition), AZStd::string("&"), queryParameters);
+
+        AZStd::unordered_map<AZStd::string, AZStd::string> keyValuePairs;
+        for (const AZStd::string& keyValuePairStr : queryParameters)
+        {
+            AZStd::vector<AZStd::string> queryParameterKeyAndValue;
+            AZStd::tokenize(keyValuePairStr, AZStd::string("="), queryParameterKeyAndValue);
+
+            if (queryParameterKeyAndValue.size() != 2)
+            {
+                AZ_Error("CloudCanvas", false, "Invalid query parameter %s", keyValuePairStr.c_str());
+                return AZStd::unordered_map<AZStd::string, AZStd::string>();
+            }
+
+            keyValuePairs[queryParameterKeyAndValue[0]] = queryParameterKeyAndValue[1];
+        }
+
+        return keyValuePairs;
+    }
+
     AZ::Job* PresignedURLManager::CreateDownloadSignedURLJob(const AZStd::string& signedURL, const AZStd::string& fileName, AZ::EntityId id) const
     {
         if (!signedURL.length())
@@ -86,6 +124,7 @@ namespace CloudCanvas
          job = AZ::CreateJobFunction([signedURL, outputFile, id]()
         {
             Aws::Client::ClientConfiguration presignedConfig;
+            presignedConfig.enableTcpKeepAlive = AZ_TRAIT_AZFRAMEWORK_AWS_ENABLE_TCP_KEEP_ALIVE_SUPPORTED;
             // This timeout value is not always used consistently across http clients - it can mean "how long between packets" or 
             // "How long does the entire request take" - we're transferring files over sometimes spotty networks and don't want 
             // this arbitrarily limited.
@@ -111,7 +150,7 @@ namespace CloudCanvas
 
             httpRequest->SetResponseStreamFactory([outputFile]() { return Aws::New<Aws::FStream>("TRANSFER", outputFile.c_str(), std::ios_base::out | std::ios_base::in | std::ios_base::binary | std::ios_base::trunc); });
 
-            auto httpResponse = httpClient->MakeRequest(*httpRequest, nullptr);
+            auto httpResponse = httpClient->MakeRequest(httpRequest, nullptr);
 
             AZStd::string returnString;
             if (!httpResponse)

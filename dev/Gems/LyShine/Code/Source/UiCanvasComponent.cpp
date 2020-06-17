@@ -251,6 +251,28 @@ namespace
         CLyShine* lyShine = static_cast<CLyShine*>(gEnv->pLyShine);
         return lyShine->GetUiRenderer();
     }
+
+    bool IsValidInteractable(const AZ::EntityId& entityId)
+    {
+        if (!entityId.IsValid())
+        {
+            return false;
+        }
+
+        // Check if element is enabled
+        bool isEnabled = false;
+        EBUS_EVENT_ID_RESULT(isEnabled, entityId, UiElementBus, IsEnabled);
+        if (!isEnabled)
+        {
+            return false;
+        }
+
+        // Check if element is handling events and therefore also an interactable
+        bool canHandleEvents = false;
+        EBUS_EVENT_ID_RESULT(canHandleEvents, entityId, UiInteractableBus, IsHandlingEvents);
+
+        return canHandleEvents;
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -302,6 +324,8 @@ UiCanvasComponent::UiCanvasComponent()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 UiCanvasComponent::~UiCanvasComponent()
 {
+    DestroyScheduledElements();
+
     m_uiAnimationSystem.RemoveAllSequences();
 
     // remove all entries from m_elementsNeedingTransformRecompute list, can't use clear since that doesn't set the
@@ -333,7 +357,7 @@ UiCanvasComponent::~UiCanvasComponent()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const string& UiCanvasComponent::GetPathname()
+const AZStd::string& UiCanvasComponent::GetPathname()
 {
     return m_pathname;
 }
@@ -1358,6 +1382,20 @@ void UiCanvasComponent::SetTooltipDisplayElement(AZ::EntityId entityId)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiCanvasComponent::ForceFocusInteractable(AZ::EntityId interactableId)
+{
+    if (interactableId.IsValid())
+    {
+        AZ::EntityId lastHoverInteractable = m_hoverInteractable;
+        // Force the interactable to have the hover. Will also auto activate the
+        // interactable if the flag is set
+        ForceHoverInteractable(interactableId);
+        // Will also set as active interactable
+        CheckHoverInteractableAndAutoActivate(lastHoverInteractable, UiNavigationHelpers::Command::Unknown, true);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void UiCanvasComponent::ForceActiveInteractable(AZ::EntityId interactableId, bool shouldStayActive, AZ::Vector2 point)
 {
     SetHoverInteractable(interactableId);
@@ -1374,6 +1412,28 @@ AZ::EntityId UiCanvasComponent::GetHoverInteractable()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void UiCanvasComponent::ForceHoverInteractable(AZ::EntityId newHoverInteractable)
 {
+    if (!m_isNavigationSupported)
+    {
+        AZ_Warning("UI", false, "This UI canvas does not support keyboard/gamepad input events");
+        return;
+    }
+
+    if (newHoverInteractable.IsValid())
+    {
+        // Make sure the element is an interactable that is handling events
+        if (!IsValidInteractable(newHoverInteractable))
+        {
+            AZ_Warning("UI", false, "Entity is either not an interactable, not enabled or is not accepting events");
+            return;
+        }
+
+        // Make sure the active interactable and the hover interactible are the same
+        if (m_activeInteractable.IsValid() && (m_activeInteractable != newHoverInteractable))
+        {
+            ClearActiveInteractable();
+        }
+    }
+
     SetHoverInteractable(newHoverInteractable);
 
     if (m_hoverInteractable.IsValid())
@@ -1403,6 +1463,45 @@ void UiCanvasComponent::ClearAllInteractables()
     {
         ClearHoverInteractable();
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiCanvasComponent::ForceEnterInputEventOnInteractable(AZ::EntityId interactableId)
+{
+    if (!m_isNavigationSupported)
+    {
+        AZ_Warning("UI", false, "This UI canvas does not support keyboard/gamepad input events");
+        return;
+    }
+
+    if (!interactableId.IsValid())
+    {
+        AZ_Warning("UI", false, "EntityId is not valid");
+        return;
+    }
+
+    // Make sure the element is an interactable that is handling events
+    if (!IsValidInteractable(interactableId))
+    {
+        AZ_Warning("UI", false, "Entity is either not an interactable, not enabled or is not accepting events");
+        return;
+    }
+
+    // Set the hover interactable to accept the events
+    if (m_hoverInteractable != interactableId)
+    {
+        ForceHoverInteractable(interactableId);
+    }
+
+    // Generate Enter key pressed input event
+    AzFramework::InputChannel::Snapshot snapshot(AzFramework::InputDeviceKeyboard::Key::EditEnter,
+        AzFramework::InputDeviceKeyboard::Id,
+        AzFramework::InputChannel::State::Began);
+    HandleEnterInputEvent(UiNavigationHelpers::Command::Enter, snapshot);
+
+    // Generate Enter key released input event
+    snapshot.m_state = AzFramework::InputChannel::State::Ended;
+    HandleEnterInputEvent(UiNavigationHelpers::Command::Enter, snapshot);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1472,6 +1571,17 @@ void UiCanvasComponent::StartSequence(const AZStd::string& sequenceName)
     {
         m_uiAnimationSystem.AddUiAnimationListener(sequence, this);
         m_uiAnimationSystem.PlaySequence(sequence, nullptr, false, false);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiCanvasComponent::PlaySequenceRange(const AZStd::string& sequenceName, float startTime, float endTime)
+{
+    IUiAnimSequence* sequence = m_uiAnimationSystem.FindSequence(sequenceName.c_str());
+    if (sequence)
+    {
+        m_uiAnimationSystem.AddUiAnimationListener(sequence, this);
+        m_uiAnimationSystem.PlaySequence(sequence, nullptr, false, false, startTime, endTime);
     }
 }
 
@@ -1555,6 +1665,25 @@ bool UiCanvasComponent::IsSequencePlaying(const AZStd::string& sequenceName)
         return m_uiAnimationSystem.IsPlaying(sequence);
     }
     return false;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float UiCanvasComponent::GetSequenceLength(const AZStd::string& sequenceName)
+{
+    float length = 0.f;
+    IUiAnimSequence* sequence = m_uiAnimationSystem.FindSequence(sequenceName.c_str());
+    if (sequence)
+    {
+        auto range = sequence->GetTimeRange();
+        length = range.Length();
+    }
+    return length;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiCanvasComponent::SetSequenceStopBehavior(IUiAnimationSystem::ESequenceStopBehavior stopBehavior)
+{
+    m_uiAnimationSystem.SetSequenceStopBehavior(stopBehavior);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1872,6 +2001,7 @@ void UiCanvasComponent::UpdateCanvas(float deltaTime, bool isInGame)
         EBUS_EVENT_ID(GetEntityId(), UiCanvasUpdateNotificationBus, UpdateInEditor, deltaTime);
     }
 
+    DestroyScheduledElements();
     SendRectChangeNotificationsAndRecomputeLayouts();
 }
 
@@ -1955,6 +2085,23 @@ void UiCanvasComponent::UnscheduleElementForTransformRecompute(UiElementComponen
         m_elementsNeedingTransformRecompute.erase(ElementComponentSlist::const_iterator_impl(elementComponent));
         elementComponent->m_next = nullptr;
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiCanvasComponent::ScheduleElementDestroy(AZ::EntityId entityId)
+{
+    m_elementsScheduledForDestroy.push_back(entityId);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiCanvasComponent::DestroyScheduledElements()
+{
+    for (auto entityId : m_elementsScheduledForDestroy)
+    {
+        UiElementComponent::DestroyElementEntity(entityId);
+    }
+
+    m_elementsScheduledForDestroy.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2142,7 +2289,7 @@ void UiCanvasComponent::Reflect(AZ::ReflectContext* context)
         // Texture Atlases
             ->Field("TextureAtlases", &UiCanvasComponent::m_atlasPathNames)
             ;
-        
+
         AZ::EditContext* ec = serializeContext->GetEditContext();
         if (ec)
         {
@@ -2248,13 +2395,16 @@ void UiCanvasComponent::Reflect(AZ::ReflectContext* context)
             ->Event("GetTooltipDisplayElement", &UiCanvasBus::Events::GetTooltipDisplayElement)
             ->Event("SetTooltipDisplayElement", &UiCanvasBus::Events::SetTooltipDisplayElement)
             ->Event("GetHoverInteractable", &UiCanvasBus::Events::GetHoverInteractable)
-            ->Event("ForceHoverInteractable", &UiCanvasBus::Events::ForceHoverInteractable);
+            ->Event("ForceHoverInteractable", &UiCanvasBus::Events::ForceHoverInteractable)
+            ->Event("ForceEnterInputEventOnInteractable", &UiCanvasBus::Events::ForceEnterInputEventOnInteractable);
+
 
         behaviorContext->EBus<UiCanvasNotificationBus>("UiCanvasNotificationBus")
             ->Handler<UiCanvasNotificationBusBehaviorHandler>();
 
         behaviorContext->EBus<UiAnimationBus>("UiAnimationBus")
             ->Event("StartSequence", &UiAnimationBus::Events::StartSequence)
+            ->Event("PlaySequenceRange", &UiAnimationBus::Events::PlaySequenceRange)
             ->Event("StopSequence", &UiAnimationBus::Events::StopSequence)
             ->Event("AbortSequence", &UiAnimationBus::Events::AbortSequence)
             ->Event("PauseSequence", &UiAnimationBus::Events::PauseSequence)
@@ -2263,12 +2413,18 @@ void UiCanvasComponent::Reflect(AZ::ReflectContext* context)
             ->Event("GetSequencePlayingSpeed", &UiAnimationBus::Events::GetSequencePlayingSpeed)
             ->Event("SetSequencePlayingSpeed", &UiAnimationBus::Events::SetSequencePlayingSpeed)
             ->Event("GetSequencePlayingTime", &UiAnimationBus::Events::GetSequencePlayingTime)
-            ->Event("IsSequencePlaying", &UiAnimationBus::Events::IsSequencePlaying);
+            ->Event("IsSequencePlaying", &UiAnimationBus::Events::IsSequencePlaying)
+            ->Event("GetSequenceLength", &UiAnimationBus::Events::GetSequenceLength)
+            ->Event("SetSequenceStopBehavior", &UiAnimationBus::Events::SetSequenceStopBehavior);
 
         behaviorContext->Enum<(int)IUiAnimationListener::EUiAnimationEvent::eUiAnimationEvent_Started>("eUiAnimationEvent_Started")
             ->Enum<(int)IUiAnimationListener::EUiAnimationEvent::eUiAnimationEvent_Stopped>("eUiAnimationEvent_Stopped")
             ->Enum<(int)IUiAnimationListener::EUiAnimationEvent::eUiAnimationEvent_Aborted>("eUiAnimationEvent_Aborted")
             ->Enum<(int)IUiAnimationListener::EUiAnimationEvent::eUiAnimationEvent_Updated>("eUiAnimationEvent_Updated");
+
+        behaviorContext->Enum<(int)IUiAnimationSystem::ESequenceStopBehavior::eSSB_LeaveTime>("eSSB_LeaveTime")
+            ->Enum<(int)IUiAnimationSystem::ESequenceStopBehavior::eSSB_GotoEndTime>("eSSB_GotoEndTime")
+            ->Enum<(int)IUiAnimationSystem::ESequenceStopBehavior::eSSB_GotoStartTime>("eSSB_GotoStartTime");
 
         behaviorContext->EBus<UiAnimationNotificationBus>("UiAnimationNotificationBus")
             ->Handler<UiAnimationNotificationBusBehaviorHandler>();
@@ -2705,22 +2861,8 @@ bool UiCanvasComponent::HandleNavigationInputEvent(UiNavigationHelpers::Command 
                     LyShine::EntityArray navigableElements;
                     UiNavigationHelpers::FindNavigableInteractables(ancestorInteractable.IsValid() ? ancestorInteractable : m_rootElement, curInteractable, navigableElements);
 
-                    auto isValidInteractable = [](AZ::EntityId entityId)
-                        {
-                            bool isEnabled = false;
-                            EBUS_EVENT_ID_RESULT(isEnabled, entityId, UiElementBus, IsEnabled);
-
-                            bool canHandleEvents = false;
-                            if (isEnabled)
-                            {
-                                EBUS_EVENT_ID_RESULT(canHandleEvents, entityId, UiInteractableBus, IsHandlingEvents);
-                            }
-
-                            return canHandleEvents;
-                        };
-
                     AZ::EntityId nextEntityId = UiNavigationHelpers::GetNextElement(curInteractable, command,
-                            navigableElements, firstHoverInteractable, isValidInteractable, ancestorInteractable);
+                            navigableElements, firstHoverInteractable, IsValidInteractable, ancestorInteractable);
 
                     if (nextEntityId.IsValid())
                     {
@@ -3036,12 +3178,12 @@ void UiCanvasComponent::ClearActiveInteractable()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void UiCanvasComponent::CheckHoverInteractableAndAutoActivate(AZ::EntityId prevHoverInteractable, UiNavigationHelpers::Command command)
+void UiCanvasComponent::CheckHoverInteractableAndAutoActivate(AZ::EntityId prevHoverInteractable, UiNavigationHelpers::Command command, bool forceAutoActivate)
 {
     // Check if this hover interactable should automatically go to an active state
     bool autoActivate = false;
     EBUS_EVENT_ID_RESULT(autoActivate, m_hoverInteractable, UiInteractableBus, GetIsAutoActivationEnabled);
-    if (autoActivate)
+    if (autoActivate || forceAutoActivate)
     {
         bool handled = false;
         EBUS_EVENT_ID_RESULT(handled, m_hoverInteractable, UiInteractableBus, HandleAutoActivation);
@@ -3280,7 +3422,7 @@ void UiCanvasComponent::RestoreAnimationSystemAfterCanvasLoad(bool remapIds, UiE
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-UiCanvasComponent* UiCanvasComponent::CloneAndInitializeCanvas(UiEntityContext* entityContext, const string& assetIdPathname, const AZ::Vector2* canvasSize)
+UiCanvasComponent* UiCanvasComponent::CloneAndInitializeCanvas(UiEntityContext* entityContext, const AZStd::string& assetIdPathname, const AZ::Vector2* canvasSize)
 {
     UiCanvasComponent* canvasComponent = nullptr;
 
@@ -3335,7 +3477,7 @@ void UiCanvasComponent::DeactivateElements()
         for (AZ::EntityId& entityId : entities)
         {
             // Look up the entity by ID, as sometimes one of the entities owns others
-            // that will be destroyed when it's destroyed. Since we store pointers, 
+            // that will be destroyed when it's destroyed. Since we store pointers,
             // those will point to freed memory.
             AZ::Entity* entity = nullptr;
             AZ::ComponentApplicationBus::BroadcastResult(entity, &AZ::ComponentApplicationBus::Events::FindEntity, entityId);
@@ -3572,7 +3714,7 @@ void UiCanvasComponent::RenderCanvasToTexture()
     if (system && !gEnv->IsDedicated())
     {
         GetUiRenderer()->BeginUiFrameRender();
-        
+
         gEnv->pRenderer->SetRenderTarget(m_renderTargetHandle, m_renderTargetDepthSurface);
 
         // clear the render target before rendering to it
@@ -3588,7 +3730,7 @@ void UiCanvasComponent::RenderCanvasToTexture()
         RenderCanvas(true, m_canvasSize);
 
         gEnv->pRenderer->SetRenderTarget(0); // restore render target
-        
+
         GetUiRenderer()->EndUiFrameRender();
     }
 }
@@ -3945,7 +4087,7 @@ UiCanvasComponent*  UiCanvasComponent::LoadCanvasInternal(const string& pathname
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 UiCanvasComponent* UiCanvasComponent::FixupReloadedCanvasForEditorInternal(AZ::Entity* newCanvasEntity,
     AZ::Entity* rootSliceEntity, UiEntityContext* entityContext,
-    LyShine::CanvasId existingId, const string& existingPathname)
+    LyShine::CanvasId existingId, const AZStd::string& existingPathname)
 {
     UiCanvasComponent* newCanvasComponent = FixupPostLoad(newCanvasEntity, rootSliceEntity, true, entityContext);
     if (newCanvasComponent)

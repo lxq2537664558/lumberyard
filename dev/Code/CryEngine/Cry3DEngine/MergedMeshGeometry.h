@@ -27,6 +27,8 @@
         #include "Xenia/MergedMeshGeometry_h_xenia.inl"
     #elif defined(AZ_PLATFORM_PROVO)
         #include "Provo/MergedMeshGeometry_h_provo.inl"
+    #elif defined(AZ_PLATFORM_SALEM)
+        #include "Salem/MergedMeshGeometry_h_salem.inl"
     #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
@@ -787,6 +789,7 @@ inline void CompressQuat(const Quat& q, SMMRMInstance& i)
     i.qy = static_cast<int>(qy);
     i.qz = static_cast<int>(qz);
     i.qw = static_cast<int>(qw);
+    AZ_Assert((i.qx != 0) || (i.qy != 0) || (i.qz != 0) || (i.qw != 0), "Invalid merged mesh quaternion will result in NaNs");
 }
 
 inline void DecompressQuat(Quat& q, const SMMRMInstance& i)
@@ -797,6 +800,7 @@ inline void DecompressQuat(Quat& q, const SMMRMInstance& i)
     q.v.z = qz / (float)(1 << 7);
     q.w   = qw / (float)(1 << 7);
     q.NormalizeFast();
+    AZ_Assert((i.qx != 0) || (i.qy != 0) || (i.qz != 0) || (i.qw != 0), "Invalid merged mesh quaternion will result in NaNs");
 }
 
 inline void ConvertInstanceAbsolute(Vec3& abs, const uint16 (&pos)[3], const Vec3& origin, const Vec3& rotationOrigin, float zRotation, const float fExtents)
@@ -892,5 +896,4 @@ inline Matrix34 CreateRotationQ(const Quat& q, const Vec3& t)
     return r;
 }
 
-extern Vec3 SampleWind(const Vec3& pos, const Vec3 (&samples)[MMRM_WIND_DIM][MMRM_WIND_DIM][MMRM_WIND_DIM]);
 extern inline Vec3 SampleWind(const Vec3& pos, const Vec3* samples);

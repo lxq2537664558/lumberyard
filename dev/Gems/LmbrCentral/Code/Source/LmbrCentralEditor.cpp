@@ -34,7 +34,6 @@
 #include "Physics/EditorWindVolumeComponent.h"
 #include "Physics/EditorForceVolumeComponent.h"
 #include "Rendering/EditorDecalComponent.h"
-#include "Scripting/EditorFlowGraphComponent.h"
 #include "Rendering/EditorLensFlareComponent.h"
 #include "Rendering/EditorLightComponent.h"
 #include "Rendering/EditorPointLightComponent.h"
@@ -58,6 +57,7 @@
 
 #include "Shape/EditorBoxShapeComponent.h"
 #include "Shape/EditorSphereShapeComponent.h"
+#include "Shape/EditorDiskShapeComponent.h"
 #include "Shape/EditorCylinderShapeComponent.h"
 #include "Shape/EditorCapsuleShapeComponent.h"
 #include "Shape/EditorSplineComponent.h"
@@ -87,7 +87,6 @@ namespace LmbrCentral
             EditorAudioTriggerComponent::CreateDescriptor(),
             EditorConstraintComponent::CreateDescriptor(),
             EditorDecalComponent::CreateDescriptor(),
-            EditorFlowGraphComponent::CreateDescriptor(),
             EditorLensFlareComponent::CreateDescriptor(),
             EditorLightComponent::CreateDescriptor(),
             EditorPointLightComponent::CreateDescriptor(),
@@ -104,6 +103,7 @@ namespace LmbrCentral
             EditorMannequinScopeComponent::CreateDescriptor(),
             EditorMannequinComponent::CreateDescriptor(),
             EditorSphereShapeComponent::CreateDescriptor(),
+            EditorDiskShapeComponent::CreateDescriptor(),
             EditorTubeShapeComponent::CreateDescriptor(),
             EditorRigidPhysicsComponent::CreateDescriptor(),
             EditorStaticPhysicsComponent::CreateDescriptor(),
@@ -136,6 +136,8 @@ namespace LmbrCentral
             typeIds.emplace_back(descriptor->GetUuid());
         }
         EBUS_EVENT(AzFramework::MetricsPlainTextNameRegistrationBus, RegisterForNameSending, typeIds);
+
+        EditorMeshBus::Handler::BusConnect();
     }
 
     LmbrCentralEditorModule::~LmbrCentralEditorModule()
@@ -152,6 +154,11 @@ namespace LmbrCentral
         requiredComponents.push_back(azrtti_typeid<AzToolsFramework::Components::EditorSelectionAccentSystemComponent>());
 
         return requiredComponents;
+    }
+
+    bool LmbrCentralEditorModule::AddMeshComponentWithAssetId(const AZ::EntityId& targetEntity, const AZ::Uuid& meshAssetId)
+    {
+        return AddMeshComponentWithMesh(targetEntity, meshAssetId);
     }
 } // namespace LmbrCentral
 
